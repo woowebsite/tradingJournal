@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "strategies",
+  "info": {
+    "singularName": "strategy",
+    "pluralName": "strategies",
+    "displayName": "Strategy",
+    "description": "Trading strategies"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "trades": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::trade.trade",
+      "mappedBy": "strategy"
+    },
+    "rules": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::rule.rule",
+      "mappedBy": "strategies"
+    },
+    "account": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::account.account",
+      "mappedBy": "strategy"
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "kind": "collectionType",
+  "collectionName": "accounts",
+  "info": {
+    "singularName": "account",
+    "pluralName": "accounts",
+    "displayName": "Account",
+    "description": "Trading accounts"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "initial_balance": {
+      "type": "decimal",
+      "required": true
+    },
+    "currency": {
+      "type": "string",
+      "default": "USD"
+    },
+    "trades": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::trade.trade",
+      "mappedBy": "account"
+    },
+    "market": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::market.market",
+      "inversedBy": "accounts"
+    },
+    "setting": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::setting.setting",
+      "inversedBy": "account"
+    },
+    "volumeFormat": {
+      "type": "string"
+    },
+    "moneyFormat": {
+      "type": "string"
+    },
+    "strategy": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::strategy.strategy",
+      "inversedBy": "account"
+    },
+    "signals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::signal.signal",
+      "mappedBy": "account"
+    },
+    "watch_lists": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::watch-list.watch-list",
+      "mappedBy": "account"
+    }
+  }
+}

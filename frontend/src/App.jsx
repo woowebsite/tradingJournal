@@ -1,0 +1,43 @@
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import MainLayout from './layouts/MainLayout';
+import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
+import Trades from './pages/Trades';
+import Accounts from './pages/Accounts';
+import ManageMarket from './pages/ManageMarket';
+import ManageRules from './pages/ManageRules';
+import ManageStrategies from './pages/ManageStrategies';
+import Signals from './pages/Signals';
+import ManageWatchlists from './pages/Watchlists';
+import ManageSymbols from './pages/ManageSymbols';
+import TradeStation from './pages/TradeStation';
+import AccountDetail from './pages/AccountDetail';
+import { AccountProvider } from './context/AccountContext';
+
+function App() {
+  return (
+    <AccountProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<MainLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="accounts" element={<Accounts />} />
+            <Route path="accounts/:id" element={<AccountDetail />} />
+            <Route path="trade-station" element={<TradeStation />} />
+            <Route path="trades" element={<Trades />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="signals" element={<Signals />} />
+            <Route path="manage-market" element={<ManageMarket />} />
+            <Route path="manage-rules" element={<ManageRules />} />
+            <Route path="manage-strategies" element={<ManageStrategies />} />
+            <Route path="manage-watchlists" element={<ManageWatchlists />} />
+            <Route path="manage-symbols" element={<ManageSymbols />} />
+            {/* Add more routes here */}
+          </Route>
+        </Routes>
+      </Router>
+    </AccountProvider>
+  );
+}
+
+export default App;

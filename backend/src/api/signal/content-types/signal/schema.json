@@ -1,0 +1,42 @@
+{
+  "kind": "collectionType",
+  "collectionName": "signals",
+  "info": {
+    "singularName": "signal",
+    "pluralName": "signals",
+    "displayName": "Signal"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "datetime"
+    },
+    "rules": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::rule.rule",
+      "inversedBy": "signals"
+    },
+    "symbol": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "signals"
+    },
+    "expired": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account",
+      "inversedBy": "signals"
+    }
+  }
+}

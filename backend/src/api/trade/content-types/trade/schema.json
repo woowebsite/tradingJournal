@@ -1,0 +1,64 @@
+{
+  "kind": "collectionType",
+  "collectionName": "trades",
+  "info": {
+    "singularName": "trade",
+    "pluralName": "trades",
+    "displayName": "Trade",
+    "description": "Individual trades"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "type": {
+      "type": "enumeration",
+      "required": true,
+      "enum": [
+        "Long",
+        "Short"
+      ]
+    },
+    "trade_status": {
+      "type": "enumeration",
+      "default": "Open",
+      "enum": [
+        "Open",
+        "Closed",
+        "ScaleIn",
+        "ScaleOut"
+      ]
+    },
+    "note": {
+      "type": "blocks"
+    },
+    "date": {
+      "type": "datetime"
+    },
+    "strategy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::strategy.strategy",
+      "inversedBy": "trades"
+    },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account",
+      "inversedBy": "trades"
+    },
+    "symbol": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "trades"
+    },
+    "trade_details": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::trade-detail.trade-detail",
+      "mappedBy": "trade"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "watch_lists",
+  "info": {
+    "singularName": "watch-list",
+    "pluralName": "watch-lists",
+    "displayName": "WatchList"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "isDefault": {
+      "type": "boolean"
+    },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account",
+      "inversedBy": "watch_lists"
+    },
+    "symbols": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::symbol.symbol",
+      "mappedBy": "watch_lists"
+    }
+  }
+}

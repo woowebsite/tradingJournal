@@ -1,0 +1,52 @@
+{
+  "kind": "collectionType",
+  "collectionName": "rules",
+  "info": {
+    "singularName": "rule",
+    "pluralName": "rules",
+    "displayName": "Rule"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Name": {
+      "type": "string"
+    },
+    "Description": {
+      "type": "string"
+    },
+    "Type": {
+      "type": "enumeration",
+      "enum": [
+        "entry",
+        "takeprofit",
+        "stoploss",
+        "exit"
+      ]
+    },
+    "Rule": {
+      "type": "json"
+    },
+    "Active": {
+      "type": "enumeration",
+      "enum": [
+        "Enable",
+        "Disable"
+      ]
+    },
+    "strategies": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::strategy.strategy",
+      "inversedBy": "rules"
+    },
+    "signals": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::signal.signal",
+      "mappedBy": "rules"
+    }
+  }
+}

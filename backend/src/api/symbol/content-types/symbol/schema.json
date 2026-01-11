@@ -1,0 +1,52 @@
+{
+  "kind": "collectionType",
+  "collectionName": "symbols",
+  "info": {
+    "singularName": "symbol",
+    "pluralName": "symbols",
+    "displayName": "Symbol"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Name": {
+      "type": "string",
+      "unique": true
+    },
+    "Description": {
+      "type": "string"
+    },
+    "trades": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::trade.trade",
+      "mappedBy": "symbol"
+    },
+    "market": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::market.market",
+      "inversedBy": "symbols"
+    },
+    "symbol_histories": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::symbol-history.symbol-history",
+      "mappedBy": "symbol"
+    },
+    "signals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::signal.signal",
+      "mappedBy": "symbol"
+    },
+    "watch_lists": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::watch-list.watch-list",
+      "inversedBy": "symbols"
+    }
+  }
+}

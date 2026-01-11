@@ -1,0 +1,33 @@
+{
+  "kind": "collectionType",
+  "collectionName": "markets",
+  "info": {
+    "singularName": "market",
+    "pluralName": "markets",
+    "displayName": "Market"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Name": {
+      "type": "string"
+    },
+    "Description": {
+      "type": "string"
+    },
+    "symbols": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::symbol.symbol",
+      "mappedBy": "market"
+    },
+    "accounts": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::account.account",
+      "mappedBy": "market"
+    }
+  }
+}
