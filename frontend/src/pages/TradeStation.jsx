@@ -189,7 +189,7 @@ const TradeStation = () => {
                                 <button
                                     key={id}
                                     onClick={() => setSearchParams({ symbol: symbol.Name })}
-                                    className={`w-full text-left p-3 rounded-lg flex justify-between items-center transition ${isSelected
+                                    className={`w-full text-left p-2 text-sm rounded-lg flex justify-between items-center transition ${isSelected
                                         ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
                                         : 'hover:bg-gray-700 text-gray-300'
                                         }`}

@@ -12,6 +12,7 @@ const Signals = () => {
     const { items: signals, loading } = useSelector(state => state.signals);
     const { items: rules } = useSelector(state => state.rules);
     const { items: strategies } = useSelector(state => state.strategies);
+    const { items: watchlists } = useSelector(state => state.watchlists);
     const { selectedAccount } = useAccount();
 
     const [selectedRule, setSelectedRule] = useState('');
@@ -116,6 +117,31 @@ const Signals = () => {
                 signal.rules?.some(r => (r.id || r.documentId).toString() === selectedRule)
             );
         }
+
+        // 3. Filter by Active Account Watchlists
+        // Get all watchlists for this account
+        const accountWatchlists = watchlists.filter(wl => {
+            const wlAccountId = wl.account?.documentId || wl.account?.id;
+            const currentAccountId = selectedAccount.documentId || selectedAccount.id;
+            return wlAccountId === currentAccountId;
+        });
+
+        // Collect all symbol IDs from these watchlists
+        const allowedSymbolIds = new Set();
+        accountWatchlists.forEach(wl => {
+            if (wl.symbols && Array.isArray(wl.symbols)) {
+                wl.symbols.forEach(s => {
+                    if (s.id) allowedSymbolIds.add(s.id);
+                    if (s.documentId) allowedSymbolIds.add(s.documentId);
+                });
+            }
+        });
+
+        // Filter signals to only show those where symbol is in the allowed list
+        list = list.filter(signal => {
+            const sigSymId = signal.symbol?.documentId || signal.symbol?.id;
+            return allowedSymbolIds.has(sigSymId);
+        });
 
         return list;
     })();
