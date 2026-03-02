@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators } from '../features/marketSlice';
 import { fetchSignals } from '../features/signalSlice';
-import CandleChart from '../components/CandleChart';
+import TradingViewChart from '../components/TradingViewChart';
 import IndicatorTable from '../components/IndicatorTable';
 import { Search, RefreshCw, Activity } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
@@ -152,7 +152,8 @@ const TradeStation = () => {
                         {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
                     </div>
                     <div className="flex-1 min-h-0">
-                        <CandleChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} />
+                        <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} />
+
                     </div>
                 </div>
 

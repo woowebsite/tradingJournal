@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Save } from 'lucide-react';
+import { X, Save, Code, Sliders } from 'lucide-react';
+import RuleBuilder from './RuleBuilder';
 
 const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     const [formData, setFormData] = useState({
@@ -12,6 +13,9 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             rules: []
         }, null, 2)
     });
+
+    // Toggle between Visual Builder and Raw JSON
+    const [viewMode, setViewMode] = useState('visual'); // 'visual' | 'json'
 
     useEffect(() => {
         if (initialData) {
@@ -61,7 +65,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <h3 className="text-xl font-bold text-white">
                         {initialData ? 'Edit Rule' : 'New Rule'}
@@ -126,17 +130,52 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
                         ></textarea>
                     </div>
 
-                    <div>
-                        <label className="block text-sm text-gray-400 mb-1">Rule (JSON Logic)</label>
-                        <textarea
-                            name="Rule"
-                            rows="6"
-                            value={formData.Rule}
-                            onChange={handleChange}
-                            className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm text-green-400"
-                            placeholder="{ ... }"
-                        ></textarea>
-                        <p className="text-xs text-gray-500 mt-1">Define logic using JSON format.</p>
+                    <div className="flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                            <label className="block text-sm text-gray-400">Rule Definition</label>
+                            <div className="flex bg-gray-700/50 rounded-lg p-1 gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('visual')}
+                                    className={`px-3 py-1 rounded text-xs flex items-center gap-1 transition ${viewMode === 'visual' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    <Sliders size={12} />
+                                    Builder
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('json')}
+                                    className={`px-3 py-1 rounded text-xs flex items-center gap-1 transition ${viewMode === 'json' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    <Code size={12} />
+                                    JSON
+                                </button>
+                            </div>
+                        </div>
+
+                        {viewMode === 'visual' ? (
+                            <div className="border border-gray-700 rounded-lg p-2 bg-gray-900/30">
+                                <RuleBuilder
+                                    value={formData.Rule}
+                                    onChange={(newRuleObj) => setFormData(prev => ({
+                                        ...prev,
+                                        Rule: JSON.stringify(newRuleObj, null, 2)
+                                    }))}
+                                />
+                            </div>
+                        ) : (
+                            <>
+                                <textarea
+                                    name="Rule"
+                                    rows="6"
+                                    value={formData.Rule}
+                                    onChange={handleChange}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm text-green-400"
+                                    placeholder="{ ... }"
+                                ></textarea>
+                                <p className="text-xs text-gray-500">Edit logic directly using JSON format.</p>
+                            </>
+                        )}
                     </div>
 
                     <div className="pt-2 flex justify-end gap-3">
