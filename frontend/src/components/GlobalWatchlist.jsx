@@ -1,15 +1,33 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, RefreshCw, TrendingUp, TrendingDown, List as ListIcon } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import { useSearchParams } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchHistories, loadExternalHistory } from '../features/marketSlice';
 import { useNavigate } from 'react-router-dom';
 
 const GlobalWatchlist = () => {
-    const { accountSymbols, defaultWatchlist } = useAccount();
+    const dispatch = useDispatch();
+    const { symbols } = useSelector(state => state.market);
+    const { selectedAccount, accountSymbols, defaultWatchlist } = useAccount();
     const [searchTerm, setSearchTerm] = useState('');
-    const [isRefreshing, setIsRefreshing] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [isWatchlistLoading, setIsWatchlistLoading] = useState(false);
+    const [selectedSymbolId, setSelectedSymbolId] = useState(null);
     const navigate = useNavigate();
     const dropdownRef = useRef(null);
+    const symbolParam = searchParams.get('symbol');
+
+    useEffect(() => {
+        if (symbolParam && symbols.length > 0) {
+            const found = symbols.find(s => s.Name === symbolParam);
+            if (found) {
+                const id = found.documentId || found.id;
+                setSelectedSymbolId(id);
+            }
+        }
+    }, [symbolParam, symbols]);
 
     const filteredSymbols = (() => {
         if (searchTerm) {
@@ -23,10 +41,41 @@ const GlobalWatchlist = () => {
         return accountSymbols;
     })();
 
-    const handleRefresh = (e) => {
-        e.stopPropagation();
-        setIsRefreshing(true);
-        setTimeout(() => setIsRefreshing(false), 1000); // Mock refresh
+    const handleWatchlistRefresh = async () => {
+        if (!filteredSymbols || filteredSymbols.length === 0) return;
+        if (!window.confirm(`Refresh data for all ${filteredSymbols.length} symbols in the list?`)) return;
+
+        setIsWatchlistLoading(true);
+        let updatedCount = 0;
+        let errors = 0;
+
+        const promises = filteredSymbols.map(async (symbol) => {
+            // Skip symbols without proper ID or Name
+            const symId = symbol.documentId || symbol.id;
+            const ticker = symbol.Name;
+            if (!symId || !ticker) return;
+
+            try {
+                const count = await dispatch(loadExternalHistory({
+                    symbol: ticker,
+                    symbolId: symId,
+                    marketType: selectedAccount?.market?.Name // Pass Account Market Type
+                })).unwrap();
+                if (count > 0) updatedCount++;
+            } catch (err) {
+                console.error(`Failed to refresh ${ticker}:`, err);
+                errors++;
+            }
+        });
+
+        await Promise.all(promises);
+        setIsWatchlistLoading(false);
+        alert(`Watchlist refresh complete.\nUpdated symbols: ${updatedCount}\nErrors: ${errors}`);
+
+        // Refresh chart if selected symbol was part of it
+        if (selectedSymbolId) {
+            dispatch(fetchHistories(selectedSymbolId));
+        }
     };
 
     // Close on click outside
@@ -66,11 +115,12 @@ const GlobalWatchlist = () => {
                         <div className="flex justify-between items-center">
                             <h3 className="text-sm font-bold text-gray-200">Your Watchlist</h3>
                             <button
-                                onClick={handleRefresh}
-                                className={`text-gray-400 hover:text-blue-400 transition ${isRefreshing ? 'animate-spin text-blue-400' : ''}`}
+                                onClick={handleWatchlistRefresh}
+                                disabled={isWatchlistLoading || (isWatchlistLoading && !isWatchlistLoading)}
+                                className={`text-gray-400 hover:text-blue-400 transition ${isWatchlistLoading ? 'animate-spin text-blue-400' : ''}`}
                                 title="Refresh Data"
                             >
-                                <RefreshCw size={14} />
+                                <RefreshCw size={14} className={isWatchlistLoading ? 'animate-spin' : ''} />
                             </button>
                         </div>
                     </div>
@@ -81,9 +131,28 @@ const GlobalWatchlist = () => {
                         ) : (
                             filteredSymbols.map(symbol => {
                                 const id = symbol.documentId || symbol.id;
-                                const mockPrice = (Math.random() * 1000).toFixed(2);
-                                const isUp = Math.random() > 0.5;
-                                const mockChange = (Math.random() * 5).toFixed(2);
+
+                                // Merge data from accountSymbols because watchlist symbols are not deeply populated
+                                const fullSymbol = accountSymbols.find(s => (s.documentId || s.id) === id) || symbol;
+
+                                let currentPrice = 0;
+                                let isUp = true;
+                                let changePercent = 0;
+
+                                if (fullSymbol.symbol_histories && fullSymbol.symbol_histories.length > 0) {
+                                    const sorted = [...fullSymbol.symbol_histories].sort((a, b) => new Date(b.date) - new Date(a.date));
+                                    const latest = sorted[0];
+                                    currentPrice = latest.close || 0;
+
+                                    if (sorted.length > 1) {
+                                        const diff = latest.close - latest.open;
+                                        isUp = diff >= 0;
+                                        changePercent = Math.abs((diff / latest.open) * 100);
+                                    }
+                                }
+
+                                const displayPrice = currentPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                const displayChange = changePercent.toFixed(2);
 
                                 return (
                                     <button
@@ -96,13 +165,15 @@ const GlobalWatchlist = () => {
                                     >
                                         <div className="flex flex-col">
                                             <span className="font-bold text-gray-200 group-hover:text-white transition">{symbol.Name}</span>
-                                            <span className="text-xs text-gray-500">Crypto</span>
+                                            <span className="text-xs text-gray-500">{symbol.market?.Name || selectedAccount?.market?.Name || 'Asset'}</span>
                                         </div>
                                         <div className="flex flex-col items-end">
-                                            <span className="text-sm font-medium text-gray-300">${mockPrice}</span>
+                                            <span className="text-sm font-medium text-gray-300">
+                                                {displayPrice === "0.00" ? `-` : `${displayPrice}`}
+                                            </span>
                                             <span className={`text-xs flex items-center gap-1 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
                                                 {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                                {mockChange}%
+                                                {displayChange}%
                                             </span>
                                         </div>
                                     </button>
