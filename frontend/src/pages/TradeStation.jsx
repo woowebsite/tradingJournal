@@ -135,7 +135,7 @@ const TradeStation = () => {
                     </div>
 
                     {/* Strategy Panel */}
-                    <StrategyPanel activeStrategy={activeStrategy} allSignals={allSignals} />
+                    <StrategyPanel activeStrategy={activeStrategy} allSignals={allSignals} trades={symbolTrades} />
                 </div>
                 <div className="w-80 flex flex-col gap-4 h-full shrink-0">
                     <SignalPanel trades={symbolTrades} signals={symbolSignals} />

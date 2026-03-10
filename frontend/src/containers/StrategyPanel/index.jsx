@@ -3,8 +3,10 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Activity } from 'lucide-react';
 import { fetchClosedTrades } from '../../features/tradeSlice';
 import { useAccount } from '../../context/AccountContext';
+import RecentTradeBox from '../../components/RecentTradeBox';
 
-const StrategyPanel = ({ activeStrategy, allSignals }) => {
+const StrategyPanel = ({ activeStrategy, allSignals, trades }) => {
+    const [activeTab, setActiveTab] = useState('summary');
     const dispatch = useDispatch();
     const { selectedAccount } = useAccount();
     const { closedTrades, closedTradesLoading } = useSelector(state => state.trades);
@@ -85,48 +87,63 @@ const StrategyPanel = ({ activeStrategy, allSignals }) => {
 
     return (
         <div className="h-60 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col shrink-0">
-            <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex items-center gap-2">
-                <Activity size={18} className="text-purple-400" />
-                <h3 className="text-lg font-bold text-white">Strategy Summary</h3>
+            <div className="flex border-b border-gray-700 bg-gray-900/50">
+                <button
+                    onClick={() => setActiveTab('summary')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'summary' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <Activity size={14} className={activeTab === 'summary' ? 'text-purple-400' : 'text-gray-500'} />
+                    Strategy Summary
+                </button>
+                <button
+                    onClick={() => setActiveTab('trades')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'trades' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    Recent Trades ({trades ? trades.length : 0})
+                </button>
             </div>
             <div className="p-2 overflow-y-auto custom-scrollbar flex-1 text-sm text-gray-300">
-                {activeStrategy ? (
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <p className="mb-1"><span className="font-semibold text-gray-400">Name:</span> <span className="text-blue-400 font-medium text-base">{activeStrategy.name}</span></p>
-                            <p className="mb-1"><span className="font-semibold text-gray-400">Description:</span> {activeStrategy.description || 'No description'}</p>
-                            <div className="flex gap-6 mt-3">
-                                <div>
-                                    <p className="mb-1">
-                                        <span className="font-semibold text-gray-400">Win Rate:</span>{' '}
-                                        <span className={`font-bold text-lg ${winRate >= 50 ? 'text-green-400' : totalFinished === 0 ? 'text-gray-400' : 'text-red-400'}`}>
-                                            {totalFinished > 0 ? `${winRate}%` : 'N/A'}
-                                        </span>
-                                    </p>
-                                    <span className="text-xs text-gray-500">({winCount}W / {lossCount}L) signals</span>
+                {activeTab === 'summary' ? (
+                    activeStrategy ? (
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="mb-1"><span className="font-semibold text-gray-400">Name:</span> <span className="text-blue-400 font-medium text-base">{activeStrategy.name}</span></p>
+                                <p className="mb-1"><span className="font-semibold text-gray-400">Description:</span> {activeStrategy.description || 'No description'}</p>
+                                <div className="flex gap-6 mt-3">
+                                    <div>
+                                        <p className="mb-1">
+                                            <span className="font-semibold text-gray-400">Win Rate:</span>{' '}
+                                            <span className={`font-bold text-lg ${winRate >= 50 ? 'text-green-400' : totalFinished === 0 ? 'text-gray-400' : 'text-red-400'}`}>
+                                                {totalFinished > 0 ? `${winRate}%` : 'N/A'}
+                                            </span>
+                                        </p>
+                                        <span className="text-xs text-gray-500">({winCount}W / {lossCount}L) signals</span>
+                                    </div>
+                                    <div>
+                                        <p className="mb-1">
+                                            <span className="font-semibold text-gray-400">Reward/Risk:</span>{' '}
+                                            <span className={`font-bold text-lg ${strategyStats.rewardRisk >= 1 ? 'text-green-400' : strategyStats.rewardRisk == 0 ? 'text-gray-400' : 'text-red-400'}`}>
+                                                {strategyStats.loading ? '...' : strategyStats.rewardRisk > 0 ? strategyStats.rewardRisk : 'N/A'}
+                                            </span>
+                                        </p>
+                                        <span className="text-xs text-gray-500">from closed trades</span>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="mb-1">
-                                        <span className="font-semibold text-gray-400">Reward/Risk:</span>{' '}
-                                        <span className={`font-bold text-lg ${strategyStats.rewardRisk >= 1 ? 'text-green-400' : strategyStats.rewardRisk == 0 ? 'text-gray-400' : 'text-red-400'}`}>
-                                            {strategyStats.loading ? '...' : strategyStats.rewardRisk > 0 ? strategyStats.rewardRisk : 'N/A'}
-                                        </span>
-                                    </p>
-                                    <span className="text-xs text-gray-500">from closed trades</span>
+                            </div>
+                            <div>
+                                <p className="mb-1"><span className="font-semibold text-gray-400">Rules:</span> {activeStrategy.rules?.length || 0} active rules</p>
+                                <div className="mt-2 text-xs">
+                                    {activeStrategy.rules?.map((rule, index) => (
+                                        <p key={index} className="mb-1"><span className="font-semibold text-gray-400">{rule.Name}:</span> {rule.Description || 'No description'}</p>
+                                    ))}
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <p className="mb-1"><span className="font-semibold text-gray-400">Rules:</span> {activeStrategy.rules?.length || 0} active rules</p>
-                            <div className="mt-2 text-xs">
-                                {activeStrategy.rules?.map((rule, index) => (
-                                    <p key={index} className="mb-1"><span className="font-semibold text-gray-400">{rule.Name}:</span> {rule.Description || 'No description'}</p>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
+                    ) : (
+                        <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>
+                    )
                 ) : (
-                    <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>
+                    <RecentTradeBox trades={trades || []} onTradeClick={(trade) => console.log('Clicked trade:', trade)} />
                 )}
             </div>
         </div>

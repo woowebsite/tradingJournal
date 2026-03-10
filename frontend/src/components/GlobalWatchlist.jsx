@@ -9,9 +9,11 @@ import { useNavigate } from 'react-router-dom';
 const GlobalWatchlist = () => {
     const dispatch = useDispatch();
     const { symbols } = useSelector(state => state.market);
+    const { items: watchlists } = useSelector(state => state.watchlists);
     const { selectedAccount, accountSymbols, defaultWatchlist } = useAccount();
     const [searchTerm, setSearchTerm] = useState('');
     const [isOpen, setIsOpen] = useState(false);
+    const [selectedWatchlist, setSelectedWatchlist] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const [isWatchlistLoading, setIsWatchlistLoading] = useState(false);
     const [selectedSymbolId, setSelectedSymbolId] = useState(null);
@@ -29,14 +31,32 @@ const GlobalWatchlist = () => {
         }
     }, [symbolParam, symbols]);
 
+    // Fetch account's watchlists
+    const accountWatchlists = watchlists ? watchlists.filter(wl => {
+        if (!selectedAccount) return false;
+        const wlAccId = wl.account?.documentId || wl.account?.id;
+        const accId = selectedAccount?.documentId || selectedAccount?.id;
+        return wlAccId === accId;
+    }) : [];
+
+    // Initialize and sync selectedWatchlist
+    useEffect(() => {
+        if (selectedAccount) {
+            const defWl = accountWatchlists.find(wl => wl.isDefault);
+            setSelectedWatchlist(defWl || accountWatchlists[0] || null);
+        } else {
+            setSelectedWatchlist(null);
+        }
+    }, [selectedAccount?.documentId, selectedAccount?.id, accountWatchlists.length]);
+
     const filteredSymbols = (() => {
         if (searchTerm) {
             return accountSymbols.filter(s =>
                 s.Name.toLowerCase().includes(searchTerm.toLowerCase())
             );
         }
-        if (defaultWatchlist?.symbols && defaultWatchlist.symbols.length > 0) {
-            return defaultWatchlist.symbols;
+        if (selectedWatchlist?.symbols && selectedWatchlist.symbols.length > 0) {
+            return selectedWatchlist.symbols;
         }
         return accountSymbols;
     })();
@@ -88,7 +108,6 @@ const GlobalWatchlist = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
-
     return (
         <div className="relative" ref={dropdownRef}>
             <div
@@ -112,8 +131,23 @@ const GlobalWatchlist = () => {
             {isOpen && (
                 <div className="absolute right-0 top-full mt-4 w-80 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl flex flex-col z-50 max-h-[70vh] overflow-hidden">
                     <div className="p-3 border-b border-gray-700 bg-gray-800/95 backdrop-blur-sm">
-                        <div className="flex justify-between items-center">
-                            <h3 className="text-sm font-bold text-gray-200">Your Watchlist</h3>
+                        <div className="flex justify-between items-center mb-2">
+                            <select
+                                value={selectedWatchlist?.documentId || selectedWatchlist?.id || ''}
+                                onChange={(e) => {
+                                    const wlId = e.target.value;
+                                    const wl = accountWatchlists.find(w => (w.documentId || w.id) == wlId);
+                                    if (wl) setSelectedWatchlist(wl);
+                                }}
+                                className="bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 hover:bg-gray-600 transition"
+                            >
+                                {accountWatchlists.length === 0 && <option value="">No Watchlists</option>}
+                                {accountWatchlists.map(wl => (
+                                    <option key={wl.documentId || wl.id} value={wl.documentId || wl.id}>
+                                        {wl.name}
+                                    </option>
+                                ))}
+                            </select>
                             <button
                                 onClick={handleWatchlistRefresh}
                                 disabled={isWatchlistLoading || (isWatchlistLoading && !isWatchlistLoading)}
