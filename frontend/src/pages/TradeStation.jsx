@@ -6,6 +6,7 @@ import { fetchSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import TradingViewChart from '../components/TradingViewChart';
 import IndicatorTable from '../components/IndicatorTable';
+import StrategyPanel from '../containers/StrategyPanel';
 import { Search, RefreshCw, Activity } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 
@@ -124,32 +125,7 @@ const TradeStation = () => {
                     </div>
 
                     {/* Strategy Panel */}
-                    <div className="h-60 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col shrink-0">
-                        <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex items-center gap-2">
-                            <Activity size={18} className="text-purple-400" />
-                            <h3 className="text-lg font-bold text-white">Strategy Summary</h3>
-                        </div>
-                        <div className="p-2 overflow-y-auto custom-scrollbar flex-1 text-sm text-gray-300">
-                            {activeStrategy ? (
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <p className="mb-1"><span className="font-semibold text-gray-400">Name:</span> <span className="text-blue-400 font-medium text-base">{activeStrategy.name}</span></p>
-                                        <p className="mb-1"><span className="font-semibold text-gray-400">Description:</span> {activeStrategy.description || 'No description'}</p>
-                                    </div>
-                                    <div>
-                                        <p className="mb-1"><span className="font-semibold text-gray-400">Rules:</span> {activeStrategy.rules?.length || 0} active rules</p>
-                                        <div className="mt-2">
-                                            {activeStrategy.rules?.map((rule, index) => (
-                                                <p key={index} className="mb-1"><span className="font-semibold text-gray-400">{rule.Name}:</span> {rule.Description || 'No description'}</p>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>
-                            )}
-                        </div>
-                    </div>
+                    <StrategyPanel activeStrategy={activeStrategy} allSignals={allSignals} />
                 </div>
                 <div className="w-80 rounded-xl overflow-hidden shadow-lg flex flex-col">
                     {/* Technical Indicators */}

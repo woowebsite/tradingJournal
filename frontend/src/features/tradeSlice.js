@@ -58,6 +58,23 @@ export const fetchOpenTrades = createAsyncThunk(
     }
 );
 
+export const fetchClosedTrades = createAsyncThunk(
+    'trades/fetchClosedTrades',
+    async ({ accountId, strategyId }, { rejectWithValue }) => {
+        try {
+            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details`;
+            // if (strategyId) {
+            //     url += `&filters[strategy][documentId][$eq]=${strategyId}`;
+            // }
+            const res = await api.get(url);
+            console.log('res.data.data closedTrades', res.data);
+            return res.data.data;
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
 
 
 export const saveTrade = createAsyncThunk(
@@ -168,8 +185,10 @@ const tradeSlice = createSlice({
     initialState: {
         items: [],       // For general list/search
         openTrades: [],  // Special list for metrics
+        closedTrades: [], // Fast access to closed trades
         loading: false,
         openTradesLoading: false,
+        closedTradesLoading: false,
         error: null,
     },
     reducers: {
@@ -206,8 +225,22 @@ const tradeSlice = createSlice({
             })
             .addCase(fetchOpenTrades.rejected, (state, action) => {
                 state.openTradesLoading = false;
-                // We might not want to set global error for a secondary fetch, or separate it
                 console.error("Failed to fetch open trades:", action.payload);
+            })
+            // Fetch Closed Trades
+            .addCase(fetchClosedTrades.pending, (state) => {
+                state.closedTradesLoading = true;
+            })
+            .addCase(fetchClosedTrades.fulfilled, (state, action) => {
+                state.closedTradesLoading = false;
+                state.closedTrades = action.payload.map(item => ({
+                    id: item.documentId || item.id,
+                    ...item
+                }));
+            })
+            .addCase(fetchClosedTrades.rejected, (state, action) => {
+                state.closedTradesLoading = false;
+                console.error("Failed to fetch closed trades:", action.payload);
             });
     }
 });

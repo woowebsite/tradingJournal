@@ -52,7 +52,16 @@ const Dashboard = () => {
                 let totalRealizedPnl = 0; // For accurately calculating equity/cash if totalPnl mixes both (though usually pnl is 0 for Open)
 
                 trades.forEach(trade => {
-                    const pnl = parseFloat(trade.pnl) || 0;
+                    const details = trade.trade_details || [];
+                    const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                    let pnl = 0;
+                    if (sortedDetails && sortedDetails.length > 0) {
+                        pnl = sortedDetails.reduce((acc, d) => {
+                            const val = (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0);
+                            return d.type === 'Sell' ? acc + val : acc - val;
+                        }, 0);
+                    }
                     totalPnl += pnl;
 
                     if (trade.trade_status === 'Open') {
@@ -65,7 +74,7 @@ const Dashboard = () => {
                         const vol3 = parseFloat(trade.volume3) || 0;
 
                         totalOpenCost += (entry1 * vol1) + (entry2 * vol2) + (entry3 * vol3);
-                    } else if (trade.trade_status === 'Closed' || trade.trade_status === 'Win' || trade.trade_status === 'Loss') {
+                    } else if (trade.trade_status === 'Closed') {
                         totalClosed++;
                         totalRealizedPnl += pnl; // Only include realized PnL in Cash calc
                         if (pnl > 0) {
