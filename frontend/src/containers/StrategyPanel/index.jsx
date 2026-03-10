@@ -83,8 +83,6 @@ const StrategyPanel = ({ activeStrategy, allSignals }) => {
         };
     }, [closedTrades, closedTradesLoading]);
 
-    console.log('closedTrades', closedTrades);
-
     return (
         <div className="h-60 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col shrink-0">
             <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex items-center gap-2">

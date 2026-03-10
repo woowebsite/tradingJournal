@@ -10,6 +10,7 @@ import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { calculateSymbolOpenVolume, calculateSymbolOpenPnL } from '../utils/tradeCalculations';
 import TradeDetailModal from '../components/TradeDetailModal';
+import RecentTradeBox from '../components/RecentTradeBox';
 
 const AccountDetail = () => {
     const { id } = useParams();
@@ -220,51 +221,7 @@ const AccountDetail = () => {
                         <h3 className="text-xl font-bold text-white">Recent Trades</h3>
                         <span className="text-sm text-gray-400">{trades.length} trades</span>
                     </div>
-                    {trades.length > 0 ? (
-                        <div className="overflow-x-auto rounded-lg border border-gray-700">
-                            <table className="w-full text-left">
-                                <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
-                                    <tr>
-                                        <th className="p-3">Date</th>
-                                        <th className="p-3">Symbol</th>
-                                        <th className="p-3">Type</th>
-                                        <th className="p-3">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700">
-                                    {trades.map(trade => (
-                                        <tr
-                                            key={trade.id}
-                                            onClick={() => handleTradeClick(trade)}
-                                            className="hover:bg-gray-700/30 cursor-pointer transition border-b border-gray-700/30 last:border-b-0"
-                                        >
-                                            <td className="p-3 text-gray-300 text-sm">
-                                                {new Date(trade.date).toLocaleDateString()}
-                                            </td>
-                                            <td className="p-3 font-bold text-white">
-                                                {trade.symbol?.Name || '-'}
-                                            </td>
-                                            <td className="p-3">
-                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${trade.type === 'Long' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                                    {trade.type}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 font-mono">
-                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${trade.trade_status === 'Open' ? 'bg-blue-500/20 text-blue-400' :
-                                                    trade.trade_status === 'Pending' ? 'bg-yellow-500/20 text-yellow-400' :
-                                                        'bg-gray-500/20 text-gray-400'
-                                                    }`}>
-                                                    {trade.trade_status}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <p className="text-gray-500 italic">No trades recorded yet.</p>
-                    )}
+                    <RecentTradeBox trades={trades} onTradeClick={handleTradeClick} />
                 </div>
             </div>
 

@@ -67,7 +67,6 @@ export const fetchClosedTrades = createAsyncThunk(
             //     url += `&filters[strategy][documentId][$eq]=${strategyId}`;
             // }
             const res = await api.get(url);
-            console.log('res.data.data closedTrades', res.data);
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);

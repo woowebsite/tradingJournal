@@ -4,15 +4,18 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators } from '../features/marketSlice';
 import { fetchSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
+import { fetchOpenTrades, fetchTrades } from '../features/tradeSlice';
 import TradingViewChart from '../components/TradingViewChart';
-import IndicatorTable from '../components/IndicatorTable';
 import StrategyPanel from '../containers/StrategyPanel';
-import { Search, RefreshCw, Activity } from 'lucide-react';
+import TechnicalPanel from '../containers/TechnicalPanel';
+import SignalPanel from '../containers/SignalPanel';
+import { Search, RefreshCw } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
     const { symbols, histories, externalIndicators, loading } = useSelector(state => state.market);
+    const { items: trades, openTrades, loading: tradesLoading } = useSelector(state => state.trades);
     const { items: allSignals } = useSelector(state => state.signals);
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -33,6 +36,7 @@ const TradeStation = () => {
         dispatch(fetchSymbols());
         dispatch(fetchSignals());
         dispatch(fetchStrategies());
+        dispatch(fetchOpenTrades({ accountId: selectedAccount?.documentId }));
     }, [dispatch]);
 
     // Select first symbol by default if likely?
@@ -52,6 +56,13 @@ const TradeStation = () => {
 
     const { selectedAccount } = useAccount();
 
+    useEffect(() => {
+        if (selectedAccount) {
+            const accId = selectedAccount.documentId || selectedAccount.id;
+            dispatch(fetchTrades({ accountId: accId, pageSize: 50 }));
+        }
+    }, [dispatch, selectedAccount]);
+
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
 
     // Active Strategy Look-up
@@ -70,11 +81,10 @@ const TradeStation = () => {
 
     // Filter signals for selected symbol
     const symbolSignals = selectedSymbolId
-        ? allSignals.filter(s => {
-            const symId = s.symbol?.documentId || s.symbol?.id;
-            return (symId && selectedSymbolId && symId.toString() === selectedSymbolId.toString());
-        })
+        ? allSignals.filter(s => s.symbol.id === selectedSymbolId || s.symbol.documentId === selectedSymbolId)
         : [];
+
+    const symbolTrades = selectedSymbolId ? trades.filter(t => t.symbol.id === selectedSymbolId || t.symbol.documentId === selectedSymbolId) : [];
 
     const handleRefresh = () => {
         if (!selectedSymbol || !selectedSymbolId) return;
@@ -127,82 +137,9 @@ const TradeStation = () => {
                     {/* Strategy Panel */}
                     <StrategyPanel activeStrategy={activeStrategy} allSignals={allSignals} />
                 </div>
-                <div className="w-80 rounded-xl overflow-hidden shadow-lg flex flex-col">
-                    {/* Technical Indicators */}
-                    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
-                        <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex items-center gap-2">
-                            <Activity size={18} className="text-blue-400" />
-                            <h3 className="text-lg font-bold text-white">Technical Indicators</h3>
-                        </div>
-                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                            <IndicatorTable indicators={(() => {
-                                if (!externalIndicators || !externalIndicators.indicator) return [];
-                                const indObj = externalIndicators.indicator;
-                                const list = [];
-                                Object.keys(indObj).forEach(key => {
-                                    if (key === 'ticker' || key === 'signal') return;
-                                    const item = indObj[key];
-                                    if (item && typeof item === 'object') {
-                                        list.push({
-                                            indicator: key.toUpperCase(),
-                                            signal: item.signal,
-                                            value: item.value
-                                        });
-                                    }
-                                });
-                                return list;
-                            })()} />
-                        </div>
-                    </div>
-
-                    {/* Moving Avergage */}
-                    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col mt-3">
-                        <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex items-center gap-2">
-                            <Activity size={18} className="text-green-400" />
-                            <h3 className="text-lg font-bold text-white">Moving Average</h3>
-                        </div>
-
-                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                            <IndicatorTable indicators={(() => {
-                                if (!externalIndicators || !externalIndicators.simple) return [];
-                                const indObj = externalIndicators.simple; // Default to Simple MA
-                                const list = [];
-                                Object.keys(indObj).forEach(key => {
-                                    if (key === 'ticker' || key === 'signal') return;
-                                    const item = indObj[key];
-                                    if (item && typeof item === 'object') {
-                                        list.push({
-                                            indicator: key.toUpperCase(),
-                                            signal: item.signal,
-                                            value: item.value
-                                        });
-                                    }
-                                });
-                                return list;
-                            })()} />
-                        </div>
-                    </div>
-
-                    {/* Summary */}
-                    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col mt-3">
-                        <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex items-center gap-2">
-                            <Activity size={18} className="text-orange-400" />
-                            <h3 className="text-lg font-bold text-white">Summary</h3>
-                        </div>
-                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                            <IndicatorTable indicators={(() => {
-                                if (!externalIndicators || !externalIndicators.summary) return [];
-                                const sumObj = externalIndicators.summary;
-                                const list = [];
-                                // Summary object: { sell: 0, buy: 17, neutral: 7, signal: "Strong Buy" }
-                                list.push({ indicator: 'Buy Count', value: sumObj.buy, signal: 'Buy' });
-                                list.push({ indicator: 'Sell Count', value: sumObj.sell, signal: 'Sell' });
-                                list.push({ indicator: 'Neutral Count', value: sumObj.neutral, signal: 'Neutral' });
-                                list.push({ indicator: 'Overall Signal', signal: sumObj.signal, value: '' });
-                                return list;
-                            })()} />
-                        </div>
-                    </div>
+                <div className="w-80 flex flex-col gap-4 h-full shrink-0">
+                    <SignalPanel trades={symbolTrades} signals={symbolSignals} />
+                    <TechnicalPanel externalIndicators={externalIndicators} />
                 </div>
             </div>
         </div>
