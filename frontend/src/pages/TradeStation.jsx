@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata } from '../features/marketSlice';
 import { fetchSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { fetchOpenTrades, fetchTrades } from '../features/tradeSlice';
@@ -99,9 +99,15 @@ const TradeStation = () => {
             .unwrap()
             .then(count => {
                 if (count > 0) console.log(`Updated ${count} new records for ${ticker}`);
-                else alert('No new records');
+                else if (count === 0) console.log('No new records');
             })
-            .catch(err => console.error(`Failed to refresh: ${err}`));
+            .catch(err => console.error(`Failed to refresh history: ${err}`));
+
+        // Also sync metadata (Exchange & Sector)
+        dispatch(syncSymbolMetadata({ ticker, symbolId: selectedSymbolId }))
+            .unwrap()
+            .then(() => console.log(`Metadata synced for ${ticker}`))
+            .catch(err => console.error(`Failed to sync metadata: ${err}`));
     };
 
     return (
@@ -112,10 +118,14 @@ const TradeStation = () => {
                     {/* Left Panel: Chart */}
                     <div className="flex-1 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
                         <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-between gap-3">
                                 <h2 className="text-xl font-bold text-white">
                                     {selectedSymbol ? `${selectedSymbol.Name}` : 'Select a Symbol'}
                                 </h2>
+                                <span className="text-sm text-gray-400">{selectedSymbol?.exchange} - {selectedSymbol?.sector}</span>
+                            </div>
+
+                            <div className="flex items-end justify-end gap-3">
                                 {selectedSymbol && (
                                     <button
                                         onClick={handleRefresh}

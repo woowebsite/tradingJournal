@@ -688,6 +688,7 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     Description: Schema.Attribute.String;
+    exchange: Schema.Attribute.String;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -697,6 +698,7 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     market: Schema.Attribute.Relation<'manyToOne', 'api::market.market'>;
     Name: Schema.Attribute.String & Schema.Attribute.Unique;
     publishedAt: Schema.Attribute.DateTime;
+    sector: Schema.Attribute.String;
     signals: Schema.Attribute.Relation<'oneToMany', 'api::signal.signal'>;
     symbol_histories: Schema.Attribute.Relation<
       'oneToMany',

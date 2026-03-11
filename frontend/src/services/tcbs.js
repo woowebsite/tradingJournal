@@ -1,5 +1,5 @@
-
 // TCBS External API Service
+import api from './api';
 
 export const getStockHistory = async (ticker) => {
     // Current timestamp for 'to' parameter (approximation for "now" or future to cover all)
@@ -120,5 +120,58 @@ export const getTechnicalIndicators = async (ticker) => {
     } catch (error) {
         console.error("Failed to fetch indicators:", error);
         throw error; // Or return [] if we want to digest error?
+    }
+};
+
+
+export const updateMarketInfo = async (ticker, symbolId) => {
+    var symbol = ticker.replace(":HOSE", "");
+    symbol = symbol.replace(":HNX", "");
+    symbol = symbol.replace(":UPCOM", "");
+    // https://apiextaws.tcbs.com.vn/stock-insight/v2/search?key=PDB&type=ALL
+    const url = `/api-tcbs/stock-insight/v2/search?key=${symbol}&type=ALL`;
+    const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    };
+    const token = import.meta.env.VITE_TCBS_TOKEN;
+    if (token) {
+        if (/[^\x00-\x7F]/.test(token)) {
+            console.error("TCBS Token contains invalid characters.");
+            return [];
+        }
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`TCBS API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const info = data.data.find(item => item.name === symbol);
+
+        if (!info) {
+            console.warn(`No metadata found for ${ticker} in TCBS`);
+            return null;
+        }
+
+        const payload = {
+            data: {
+                exchange: info.exchange === "0" ? "HOSE" : info.exchange === "1" ? "HNX" : "UPCOM",
+                sector: info.industry // Map industry to sector
+            }
+        };
+
+        const res = await api.put(`/symbols/${symbolId}`, payload);
+        return res.data.data;
+    } catch (error) {
+        console.error("Failed to update market info:", error);
+        throw error;
     }
 };

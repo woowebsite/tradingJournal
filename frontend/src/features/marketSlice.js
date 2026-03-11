@@ -2,7 +2,7 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { getCryptoHistory } from '../services/binance';
 
-import { getStockHistory, getIntradaySnapshots, getTechnicalIndicators } from '../services/tcbs';
+import { getStockHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
 // Async Thunks
 export const fetchSymbols = createAsyncThunk(
@@ -264,6 +264,17 @@ export const fetchExternalIndicators = createAsyncThunk(
         }
     }
 );
+export const syncSymbolMetadata = createAsyncThunk(
+    'market/syncSymbolMetadata',
+    async ({ ticker, symbolId }, { rejectWithValue }) => {
+        try {
+            const updatedSymbol = await updateMarketInfo(ticker, symbolId);
+            return updatedSymbol;
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
 
 const marketSlice = createSlice({
     name: 'market',
@@ -294,6 +305,15 @@ const marketSlice = createSlice({
                 ...item
             }));
             // state.loading = false;
+        });
+        builder.addCase(syncSymbolMetadata.fulfilled, (state, action) => {
+            if (action.payload) {
+                const updated = action.payload;
+                const index = state.symbols.findIndex(s => s.id === (updated.documentId || updated.id));
+                if (index !== -1) {
+                    state.symbols[index] = { ...state.symbols[index], ...updated };
+                }
+            }
         });
 
         // Fetch Histories
