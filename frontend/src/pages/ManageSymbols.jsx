@@ -11,7 +11,9 @@ const ManageSymbols = () => {
 
     const [formData, setFormData] = useState({
         Name: '',
-        Description: ''
+        Description: '',
+        exchange: '',
+        sector: ''
     });
     const [editingId, setEditingId] = useState(null); // ID of symbol being edited
 
@@ -23,7 +25,9 @@ const ManageSymbols = () => {
     const handleEdit = (symbol) => {
         setFormData({
             Name: symbol.Name,
-            Description: symbol.Description || ''
+            Description: symbol.Description || '',
+            exchange: symbol.exchange || '',
+            sector: symbol.sector || ''
         });
         setEditingId(symbol.id || symbol.documentId);
         // Scroll to top
@@ -31,12 +35,29 @@ const ManageSymbols = () => {
     };
 
     const handleCancel = () => {
-        setFormData({ Name: '', Description: '' });
+        setFormData({ Name: '', Description: '', exchange: '', sector: '' });
         setEditingId(null);
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        // Suffix-aware duplicate check
+        const cleanName = (name) => name.replace(/:(HOSE|HNX|UPCOM)$/i, "").trim().toUpperCase();
+        const baseInput = cleanName(formData.Name);
+
+        const isDuplicate = symbols.some(s => {
+            // Don't check against the record being edited
+            const symId = s.id || s.documentId;
+            if (editingId && symId === editingId) return false;
+            return cleanName(s.Name) === baseInput;
+        });
+
+        if (isDuplicate) {
+            alert(`Symbol "${baseInput}" (or similar with suffix) already exists in this market.`);
+            return;
+        }
+
         try {
             const payload = { ...formData };
             if (selectedAccount?.market) {
@@ -100,6 +121,30 @@ const ManageSymbols = () => {
                                 placeholder="e.g. BTCUSD"
                             />
                         </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-1">Exchange</label>
+                                <input
+                                    type="text"
+                                    name="exchange"
+                                    value={formData.exchange}
+                                    onChange={handleChange}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+                                    placeholder="e.g. HOSE, HNX"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-1">Sector (Industry)</label>
+                                <input
+                                    type="text"
+                                    name="sector"
+                                    value={formData.sector}
+                                    onChange={handleChange}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+                                    placeholder="e.g. Banks"
+                                />
+                            </div>
+                        </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-400 mb-1">Description</label>
                             <textarea
@@ -145,6 +190,8 @@ const ManageSymbols = () => {
                         <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase tracking-wider">
                             <tr>
                                 <th className="px-6 py-3 font-medium">Name</th>
+                                <th className="px-6 py-3 font-medium">Exchange</th>
+                                <th className="px-6 py-3 font-medium">Sector</th>
                                 <th className="px-6 py-3 font-medium">Description</th>
                                 <th className="px-6 py-3 font-medium text-right">Actions</th>
                             </tr>
@@ -152,17 +199,19 @@ const ManageSymbols = () => {
                         <tbody className="divide-y divide-gray-700">
                             {loading && symbols.length === 0 ? (
                                 <tr>
-                                    <td colSpan="3" className="px-6 py-8 text-center text-gray-500">Loading...</td>
+                                    <td colSpan="5" className="px-6 py-8 text-center text-gray-500">Loading...</td>
                                 </tr>
                             ) : symbols.length === 0 ? (
                                 <tr>
-                                    <td colSpan="3" className="px-6 py-8 text-center text-gray-500">No symbols found for this market.</td>
+                                    <td colSpan="5" className="px-6 py-8 text-center text-gray-500">No symbols found for this market.</td>
                                 </tr>
                             ) : (
                                 symbols.map(symbol => (
                                     <tr key={symbol.id} className="hover:bg-gray-700/50 transition">
                                         <td className="px-6 py-4 text-white font-medium">{symbol.Name}</td>
-                                        <td className="px-6 py-4 text-gray-400">{symbol.Description || '-'}</td>
+                                        <td className="px-6 py-4 text-gray-300 text-sm whitespace-nowrap">{symbol.exchange || '-'}</td>
+                                        <td className="px-6 py-4 text-gray-300 text-sm">{symbol.sector || '-'}</td>
+                                        <td className="px-6 py-4 text-gray-400 max-w-xs truncate">{symbol.Description || '-'}</td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-2">
                                                 <button

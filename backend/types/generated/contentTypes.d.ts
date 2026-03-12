@@ -810,7 +810,12 @@ export interface ApiWatchListWatchList extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.String;
+    fromWatchlist: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::watch-list.watch-list'
+    >;
     isDefault: Schema.Attribute.Boolean;
+    isSubWatchlist: Schema.Attribute.Boolean;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -819,6 +824,7 @@ export interface ApiWatchListWatchList extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    rule: Schema.Attribute.JSON;
     symbols: Schema.Attribute.Relation<'manyToMany', 'api::symbol.symbol'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

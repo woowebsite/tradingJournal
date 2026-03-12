@@ -10,11 +10,13 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
         isDefault: false,
         symbols: [] // Array of symbol IDs
     });
+    const [bulkText, setBulkText] = useState('');
 
     useEffect(() => {
         if (initialData) {
             // Populate form with existing data
             const linkedSymbolIds = initialData.symbols?.map(s => s.documentId || s.id) || [];
+            const symbolNames = initialData.symbols?.map(s => s.Name).join(', ') || '';
 
             setFormData({
                 name: initialData.name || '',
@@ -22,6 +24,7 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
                 isDefault: initialData.isDefault || false,
                 symbols: linkedSymbolIds
             });
+            setBulkText(symbolNames);
         } else {
             // Reset form for new entry
             setFormData({
@@ -30,6 +33,7 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
                 isDefault: false,
                 symbols: []
             });
+            setBulkText('');
         }
     }, [initialData, isOpen]);
 
@@ -41,15 +45,46 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
         }));
     };
 
+    const handleBulkInputChange = (e) => {
+        const text = e.target.value;
+        setBulkText(text);
+
+        // Parse names and find corresponding IDs
+        const names = text.split(/[,|\n]/).map(n => n.trim().toUpperCase()).filter(n => n !== '');
+        const matchedIds = [];
+
+        names.forEach(name => {
+            const found = symbols.find(s => s.Name.toUpperCase() === name);
+            if (found) {
+                matchedIds.push(found.documentId || found.id);
+            }
+        });
+
+        // Use Set to remove duplicates
+        const uniqueIds = Array.from(new Set(matchedIds));
+
+        setFormData(prev => ({
+            ...prev,
+            symbols: uniqueIds
+        }));
+    };
+
     const handleSymbolToggle = (symbolId) => {
         setFormData(prev => {
             const currentSymbols = prev.symbols;
             const isSelected = currentSymbols.includes(symbolId);
-            if (isSelected) {
-                return { ...prev, symbols: currentSymbols.filter(id => id !== symbolId) };
-            } else {
-                return { ...prev, symbols: [...currentSymbols, symbolId] };
-            }
+            const nextSymbols = isSelected
+                ? currentSymbols.filter(id => id !== symbolId)
+                : [...currentSymbols, symbolId];
+
+            // Update bulk text to match
+            const names = nextSymbols.map(id => {
+                const sym = symbols.find(s => (s.documentId || s.id) === id);
+                return sym ? sym.Name : null;
+            }).filter(Boolean);
+            setBulkText(names.join(', '));
+
+            return { ...prev, symbols: nextSymbols };
         });
     };
 
@@ -79,17 +114,35 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
 
                 <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Name</label>
-                            <input
-                                type="text"
-                                name="name"
-                                value={formData.name}
-                                onChange={handleChange}
-                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                                required
-                                placeholder="e.g., Potential Breakouts"
-                            />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-1">Name</label>
+                                <input
+                                    type="text"
+                                    name="name"
+                                    value={formData.name}
+                                    onChange={handleChange}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+                                    required
+                                    placeholder="e.g., Potential Breakouts"
+                                />
+                            </div>
+
+                            <div className="flex items-center pt-6">
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        id="isDefault"
+                                        name="isDefault"
+                                        checked={formData.isDefault}
+                                        onChange={handleChange}
+                                        className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 transition cursor-pointer"
+                                    />
+                                    <span className="text-sm text-gray-300 group-hover:text-white transition">
+                                        Set as Default Watchlist
+                                    </span>
+                                </label>
+                            </div>
                         </div>
 
                         <div>
@@ -98,30 +151,33 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
                                 name="description"
                                 value={formData.description}
                                 onChange={handleChange}
-                                rows="3"
+                                rows="2"
                                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
                                 placeholder="Optional description..."
                             />
                         </div>
 
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="checkbox"
-                                id="isDefault"
-                                name="isDefault"
-                                checked={formData.isDefault}
-                                onChange={handleChange}
-                                className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Bulk Symbols Import (comma separated)</label>
+                            <textarea
+                                value={bulkText}
+                                onChange={handleBulkInputChange}
+                                rows="3"
+                                className="w-full bg-gray-900/50 border border-gray-700 rounded-lg px-4 py-2 text-blue-100 font-mono text-sm focus:outline-none focus:border-blue-500 transition placeholder:text-gray-600"
+                                placeholder="e.g. ACB, BID, CTG..."
                             />
-                            <label htmlFor="isDefault" className="text-sm text-gray-300 pointer-events-none">
-                                Set as Default Watchlist
-                            </label>
+                            <p className="text-[10px] text-gray-500 mt-1 italic">Type or paste symbols separated by commas or new lines. Invalid symbols are ignored.</p>
                         </div>
                     </div>
 
                     <div className="space-y-3">
-                        <label className="block text-sm font-medium text-gray-400">Select Symbols</label>
-                        <div className="bg-gray-900/50 rounded-lg border border-gray-700 p-4 max-h-60 overflow-y-auto custom-scrollbar">
+                        <div className="flex items-center justify-between">
+                            <label className="block text-sm font-medium text-gray-400">Select Symbols</label>
+                            <span className="text-xs font-medium px-2 py-0.5 bg-blue-600/20 text-blue-400 rounded-full border border-blue-500/30">
+                                {formData.symbols.length} selected
+                            </span>
+                        </div>
+                        <div className="bg-gray-900/50 rounded-xl border border-gray-700 p-4 max-h-60 overflow-y-auto custom-scrollbar">
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                 {symbols.map(sym => {
                                     const symId = sym.documentId || sym.id;
@@ -134,23 +190,24 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
                                                 cursor-pointer px-3 py-2 rounded-lg border text-sm transition flex items-center justify-between
                                                 ${isSelected
                                                     ? 'bg-blue-600/20 border-blue-500/50 text-blue-200'
-                                                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                                                    : 'bg-gray-800/40 border-gray-700 text-gray-500 hover:border-gray-500 hover:bg-gray-800'
                                                 }
                                             `}
                                         >
-                                            <span className="font-bold">{sym.Name}</span>
-                                            {isSelected && <div className="w-2 h-2 rounded-full bg-blue-500"></div>}
+                                            <span className={`${isSelected ? 'font-bold' : ''}`}>{sym.Name}</span>
+                                            {isSelected && (
+                                                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
+                                            )}
                                         </div>
                                     );
                                 })}
                                 {symbols.length === 0 && (
-                                    <p className="col-span-full text-center text-gray-500 py-4">No symbols available.</p>
+                                    <div className="col-span-full py-8 flex flex-col items-center justify-center text-gray-600">
+                                        <p>No symbols available.</p>
+                                    </div>
                                 )}
                             </div>
                         </div>
-                        <p className="text-xs text-gray-500">
-                            Selected: {formData.symbols.length}
-                        </p>
                     </div>
                 </form>
 

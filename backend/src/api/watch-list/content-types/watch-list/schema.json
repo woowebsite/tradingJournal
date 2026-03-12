@@ -20,6 +20,9 @@
     "isDefault": {
       "type": "boolean"
     },
+    "rule": {
+      "type": "json"
+    },
     "account": {
       "type": "relation",
       "relation": "manyToOne",
@@ -31,6 +34,14 @@
       "relation": "manyToMany",
       "target": "api::symbol.symbol",
       "mappedBy": "watch_lists"
+    },
+    "isSubWatchlist": {
+      "type": "boolean"
+    },
+    "fromWatchlist": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::watch-list.watch-list"
     }
   }
 }

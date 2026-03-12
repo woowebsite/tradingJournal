@@ -4,6 +4,7 @@ import { Plus, Edit2, Trash2, List, Eye } from 'lucide-react';
 import { fetchWatchlists, createWatchlist, updateWatchlist, deleteWatchlist } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
 import WatchlistModal from '../components/WatchlistModal';
+import SubWatchlistModal from '../components/SubWatchlistModal';
 import { useAccount } from '../context/AccountContext';
 
 const ManageWatchlists = () => {
@@ -13,6 +14,7 @@ const ManageWatchlists = () => {
     const { selectedAccount, accountSymbols } = useAccount();
 
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isSubModalOpen, setIsSubModalOpen] = useState(false);
     const [selectedWatchlist, setSelectedWatchlist] = useState(null);
 
     useEffect(() => {
@@ -36,6 +38,7 @@ const ManageWatchlists = () => {
             await dispatch(createWatchlist(data)).unwrap();
             await dispatch(fetchWatchlists());
             setIsModalOpen(false);
+            setIsSubModalOpen(false);
         } catch (error) {
             alert(`Failed to create watchlist: ${error}`);
         }
@@ -48,6 +51,7 @@ const ManageWatchlists = () => {
             await dispatch(updateWatchlist({ id, data })).unwrap();
             await dispatch(fetchWatchlists());
             setIsModalOpen(false);
+            setIsSubModalOpen(false);
             setSelectedWatchlist(null);
         } catch (error) {
             alert(`Failed to update watchlist: ${error}`);
@@ -68,9 +72,18 @@ const ManageWatchlists = () => {
         setIsModalOpen(true);
     };
 
+    const handleSubModalClose = () => {
+        setIsSubModalOpen(false);
+        setSelectedWatchlist(null);
+    };
+
     const openEditModal = (watchlist) => {
         setSelectedWatchlist(watchlist);
-        setIsModalOpen(true);
+        if (watchlist.isSubWatchlist) {
+            setIsSubModalOpen(true);
+        } else {
+            setIsModalOpen(true);
+        }
     };
 
     return (
@@ -83,13 +96,22 @@ const ManageWatchlists = () => {
                     </h1>
                     <p className="text-gray-400 mt-2">Create and organize your custom symbol lists.</p>
                 </div>
-                <button
-                    onClick={openCreateModal}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
-                >
-                    <Plus size={20} />
-                    New Watchlist
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => setIsSubModalOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 rounded-lg hover:bg-purple-700 transition font-medium text-white shadow-lg shadow-purple-500/20"
+                    >
+                        <Plus size={20} />
+                        Create Sub Watchlist
+                    </button>
+                    <button
+                        onClick={openCreateModal}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
+                    >
+                        <Plus size={20} />
+                        New Watchlist
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -107,6 +129,11 @@ const ManageWatchlists = () => {
                                 <div>
                                     <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
                                         {wl.name}
+                                        {wl.isSubWatchlist && (
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/40 text-purple-400 border border-purple-900/50 uppercase tracking-wide">
+                                                Sub
+                                            </span>
+                                        )}
                                         {wl.isDefault && (
                                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-900/40 text-green-400 border border-green-900/50 uppercase tracking-wide">
                                                 Default
@@ -163,10 +190,19 @@ const ManageWatchlists = () => {
 
             <WatchlistModal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => { setIsModalOpen(false); setSelectedWatchlist(null); }}
                 onSubmit={selectedWatchlist ? handleUpdate : handleCreate}
                 initialData={selectedWatchlist}
                 symbols={accountSymbols}
+            />
+
+            <SubWatchlistModal
+                isOpen={isSubModalOpen}
+                onClose={handleSubModalClose}
+                onSubmit={selectedWatchlist ? handleUpdate : handleCreate}
+                initialData={selectedWatchlist}
+                watchlists={filteredWatchlists}
+                allSymbols={symbols}
             />
         </div>
     );
