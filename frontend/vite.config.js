@@ -20,6 +20,18 @@ export default defineConfig({
         secure: false,
         ws: true,
       },
+      '/openapi-tcbs': {
+        target: 'https://openapi.tcbs.com.vn',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/openapi-tcbs/, ''),
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          });
+        }
+      },
       '/api': {
         target: 'http://localhost:1337',
         changeOrigin: true,

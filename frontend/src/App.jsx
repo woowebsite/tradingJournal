@@ -12,6 +12,7 @@ import ManageWatchlists from './pages/Watchlists';
 import ManageSymbols from './pages/ManageSymbols';
 import TradeStation from './pages/TradeStation';
 import AccountDetail from './pages/AccountDetail';
+import Journal from './pages/Journal';
 import { AccountProvider } from './context/AccountContext';
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
             <Route path="accounts/:id" element={<AccountDetail />} />
             <Route path="trade-station" element={<TradeStation />} />
             <Route path="trades" element={<Trades />} />
+            <Route path="journal" element={<Journal />} />
             <Route path="settings" element={<Settings />} />
             <Route path="signals" element={<Signals />} />
             <Route path="manage-market" element={<ManageMarket />} />
