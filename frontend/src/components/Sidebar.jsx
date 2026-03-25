@@ -1,4 +1,4 @@
-import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag } from 'lucide-react';
+import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import clsx from 'clsx';
@@ -13,6 +13,7 @@ const Sidebar = () => {
             items: [
                 { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
                 { icon: BarChart2, label: 'Trade Station', path: '/trade-station' },
+                { icon: TrendingUp, label: 'Derivation', path: '/derivation' },
                 { icon: Wallet, label: 'Accounts', path: '/accounts' },
                 { icon: ReceiptText, label: 'Trades', path: '/trades' },
                 { icon: NotebookPen, label: 'Journal', path: '/journal' },

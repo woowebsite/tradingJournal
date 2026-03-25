@@ -93,3 +93,58 @@ export const getTCBSProfile = async (custodyCode, jwtToken) => {
         throw error;
     }
 };
+
+export const getTCBSDerivatives = async (jwtToken) => {
+    const url = `/openapi-tcbs/tartarus/v1/derivatives`;
+    const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwtToken}`,
+    };
+
+    try {
+        const response = await fetch(url, { method: 'GET', headers });
+        if (!response.ok) {
+            throw new Error(`TCBS Derivatives API Error: ${response.status} ${response.statusText}`);
+        }
+        const data = await response.json();
+        if (data && data.data) return data.data;
+        return data; // Return raw if structure is different
+    } catch (error) {
+        console.error("Failed to fetch TCBS Derivatives:", error);
+        throw error;
+    }
+};
+
+export const placeTCBSConditionOrder = async (jwtToken, payload) => {
+    const url = `/openapi-tcbs/khronos/v1/order/condition/place`;
+    const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwtToken}`,
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            // Try to parse error message if possible
+            let errorMsg = `${response.status} ${response.statusText}`;
+            try {
+                const errData = await response.json();
+                if (errData && errData.message) errorMsg = errData.message;
+            } catch (e) {}
+            throw new Error(`TCBS Order API Error: ${errorMsg}`);
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error("Failed to place TCBS Condition Order:", error);
+        throw error;
+    }
+};
