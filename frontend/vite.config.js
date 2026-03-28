@@ -25,8 +25,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/openapi-tcbs/, ''),
         secure: false,
+        ws: true,
         configure: (proxy, _options) => {
           proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          });
+          proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
             proxyReq.removeHeader('origin');
             proxyReq.removeHeader('referer');
           });
