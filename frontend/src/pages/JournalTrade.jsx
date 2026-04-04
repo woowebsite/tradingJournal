@@ -3,13 +3,16 @@ import { useSelector, useDispatch } from 'react-redux';
 import { fetchTrades } from '../features/tradeSlice';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
+import { calculateTradePnL } from '../utils/tradeCalculations';
 import { Calendar, Tag, TrendingUp, TrendingDown, Image as ImageIcon } from 'lucide-react';
+import { fetchBatchLatestPrices } from '../features/marketSlice';
 import clsx from 'clsx';
 
 const JournalTrade = () => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const { items: rawTrades, loading } = useSelector(state => state.trades);
+    const { latestPricesMap } = useSelector(state => state.market);
     const [selectedMonth, setSelectedMonth] = useState(null);
 
     const API_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:1337';
@@ -21,6 +24,19 @@ const JournalTrade = () => {
         }
     }, [dispatch, selectedAccount]);
 
+    useEffect(() => {
+        if (rawTrades && rawTrades.length > 0) {
+            const symbolIds = Array.from(new Set(
+                rawTrades
+                    .map(t => t.symbol?.documentId || t.symbol?.id)
+                    .filter(id => !!id)
+            ));
+            if (symbolIds.length > 0) {
+                dispatch(fetchBatchLatestPrices(symbolIds));
+            }
+        }
+    }, [dispatch, rawTrades]);
+
     const trades = useMemo(() => {
         if (!rawTrades) return [];
         return rawTrades.map(item => {
@@ -29,13 +45,9 @@ const JournalTrade = () => {
             const firstEntry = sortedDetails.find(d => d.signal === 'Entry') || sortedDetails[0];
 
             // Calc PnL
-            let pnl = 0;
-            if (sortedDetails && sortedDetails.length > 0) {
-                pnl = sortedDetails.reduce((acc, d) => {
-                    const val = (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0);
-                    return d.type === 'Sell' ? acc + val : acc - val;
-                }, 0);
-            }
+            const symbolId = item.symbol?.documentId || item.symbol?.id;
+            const currentPrice = symbolId ? latestPricesMap[symbolId] : null;
+            const pnl = calculateTradePnL(item, currentPrice);
 
             // Get screenshot from the first detail that has one
             const detailWithScreenshot = sortedDetails.find(d => d.screenshot);
@@ -51,7 +63,7 @@ const JournalTrade = () => {
                 firstNote: firstEntry?.note || item.note
             };
         }).sort((a, b) => new Date(b.derivedDate) - new Date(a.derivedDate));
-    }, [rawTrades, API_URL]);
+    }, [rawTrades, API_URL, latestPricesMap]);
 
     const months = useMemo(() => {
         const uniqueMonths = new Set();
@@ -130,7 +142,7 @@ const JournalTrade = () => {
                         filteredTrades.map(trade => (
                             <div
                                 key={trade.id}
-                                className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden hover:border-blue-500/50 transition-all duration-300 group shadow-lg flex flex-col"
+                                className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden hover:border-blue-500/50 transition-all duration-300 group shadow-lg flex flex-col mb-4"
                             >
                                 {/* Screenshot Container */}
                                 <div className="aspect-video w-full bg-gray-900 relative overflow-hidden">

@@ -180,6 +180,33 @@ export const deleteAllHistories = createAsyncThunk(
     }
 );
 
+export const fetchBatchLatestPrices = createAsyncThunk(
+    'market/fetchBatchLatestPrices',
+    async (symbolIds, { rejectWithValue }) => {
+        try {
+            if (!symbolIds || symbolIds.length === 0) return {};
+
+            const queryParams = symbolIds.map((id, index) => `filters[symbol][documentId][$in][${index}]=${id}`).join('&');
+            const url = `/symbol-histories?${queryParams}&populate=symbol&sort=date:desc&pagination[pageSize]=1000`;
+            const res = await api.get(url);
+            const data = res.data.data;
+
+            const pricesMap = {};
+            data.forEach(item => {
+                const symId = item.symbol?.documentId || item.symbol?.id;
+                if (symId && pricesMap[symId] === undefined) {
+                    pricesMap[symId] = item.close;
+                }
+            });
+
+            return pricesMap;
+        } catch (error) {
+            console.error(error);
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
 export const fetchLatestHistory = createAsyncThunk(
     'market/fetchLatestHistory',
     async (symbolId, { rejectWithValue }) => {
@@ -281,6 +308,7 @@ const marketSlice = createSlice({
     initialState: {
         symbols: [],
         histories: [],
+        latestPricesMap: {},
         loading: false,
         error: null,
         selectedSymbolFilter: '',
@@ -369,6 +397,11 @@ const marketSlice = createSlice({
         builder.addCase(deleteAllHistories.rejected, (state, action) => {
             state.loading = false;
             state.error = action.payload;
+        });
+
+        // Batch Latest Prices
+        builder.addCase(fetchBatchLatestPrices.fulfilled, (state, action) => {
+            state.latestPricesMap = { ...state.latestPricesMap, ...action.payload };
         });
     }
 });

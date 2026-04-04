@@ -7,11 +7,14 @@ import TradeDetailModal from '../components/TradeDetailModal';
 import api from '../services/api';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
+import { calculateTradePnL } from '../utils/tradeCalculations';
+import { fetchBatchLatestPrices } from '../features/marketSlice';
 
 const Trades = () => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const { items: rawTrades, loading } = useSelector(state => state.trades);
+    const { latestPricesMap } = useSelector(state => state.market);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [tradeToEdit, setTradeToEdit] = useState(null);
@@ -23,6 +26,19 @@ const Trades = () => {
         }
     }, [dispatch, selectedAccount]);
 
+    useEffect(() => {
+        if (rawTrades && rawTrades.length > 0) {
+            const symbolIds = Array.from(new Set(
+                rawTrades
+                    .map(t => t.symbol?.documentId || t.symbol?.id)
+                    .filter(id => !!id)
+            ));
+            if (symbolIds.length > 0) {
+                dispatch(fetchBatchLatestPrices(symbolIds));
+            }
+        }
+    }, [dispatch, rawTrades]);
+
     const trades = useMemo(() => {
         if (!rawTrades) return [];
         return rawTrades.map(item => {
@@ -33,13 +49,9 @@ const Trades = () => {
             const lastExit = sortedDetails.reverse().find(d => d.signal === 'Exit' || d.signal === 'TakeProfit' || d.signal === 'Stoploss');
 
             // Calc PnL
-            let pnl = 0;
-            if (sortedDetails && sortedDetails.length > 0) {
-                pnl = sortedDetails.reduce((acc, d) => {
-                    const val = (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0);
-                    return d.type === 'Sell' ? acc + val : acc - val;
-                }, 0);
-            }
+            const symbolId = item.symbol?.documentId || item.symbol?.id;
+            const currentPrice = symbolId ? latestPricesMap[symbolId] : null;
+            const pnl = calculateTradePnL(item, currentPrice);
 
             return {
                 id: item.id || item.documentId,
@@ -50,7 +62,7 @@ const Trades = () => {
                 derivedPnl: pnl
             };
         }).sort((a, b) => new Date(b.derivedDate) - new Date(a.derivedDate));
-    }, [rawTrades]);
+    }, [rawTrades, latestPricesMap]);
 
 
 
