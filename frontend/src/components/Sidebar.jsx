@@ -1,4 +1,5 @@
-import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp } from 'lucide-react';
+import { useState } from 'react';
+import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp, ChevronRight } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import clsx from 'clsx';
@@ -16,7 +17,14 @@ const Sidebar = () => {
                 { icon: TrendingUp, label: 'Derivation', path: '/derivation' },
                 { icon: Wallet, label: 'Accounts', path: '/accounts' },
                 { icon: ReceiptText, label: 'Trades', path: '/trades' },
-                { icon: NotebookPen, label: 'Journal', path: '/journal' },
+                { 
+                    icon: NotebookPen, 
+                    label: 'Journal', 
+                    path: '/journal',
+                    subItems: [
+                        { label: 'Journal Trade', path: '/journal-trade' }
+                    ]
+                },
                 { icon: Activity, label: 'Signals', path: '/signals' },
                 { icon: List, label: 'Watchlists', path: '/manage-watchlists' },
                 { icon: Tag, label: 'Symbols', path: '/manage-symbols' },
@@ -37,6 +45,16 @@ const Sidebar = () => {
             ]
         }
     ];
+
+    const [expandedItems, setExpandedItems] = useState(['/journal']);
+
+    const toggleExpand = (path) => {
+        setExpandedItems(prev => 
+            prev.includes(path) 
+                ? prev.filter(p => p !== path) 
+                : [...prev, path]
+        );
+    };
 
     return (
         <div className="w-64 h-screen fixed left-0 top-0 bg-gray-800 border-r border-gray-700 p-4 flex flex-col overflow-y-auto">
@@ -82,21 +100,56 @@ const Sidebar = () => {
                             </div>
                         )}
                         <div className="space-y-1">
-                            {group.items.map((item) => (
-                                <Link
-                                    key={item.path}
-                                    to={item.path}
-                                    className={clsx(
-                                        'flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200',
-                                        location.pathname === item.path
-                                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                                            : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-                                    )}
-                                >
-                                    <item.icon size={18} />
-                                    <span className="font-medium text-sm">{item.label}</span>
-                                </Link>
-                            ))}
+                            {group.items.map((item) => {
+                                const isExpanded = expandedItems.includes(item.path);
+                                const hasSubItems = item.subItems && item.subItems.length > 0;
+                                
+                                return (
+                                    <div key={item.path}>
+                                        <div className="flex items-center group">
+                                            <Link
+                                                to={item.path}
+                                                className={clsx(
+                                                    'flex-1 flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200',
+                                                    location.pathname === item.path
+                                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                                                        : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                                                )}
+                                            >
+                                                <item.icon size={18} />
+                                                <span className="font-medium text-sm">{item.label}</span>
+                                            </Link>
+                                            {hasSubItems && (
+                                                <button 
+                                                    onClick={() => toggleExpand(item.path)}
+                                                    className="p-2 text-gray-500 hover:text-white transition-colors"
+                                                >
+                                                    {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                </button>
+                                            )}
+                                        </div>
+                                        
+                                        {hasSubItems && isExpanded && (
+                                            <div className="ml-9 mt-1 space-y-1 border-l border-gray-700 pl-4">
+                                                {item.subItems.map((subItem) => (
+                                                    <Link
+                                                        key={subItem.path}
+                                                        to={subItem.path}
+                                                        className={clsx(
+                                                            'block py-1.5 text-sm transition-colors',
+                                                            location.pathname === subItem.path
+                                                                ? 'text-blue-400 font-medium'
+                                                                : 'text-gray-500 hover:text-gray-300'
+                                                        )}
+                                                    >
+                                                        {subItem.label}
+                                                    </Link>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 ))}

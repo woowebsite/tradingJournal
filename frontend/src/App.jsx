@@ -14,6 +14,7 @@ import TradeStation from './pages/TradeStation';
 import Derivation from './pages/Derivation';
 import AccountDetail from './pages/AccountDetail';
 import Journal from './pages/Journal';
+import JournalTrade from './pages/JournalTrade';
 import { AccountProvider } from './context/AccountContext';
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
             <Route path="derivation" element={<Derivation />} />
             <Route path="trades" element={<Trades />} />
             <Route path="journal" element={<Journal />} />
+            <Route path="journal-trade" element={<JournalTrade />} />
             <Route path="settings" element={<Settings />} />
             <Route path="signals" element={<Signals />} />
             <Route path="manage-market" element={<ManageMarket />} />
