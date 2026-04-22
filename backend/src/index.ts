@@ -1,3 +1,4 @@
+import { Server } from 'socket.io';
 
 export default {
   /**
@@ -16,6 +17,24 @@ export default {
    * run jobs, or perform some special logic.
    */
   async bootstrap({ strapi }) {
+    // Initialize Socket.IO
+    const io = new Server(strapi.server.httpServer, {
+      cors: {
+        origin: '*', // Adjust this for production
+        methods: ['GET', 'POST'],
+      },
+    });
+
+    strapi.io = io; // Attach to strapi instance so we can use it in controllers
+
+    io.on('connection', (socket) => {
+      strapi.log.info(`New socket connection: ${socket.id}`);
+      
+      socket.on('disconnect', () => {
+        strapi.log.info(`Socket disconnected: ${socket.id}`);
+      });
+    });
+
     // Grant public access to trade, account, strategy endpoints
     const publicRole = await strapi.db.query('plugin::users-permissions.role').findOne({
       where: { type: 'public' },

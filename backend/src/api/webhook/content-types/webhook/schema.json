@@ -1,0 +1,34 @@
+{
+  "kind": "collectionType",
+  "collectionName": "webhooks",
+  "info": {
+    "singularName": "webhook",
+    "pluralName": "webhooks",
+    "displayName": "Webhook"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Title": {
+      "type": "string"
+    },
+    "App": {
+      "type": "string"
+    },
+    "Description": {
+      "type": "string"
+    },
+    "WebhookUrl": {
+      "type": "string"
+    },
+    "webhookStatus": {
+      "type": "enumeration",
+      "enum": [
+        "Enable",
+        "Disable"
+      ]
+    }
+  }
+}

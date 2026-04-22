@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp, ChevronRight, Webhook } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import clsx from 'clsx';
@@ -36,6 +36,7 @@ const Sidebar = () => {
                 { icon: LineChart, label: 'Market', path: '/manage-market' },
                 { icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies' },
                 { icon: Activity, label: 'Rules', path: '/manage-rules' },
+                { icon: Webhook, label: 'Webhooks', path: '/manage-webhooks' },
             ]
         },
         {

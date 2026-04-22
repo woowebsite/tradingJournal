@@ -6,6 +6,7 @@ import signalReducer from './features/signalSlice';
 import watchlistReducer from './features/watchlistSlice';
 import symbolReducer from './features/symbolSlice';
 import tradeReducer from './features/tradeSlice';
+import webhookReducer from './features/webhookSlice';
 
 export const store = configureStore({
     reducer: {
@@ -16,5 +17,6 @@ export const store = configureStore({
         signals: signalReducer,
         watchlists: watchlistReducer,
         trades: tradeReducer,
+        webhooks: webhookReducer,
     },
 });

@@ -832,6 +832,38 @@ export interface ApiWatchListWatchList extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiWebhookWebhook extends Struct.CollectionTypeSchema {
+  collectionName: 'webhooks';
+  info: {
+    displayName: 'Webhook';
+    pluralName: 'webhooks';
+    singularName: 'webhook';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    App: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    Description: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::webhook.webhook'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    Title: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    webhookStatus: Schema.Attribute.Enumeration<['Enable', 'Disable']>;
+    WebhookUrl: Schema.Attribute.String;
+  };
+}
+
 export interface PluginContentReleasesRelease
   extends Struct.CollectionTypeSchema {
   collectionName: 'strapi_releases';
@@ -1353,6 +1385,7 @@ declare module '@strapi/strapi' {
       'api::trade-detail.trade-detail': ApiTradeDetailTradeDetail;
       'api::trade.trade': ApiTradeTrade;
       'api::watch-list.watch-list': ApiWatchListWatchList;
+      'api::webhook.webhook': ApiWebhookWebhook;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;
       'plugin::i18n.locale': PluginI18NLocale;
