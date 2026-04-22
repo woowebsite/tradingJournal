@@ -98,7 +98,7 @@ const JournalTrade = () => {
         if (!note) return 'No notes';
         if (Array.isArray(note)) {
             // Strapi blocks format
-            return note.map(block => block.children?.map(child => child.text).join('')).join(' ');
+            return note.map(block => block.children?.map(child => child.text).join('')).join('\n');
         }
         return note;
     };
@@ -158,11 +158,21 @@ const JournalTrade = () => {
                                             <span className="text-xs">No preview available</span>
                                         </div>
                                     )}
-                                    <div className={clsx(
-                                        "absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
-                                        trade.type === 'Long' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
-                                    )}>
-                                        {trade.type}
+                                    <div className="absolute top-4 left-4 flex gap-2">
+                                        <div className={clsx(
+                                            "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+                                            trade.type === 'Long' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+                                        )}>
+                                            {trade.type}
+                                        </div>
+                                        <div className={clsx(
+                                            "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+                                            trade.trade_status === 'Open' ? 'bg-blue-500 text-white' :
+                                                trade.trade_status === 'Pending' ? 'bg-yellow-500 text-white' :
+                                                    'bg-gray-500 text-white'
+                                        )}>
+                                            {trade.trade_status}
+                                        </div>
                                     </div>
                                     <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-mono text-white border border-white/10">
                                         {new Date(trade.derivedDate).toLocaleDateString()}
@@ -195,8 +205,8 @@ const JournalTrade = () => {
                                         </div>
                                     </div>
 
-                                    <div className="bg-gray-900/50 rounded-lg p-4 mb-4 flex-1">
-                                        <p className="text-sm text-gray-300 line-clamp-3 italic leading-relaxed">
+                                    <div className="bg-gray-900/50 rounded-lg p-4 mb-4 flex-1 overflow-hidden">
+                                        <p className="text-sm text-gray-300 italic leading-relaxed whitespace-pre-wrap">
                                             {renderNote(trade.note)}
                                         </p>
                                     </div>

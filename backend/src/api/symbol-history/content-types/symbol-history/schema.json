@@ -12,22 +12,22 @@
   "pluginOptions": {},
   "attributes": {
     "open": {
-      "type": "decimal"
+      "type": "float"
     },
     "high": {
-      "type": "decimal"
+      "type": "float"
     },
     "low": {
-      "type": "decimal"
+      "type": "float"
     },
     "close": {
-      "type": "decimal"
+      "type": "float"
     },
     "date": {
       "type": "datetime"
     },
     "volume": {
-      "type": "decimal"
+      "type": "float"
     },
     "symbol": {
       "type": "relation",

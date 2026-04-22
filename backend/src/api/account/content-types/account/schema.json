@@ -20,7 +20,7 @@
       "type": "string"
     },
     "initial_balance": {
-      "type": "decimal",
+      "type": "float",
       "required": true
     },
     "currency": {

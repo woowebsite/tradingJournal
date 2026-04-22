@@ -163,7 +163,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+      <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
           <h3 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
             {initialData ? 'Edit Trade' : 'New Trade'}

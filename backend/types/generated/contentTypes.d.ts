@@ -447,7 +447,7 @@ export interface ApiAccountAccount extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     currency: Schema.Attribute.String & Schema.Attribute.DefaultTo<'USD'>;
     description: Schema.Attribute.String;
-    initial_balance: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    initial_balance: Schema.Attribute.Float & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -650,26 +650,26 @@ export interface ApiSymbolHistorySymbolHistory
     draftAndPublish: true;
   };
   attributes: {
-    close: Schema.Attribute.Decimal;
+    close: Schema.Attribute.Float;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     date: Schema.Attribute.DateTime;
-    high: Schema.Attribute.Decimal;
+    high: Schema.Attribute.Float;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::symbol-history.symbol-history'
     > &
       Schema.Attribute.Private;
-    low: Schema.Attribute.Decimal;
-    open: Schema.Attribute.Decimal;
+    low: Schema.Attribute.Float;
+    open: Schema.Attribute.Float;
     publishedAt: Schema.Attribute.DateTime;
     symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    volume: Schema.Attribute.Decimal;
+    volume: Schema.Attribute.Float;
   };
 }
 
@@ -737,7 +737,7 @@ export interface ApiTradeDetailTradeDetail extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     note: Schema.Attribute.Blocks;
-    price: Schema.Attribute.Decimal;
+    price: Schema.Attribute.Float;
     publishedAt: Schema.Attribute.DateTime;
     screenshot: Schema.Attribute.Media<
       'images' | 'files' | 'videos' | 'audios'
@@ -750,7 +750,7 @@ export interface ApiTradeDetailTradeDetail extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    volume: Schema.Attribute.Decimal;
+    volume: Schema.Attribute.Float;
   };
 }
 

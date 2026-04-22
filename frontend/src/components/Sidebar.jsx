@@ -16,13 +16,13 @@ const Sidebar = () => {
                 { icon: BarChart2, label: 'Trade Station', path: '/trade-station' },
                 { icon: TrendingUp, label: 'Derivation', path: '/derivation' },
                 { icon: Wallet, label: 'Accounts', path: '/accounts' },
-                { icon: ReceiptText, label: 'Trades', path: '/trades' },
-                { 
-                    icon: NotebookPen, 
-                    label: 'Journal', 
+                {
+                    icon: NotebookPen,
+                    label: 'Journal',
                     path: '/journal',
                     subItems: [
-                        { label: 'Journal Trade', path: '/journal-trade' }
+                        { label: 'Trades', path: '/trades' },
+                        { label: 'Journal', path: '/journal-trade' }
                     ]
                 },
                 { icon: Activity, label: 'Signals', path: '/signals' },
@@ -49,9 +49,9 @@ const Sidebar = () => {
     const [expandedItems, setExpandedItems] = useState(['/journal']);
 
     const toggleExpand = (path) => {
-        setExpandedItems(prev => 
-            prev.includes(path) 
-                ? prev.filter(p => p !== path) 
+        setExpandedItems(prev =>
+            prev.includes(path)
+                ? prev.filter(p => p !== path)
                 : [...prev, path]
         );
     };
@@ -103,7 +103,7 @@ const Sidebar = () => {
                             {group.items.map((item) => {
                                 const isExpanded = expandedItems.includes(item.path);
                                 const hasSubItems = item.subItems && item.subItems.length > 0;
-                                
+
                                 return (
                                     <div key={item.path}>
                                         <div className="flex items-center group">
@@ -120,7 +120,7 @@ const Sidebar = () => {
                                                 <span className="font-medium text-sm">{item.label}</span>
                                             </Link>
                                             {hasSubItems && (
-                                                <button 
+                                                <button
                                                     onClick={() => toggleExpand(item.path)}
                                                     className="p-2 text-gray-500 hover:text-white transition-colors"
                                                 >
@@ -128,7 +128,7 @@ const Sidebar = () => {
                                                 </button>
                                             )}
                                         </div>
-                                        
+
                                         {hasSubItems && isExpanded && (
                                             <div className="ml-9 mt-1 space-y-1 border-l border-gray-700 pl-4">
                                                 {item.subItems.map((subItem) => (
