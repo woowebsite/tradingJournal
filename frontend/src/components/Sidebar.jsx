@@ -36,7 +36,15 @@ const Sidebar = () => {
                 { icon: LineChart, label: 'Market', path: '/manage-market' },
                 { icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies' },
                 { icon: Activity, label: 'Rules', path: '/manage-rules' },
-                { icon: Webhook, label: 'Webhooks', path: '/manage-webhooks' },
+                {
+                    icon: Webhook,
+                    label: 'Webhooks',
+                    path: '/webhooks',
+                    subItems: [
+                        { label: 'Manage', path: '/manage-webhooks' },
+                        { label: 'Signals', path: '/webhook-signals' }
+                    ]
+                },
             ]
         },
         {

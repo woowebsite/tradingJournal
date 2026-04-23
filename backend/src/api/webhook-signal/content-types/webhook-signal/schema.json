@@ -1,0 +1,50 @@
+{
+  "kind": "collectionType",
+  "collectionName": "webhook_signals",
+  "info": {
+    "singularName": "webhook-signal",
+    "pluralName": "webhook-signals",
+    "displayName": "WebHookSignal"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "symbol": {
+      "type": "string"
+    },
+    "signal": {
+      "type": "string"
+    },
+    "tf": {
+      "type": "string"
+    },
+    "signalStatus": {
+      "type": "enumeration",
+      "enum": [
+        "Execute",
+        "Unread",
+        "Reject"
+      ],
+      "default": "Unread"
+    },
+    "createdDate": {
+      "type": "datetime"
+    },
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
+    "webhook": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::webhook.webhook",
+      "inversedBy": "webhook_signals"
+    }
+  }
+}

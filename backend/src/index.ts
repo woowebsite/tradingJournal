@@ -67,6 +67,10 @@ export default {
         'api::market.market.create',
         'api::market.market.update',
         'api::market.market.delete',
+        'api::webhook-signal.webhook-signal.find',
+        'api::webhook-signal.webhook-signal.findOne',
+        'api::webhook-signal.webhook-signal.update',
+        'api::webhook-signal.webhook-signal.delete',
       ];
 
       // Find permission IDs

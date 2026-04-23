@@ -11,6 +11,7 @@ import Signals from './pages/Signals';
 import ManageWatchlists from './pages/Watchlists';
 import ManageSymbols from './pages/ManageSymbols';
 import ManageWebhooks from './pages/ManageWebhooks';
+import ManageWebhookSignals from './pages/ManageWebhookSignals';
 import TradeStation from './pages/TradeStation';
 import Derivation from './pages/Derivation';
 import AccountDetail from './pages/AccountDetail';
@@ -39,7 +40,9 @@ function App() {
             <Route path="manage-strategies" element={<ManageStrategies />} />
             <Route path="manage-watchlists" element={<ManageWatchlists />} />
             <Route path="manage-symbols" element={<ManageSymbols />} />
+            <Route path="webhooks" element={<Navigate to="/manage-webhooks" replace />} />
             <Route path="manage-webhooks" element={<ManageWebhooks />} />
+            <Route path="webhook-signals" element={<ManageWebhookSignals />} />
             {/* Add more routes here */}
           </Route>
         </Routes>

@@ -832,6 +832,44 @@ export interface ApiWatchListWatchList extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiWebhookSignalWebhookSignal
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'webhook_signals';
+  info: {
+    displayName: 'WebHookSignal';
+    pluralName: 'webhook-signals';
+    singularName: 'webhook-signal';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    createdDate: Schema.Attribute.DateTime;
+    image: Schema.Attribute.Media<'images'>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::webhook-signal.webhook-signal'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    signal: Schema.Attribute.String;
+    signalStatus: Schema.Attribute.Enumeration<
+      ['Execute', 'Unread', 'Reject']
+    > &
+      Schema.Attribute.DefaultTo<'Unread'>;
+    symbol: Schema.Attribute.String;
+    tf: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    webhook: Schema.Attribute.Relation<'manyToOne', 'api::webhook.webhook'>;
+  };
+}
+
 export interface ApiWebhookWebhook extends Struct.CollectionTypeSchema {
   collectionName: 'webhooks';
   info: {
@@ -859,6 +897,10 @@ export interface ApiWebhookWebhook extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    webhook_signals: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::webhook-signal.webhook-signal'
+    >;
     webhookStatus: Schema.Attribute.Enumeration<['Enable', 'Disable']>;
     WebhookUrl: Schema.Attribute.String;
   };
@@ -1385,6 +1427,7 @@ declare module '@strapi/strapi' {
       'api::trade-detail.trade-detail': ApiTradeDetailTradeDetail;
       'api::trade.trade': ApiTradeTrade;
       'api::watch-list.watch-list': ApiWatchListWatchList;
+      'api::webhook-signal.webhook-signal': ApiWebhookSignalWebhookSignal;
       'api::webhook.webhook': ApiWebhookWebhook;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;

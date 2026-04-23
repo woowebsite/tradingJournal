@@ -39,6 +39,27 @@ Strapi gives you many possible deployment options for your project including [St
 ```
 yarn strapi deploy
 ```
+## Webhook
+```
+/api/webhook/receive/:token
+``` 
+Test
+
+```
+Invoke-RestMethod -Uri "http://localhost:1337/api/webhooks/receive/tradingview-crypto-multi-symbols" -Method Post -ContentType "application/json" -Body '{"symbol": "BTCUSDT", "action": "BUY", "price": "65000"}'
+```
+
+## NgRok
+Download https://ngrok.com/download, không dùng npx vì npx không sử dụng free account 
+Tạo token cho ngrok
+Truy cập vào https://dashboard.ngrok.com/get-started/setup/windows để lấy token
+```
+ngrok config add-authtoken token_here
+```
+Sau đó chạy lệnh sau để khởi tạo domain
+```
+npx ngrok http 1337
+```
 
 ## 📚 Learn more
 

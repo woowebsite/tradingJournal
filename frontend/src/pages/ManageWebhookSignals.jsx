@@ -1,0 +1,283 @@
+import React, { useEffect, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchWebhookSignals, updateWebhookSignalStatus } from '../features/webhookSignalSlice';
+import { Activity, Check, X, AlertCircle } from 'lucide-react';
+import { useWebSocket } from '../hooks/useWebSocket';
+
+const ManageWebhookSignals = () => {
+    const dispatch = useDispatch();
+    const { items: signals, loading, error } = useSelector((state) => state.webhookSignals);
+
+    const [executingSignal, setExecutingSignal] = useState(null);
+    const [executeForm, setExecuteForm] = useState({
+        price: '',
+        volume: ''
+    });
+
+    useEffect(() => {
+        dispatch(fetchWebhookSignals());
+    }, [dispatch]);
+
+    // Handle incoming realtime signals to refresh the list automatically
+    useWebSocket({
+        'tradingview_signal': () => {
+            dispatch(fetchWebhookSignals());
+        }
+    });
+
+    const handleOpenExecuteModal = (signal) => {
+        setExecutingSignal(signal);
+        setExecuteForm({ price: '', volume: '' });
+    };
+
+    const handleCloseExecuteModal = () => {
+        setExecutingSignal(null);
+        setExecuteForm({ price: '', volume: '' });
+    };
+
+    const handleConfirmExecute = (e) => {
+        e.preventDefault();
+        if (!executingSignal) return;
+        
+        const id = executingSignal.documentId || executingSignal.id;
+        // Proceed to update status to Execute
+        dispatch(updateWebhookSignalStatus({ id, status: 'Execute' }));
+        
+        // (Optional future step: actually call trade execution API here)
+
+        handleCloseExecuteModal();
+    };
+
+    const handleUpdateStatus = (signal, status) => {
+        const id = signal.documentId || signal.id;
+        dispatch(updateWebhookSignalStatus({ id, status }));
+    };
+
+    // Calculate USD value dynamically
+    const usdValue = (parseFloat(executeForm.price || 0) * parseFloat(executeForm.volume || 0)).toFixed(2);
+
+    return (
+        <div className="p-6">
+            <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
+                        <Activity className="w-6 h-6 text-blue-400" />
+                        Webhook Signals
+                    </h1>
+                    <p className="text-gray-400 text-sm mt-1">Manage and execute incoming signals</p>
+                </div>
+            </div>
+
+            {error && (
+                <div className="mb-6 p-4 bg-red-900/50 border border-red-500 rounded-lg text-red-200">
+                    <p>{typeof error === 'string' ? error : 'An error occurred'}</p>
+                </div>
+            )}
+
+            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-900/50 text-sm uppercase text-gray-400">
+                            <tr>
+                                <th className="p-4">Date</th>
+                                <th className="p-4">Symbol</th>
+                                <th className="p-4">Signal</th>
+                                <th className="p-4">TF</th>
+                                <th className="p-4">Webhook</th>
+                                <th className="p-4">Status</th>
+                                <th className="p-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700/50">
+                            {loading && signals.length === 0 ? (
+                                <tr>
+                                    <td colSpan="7" className="p-8 text-center text-gray-400">Loading signals...</td>
+                                </tr>
+                            ) : signals.length === 0 ? (
+                                <tr>
+                                    <td colSpan="7" className="p-8 text-center text-gray-500">No signals found.</td>
+                                </tr>
+                            ) : (
+                                signals.map(signal => {
+                                    const isUnread = signal.signalStatus === 'Unread';
+                                    const isReject = signal.signalStatus === 'Reject';
+                                    const isExecute = signal.signalStatus === 'Execute';
+
+                                    return (
+                                        <tr 
+                                            key={signal.documentId || signal.id} 
+                                            className={`transition-colors ${
+                                                isUnread ? 'bg-blue-900/20 hover:bg-blue-900/30' : 
+                                                isReject ? 'opacity-50 grayscale bg-gray-900/30' : 
+                                                'hover:bg-gray-700/30'
+                                            }`}
+                                        >
+                                            <td className="p-4 text-sm text-gray-400">
+                                                {new Date(signal.createdDate || signal.createdAt).toLocaleString()}
+                                            </td>
+                                            <td className={`p-4 font-bold ${isUnread ? 'text-blue-300' : 'text-gray-200'}`}>
+                                                {signal.symbol}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                    ['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'bg-green-500/20 text-green-400' :
+                                                    ['SHORT', 'SELL'].includes(signal.signal?.toUpperCase()) ? 'bg-red-500/20 text-red-400' :
+                                                    'bg-gray-700 text-gray-300'
+                                                }`}>
+                                                    {signal.signal}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-sm text-gray-400">{signal.tf}</td>
+                                            <td className="p-4 text-sm text-gray-400">
+                                                {signal.webhook?.Title || '-'}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                                                    isUnread ? 'bg-blue-500/20 text-blue-400' :
+                                                    isExecute ? 'bg-green-500/20 text-green-400' :
+                                                    'bg-gray-700 text-gray-400'
+                                                }`}>
+                                                    {signal.signalStatus}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <button
+                                                        onClick={() => handleOpenExecuteModal(signal)}
+                                                        disabled={isExecute}
+                                                        className={`p-1.5 rounded-lg transition-colors ${
+                                                            isExecute ? 'text-green-500 opacity-50 cursor-not-allowed' :
+                                                            'text-gray-400 hover:text-green-400 hover:bg-green-400/10'
+                                                        }`}
+                                                        title="Execute"
+                                                    >
+                                                        <Check className="w-5 h-5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleUpdateStatus(signal, 'Reject')}
+                                                        disabled={isReject}
+                                                        className={`p-1.5 rounded-lg transition-colors ${
+                                                            isReject ? 'text-red-500 opacity-50 cursor-not-allowed' :
+                                                            'text-gray-400 hover:text-red-400 hover:bg-red-400/10'
+                                                        }`}
+                                                        title="Reject"
+                                                    >
+                                                        <X className="w-5 h-5" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Execute Modal */}
+            {executingSignal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-md overflow-hidden shadow-2xl">
+                        <div className="flex items-center justify-between p-6 border-b border-gray-700">
+                            <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
+                                <Activity className="w-5 h-5 text-blue-400" />
+                                Execute Signal
+                            </h2>
+                            <button
+                                onClick={handleCloseExecuteModal}
+                                className="text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleConfirmExecute} className="p-6 space-y-4">
+                            <div className="p-3 bg-gray-900 rounded-lg border border-gray-700 flex justify-between items-center">
+                                <span className="text-sm text-gray-400">Signal:</span>
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                    ['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase()) ? 'bg-green-500/20 text-green-400' :
+                                    ['SHORT', 'SELL'].includes(executingSignal.signal?.toUpperCase()) ? 'bg-red-500/20 text-red-400' :
+                                    'bg-gray-700 text-gray-300'
+                                }`}>
+                                    {executingSignal.signal}
+                                </span>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">Symbol</label>
+                                <input
+                                    type="text"
+                                    readOnly
+                                    value={executingSignal.symbol}
+                                    className="w-full bg-gray-900/50 border border-gray-700 text-gray-400 rounded-lg px-4 py-2 cursor-not-allowed outline-none"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-1">Price</label>
+                                    <input
+                                        type="number"
+                                        step="any"
+                                        required
+                                        value={executeForm.price}
+                                        onChange={(e) => setExecuteForm(prev => ({ ...prev, price: e.target.value }))}
+                                        className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="0.00"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-1">Volume</label>
+                                    <input
+                                        type="number"
+                                        step="any"
+                                        required
+                                        value={executeForm.volume}
+                                        onChange={(e) => setExecuteForm(prev => ({ ...prev, volume: e.target.value }))}
+                                        className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="0.00"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">USD Value</label>
+                                <div className="w-full bg-gray-900 border border-gray-700 text-green-400 font-mono rounded-lg px-4 py-2 flex items-center justify-between">
+                                    <span>$</span>
+                                    <span>{isNaN(usdValue) ? '0.00' : usdValue}</span>
+                                </div>
+                            </div>
+
+                            <div className="pt-4 flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleCloseExecuteModal}
+                                    className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className={`px-6 py-2 text-white font-medium rounded-lg transition-colors shadow-lg ${
+                                        ['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase()) 
+                                        ? 'bg-green-600 hover:bg-green-700 shadow-green-600/20' 
+                                        : ['SHORT', 'SELL'].includes(executingSignal.signal?.toUpperCase()) 
+                                        ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20' 
+                                        : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                                    }`}
+                                >
+                                    {['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase()) ? 'Long' :
+                                     ['SHORT', 'SELL'].includes(executingSignal.signal?.toUpperCase()) ? 'Short' :
+                                     'Execute'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default ManageWebhookSignals;

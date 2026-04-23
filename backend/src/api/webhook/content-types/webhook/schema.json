@@ -29,6 +29,12 @@
         "Enable",
         "Disable"
       ]
+    },
+    "webhook_signals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::webhook-signal.webhook-signal",
+      "mappedBy": "webhook"
     }
   }
 }

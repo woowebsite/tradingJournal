@@ -139,7 +139,6 @@ const ManageWebhooks = () => {
                                 <tr>
                                     <th className="p-4 text-sm font-semibold text-gray-400">Title</th>
                                     <th className="p-4 text-sm font-semibold text-gray-400">App</th>
-                                    <th className="p-4 text-sm font-semibold text-gray-400">Description</th>
                                     <th className="p-4 text-sm font-semibold text-gray-400">URL</th>
                                     <th className="p-4 text-sm font-semibold text-gray-400">Status</th>
                                     <th className="p-4 text-sm font-semibold text-gray-400 text-right">Actions</th>
@@ -163,14 +162,13 @@ const ManageWebhooks = () => {
                                         <tr key={webhook.documentId || webhook.id} className="hover:bg-gray-700/20 transition-colors">
                                             <td className="p-4 text-sm text-gray-200 font-medium">
                                                 {webhook.Title}
+                                                <p className="text-xs text-gray-400">{webhook.Description}
+                                                </p>
                                             </td>
                                             <td className="p-4 text-sm text-gray-400">
                                                 <span className="px-2 py-1 bg-gray-700 rounded text-xs font-medium">
                                                     {webhook.App}
                                                 </span>
-                                            </td>
-                                            <td className="p-4 text-sm text-gray-400 max-w-xs truncate" title={webhook.Description}>
-                                                {webhook.Description}
                                             </td>
                                             <td className="p-4 text-sm text-gray-400 max-w-xs truncate" title={webhook.WebhookUrl}>
                                                 {webhook.WebhookUrl}
