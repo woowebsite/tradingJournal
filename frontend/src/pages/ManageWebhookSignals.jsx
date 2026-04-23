@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchWebhookSignals, updateWebhookSignalStatus } from '../features/webhookSignalSlice';
+import { fetchWebhookSignals, updateWebhookSignalStatus, fetchWebhookSignalById } from '../features/webhookSignalSlice';
 import { Activity, Check, X, AlertCircle, Image, ZoomIn } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useAccount } from '../context/AccountContext';
+import { Filter } from 'lucide-react';
 
 
 const ManageWebhookSignals = () => {
@@ -14,23 +16,37 @@ const ManageWebhookSignals = () => {
         price: '',
         volume: ''
     });
+    const [fetchingSignalId, setFetchingSignalId] = useState(null);
     const [zoomedImage, setZoomedImage] = useState(null);
+    const { accountSymbols, selectedAccount } = useAccount();
+    const [selectedSymbolFilter, setSelectedSymbolFilter] = useState('');
 
 
     useEffect(() => {
-        dispatch(fetchWebhookSignals());
-    }, [dispatch]);
+        dispatch(fetchWebhookSignals(selectedSymbolFilter));
+    }, [dispatch, selectedSymbolFilter]);
 
     // Handle incoming realtime signals to refresh the list automatically
     useWebSocket({
         'tradingview_signal': () => {
-            dispatch(fetchWebhookSignals());
+            dispatch(fetchWebhookSignals(selectedSymbolFilter));
         }
     });
 
-    const handleOpenExecuteModal = (signal) => {
-        setExecutingSignal(signal);
-        setExecuteForm({ price: '', volume: '' });
+    const handleOpenExecuteModal = async (signal) => {
+        const id = signal.documentId || signal.id;
+        setFetchingSignalId(id);
+        try {
+            const result = await dispatch(fetchWebhookSignalById(id)).unwrap();
+            setExecutingSignal(result);
+            setExecuteForm({ price: '', volume: '' });
+        } catch (error) {
+            console.error("Failed to fetch signal details:", error);
+            // Fallback to existing signal if fetch fails
+            setExecutingSignal(signal);
+        } finally {
+            setFetchingSignalId(null);
+        }
     };
 
     const handleCloseExecuteModal = () => {
@@ -69,6 +85,25 @@ const ManageWebhookSignals = () => {
                     </h1>
                     <p className="text-gray-400 text-sm mt-1">Manage and execute incoming signals</p>
                 </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5">
+                        <Filter className="w-4 h-4 text-gray-400" />
+                        <span className="text-sm text-gray-400 font-medium">Filter:</span>
+                        <select
+                            value={selectedSymbolFilter}
+                            onChange={(e) => setSelectedSymbolFilter(e.target.value)}
+                            className="bg-transparent border-none text-sm text-gray-200 focus:ring-0 cursor-pointer outline-none min-w-[150px]"
+                        >
+                            <option value="" className="bg-gray-800">All Symbols</option>
+                            {accountSymbols.map(sym => (
+                                <option key={sym.id} value={sym.id} className="bg-gray-800">
+                                    {sym.Name || sym.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
             </div>
 
             {error && (
@@ -98,7 +133,9 @@ const ManageWebhookSignals = () => {
                                 </tr>
                             ) : signals.length === 0 ? (
                                 <tr>
-                                    <td colSpan="7" className="p-8 text-center text-gray-500">No signals found.</td>
+                                    <td colSpan="7" className="p-8 text-center text-gray-500">
+                                        {selectedSymbolFilter ? 'No signals found for this symbol.' : 'No signals found.'}
+                                    </td>
                                 </tr>
                             ) : (
                                 signals.map(signal => {
@@ -118,7 +155,14 @@ const ManageWebhookSignals = () => {
                                                 {new Date(signal.createdDate || signal.createdAt).toLocaleString()}
                                             </td>
                                             <td className={`p-4 font-bold ${isUnread ? 'text-blue-300' : 'text-gray-200'}`}>
-                                                {signal.symbol}
+                                                <div className="flex flex-col">
+                                                    <span>{signal.symbol}</span>
+                                                    {signal.linked_symbol && (
+                                                        <span className="text-[10px] text-gray-500 font-normal uppercase">
+                                                            Linked: {signal.linked_symbol.Name || signal.linked_symbol.name}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="p-4">
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'bg-green-500/20 text-green-400' :
@@ -150,7 +194,7 @@ const ManageWebhookSignals = () => {
                                                             }`}
                                                         title="Execute"
                                                     >
-                                                        <Check className="w-5 h-5" />
+                                                        <Check className={`w-5 h-5 ${fetchingSignalId === (signal.documentId || signal.id) ? 'animate-pulse' : ''}`} />
                                                     </button>
                                                     <button
                                                         onClick={() => handleUpdateStatus(signal, 'Reject')}

@@ -156,6 +156,45 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
     const payload = ctx.request.body || {};
     const signalValue = payload.signal || payload.action || 'UNKNOWN';
 
+    // 1. Extract ticker from "Market:Ticker" (e.g., BINANCE:BTCUSDT)
+    const rawSymbol = payload.symbol || '';
+    const symbolParts = rawSymbol.split(':');
+    const ticker = symbolParts.length > 1 ? symbolParts[1] : symbolParts[0];
+    const marketName = symbolParts.length > 1 ? symbolParts[0] : null;
+
+    let linkedSymbolId = null;
+    if (ticker) {
+      // Find symbol by Name
+      let symbolMatch = await strapi.db.query('api::symbol.symbol').findOne({
+        where: { Name: ticker }
+      });
+
+      if (!symbolMatch) {
+        strapi.log.info(`[webhook] Symbol ${ticker} not found. Creating new symbol...`);
+
+        let marketId = null;
+        if (marketName) {
+          const marketMatch = await strapi.db.query('api::market.market').findOne({
+            where: { Name: marketName }
+          });
+          if (marketMatch) {
+            marketId = marketMatch.documentId || marketMatch.id;
+          }
+        }
+
+        // Create new symbol
+        const newSymbol = await strapi.documents('api::symbol.symbol').create({
+          data: {
+            Name: ticker,
+            market: marketId
+          } as any,
+          status: 'published'
+        });
+        symbolMatch = newSymbol;
+      }
+      linkedSymbolId = symbolMatch.documentId || symbolMatch.id;
+    }
+
     // Create a new WebHookSignal record
     const newSignal = await strapi.documents('api::webhook-signal.webhook-signal').create({
       data: {
@@ -164,7 +203,8 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
         tf: payload.tf,
         signalStatus: 'Unread',
         createdDate: new Date().toISOString(),
-        webhook: match.documentId
+        webhook: match.documentId,
+        linked_symbol: linkedSymbolId
       },
       status: 'published'
     });
@@ -199,12 +239,25 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
           const fileId = await uploadChartImageToStrapi(imageBuffer, filename);
 
           if (fileId) {
-            await strapi.documents('api::webhook-signal.webhook-signal').update({
+            const updatedSignal = await strapi.documents('api::webhook-signal.webhook-signal').update({
               documentId: newSignal.documentId,
               data: { image: fileId } as any,
               status: 'published',
             });
             strapi.log.info(`[webhook-screenshot] ${sourceLabel} screenshot attached to signal ${newSignal.documentId}`);
+
+            // Emit again so the frontend knows the image is ready
+            if ((strapi as any).io) {
+              (strapi as any).io.emit('tradingview_signal', {
+                webhookId: match.id,
+                title: match.Title,
+                app: match.App,
+                payload: payload,
+                signalRecord: updatedSignal,
+                timestamp: new Date().toISOString(),
+                isUpdate: true
+              });
+            }
           }
         }
       } catch (err: any) {

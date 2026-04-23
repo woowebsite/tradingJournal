@@ -849,6 +849,7 @@ export interface ApiWebhookSignalWebhookSignal
       Schema.Attribute.Private;
     createdDate: Schema.Attribute.DateTime;
     image: Schema.Attribute.Media<'images'>;
+    linked_symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

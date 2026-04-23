@@ -3,9 +3,31 @@ import api from '../services/api';
 
 export const fetchWebhookSignals = createAsyncThunk(
     'webhookSignals/fetchWebhookSignals',
-    async (_, { rejectWithValue }) => {
+    async (symbolId, { rejectWithValue }) => {
         try {
-            const res = await api.get('/webhook-signals?populate=*&sort=createdAt:desc');
+            let url = '/webhook-signals?populate=*&sort=createdAt:desc';
+            if (symbolId) {
+                const isDocumentId = typeof symbolId === 'string';
+
+                if (isDocumentId) {
+                    url += `&filters[$or][0][linked_symbol][documentId][$eq]=${symbolId}`;
+                } else {
+                    url += `&filters[$or][0][linked_symbol][id][$eq]=${symbolId}`;
+                }
+            }
+            const res = await api.get(url);
+            return res.data.data;
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
+export const fetchWebhookSignalById = createAsyncThunk(
+    'webhookSignals/fetchById',
+    async (id, { rejectWithValue }) => {
+        try {
+            const res = await api.get(`/webhook-signals/${id}?populate=linked_symbol&populate=webhook&populate=image`);
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
@@ -50,6 +72,14 @@ const webhookSignalSlice = createSlice({
                 state.error = action.payload;
             })
             .addCase(updateWebhookSignalStatus.fulfilled, (state, action) => {
+                const updatedItem = action.payload;
+                state.items = state.items.map(item =>
+                    (item.id === updatedItem.id || item.documentId === updatedItem.documentId)
+                        ? { ...item, ...updatedItem }
+                        : item
+                );
+            })
+            .addCase(fetchWebhookSignalById.fulfilled, (state, action) => {
                 const updatedItem = action.payload;
                 state.items = state.items.map(item =>
                     (item.id === updatedItem.id || item.documentId === updatedItem.documentId)

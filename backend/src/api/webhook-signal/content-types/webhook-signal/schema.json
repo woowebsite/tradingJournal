@@ -45,6 +45,11 @@
       "relation": "manyToOne",
       "target": "api::webhook.webhook",
       "inversedBy": "webhook_signals"
+    },
+    "linked_symbol": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol.symbol"
     }
   }
 }
