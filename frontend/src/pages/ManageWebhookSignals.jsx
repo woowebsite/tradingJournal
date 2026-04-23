@@ -25,6 +25,23 @@ const ManageWebhookSignals = () => {
         dispatch(fetchWebhookSignals(selectedSymbolFilter));
     }, [dispatch, selectedSymbolFilter]);
 
+    // Handle Escape key to close modal
+    useEffect(() => {
+        const handleEsc = (event) => {
+            if (event.key === 'Escape') {
+                handleCloseExecuteModal();
+            }
+        };
+
+        if (executingSignal) {
+            window.addEventListener('keydown', handleEsc);
+        }
+
+        return () => {
+            window.removeEventListener('keydown', handleEsc);
+        };
+    }, [executingSignal]);
+
     // Handle incoming realtime signals to refresh the list automatically
     useWebSocket({
         'tradingview_signal': () => {

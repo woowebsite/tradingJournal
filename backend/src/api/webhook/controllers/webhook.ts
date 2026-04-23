@@ -179,7 +179,7 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
             where: { Name: marketName }
           });
           if (marketMatch) {
-            marketId = marketMatch.documentId || marketMatch.id;
+            marketId = marketMatch.id || marketMatch.documentId;
           }
         }
 
