@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchWebhookSignals, updateWebhookSignalStatus, fetchWebhookSignalById } from '../features/webhookSignalSlice';
-import { Activity, Check, X, AlertCircle, Image, ZoomIn } from 'lucide-react';
+import { Activity, Check, X, AlertCircle, Image, ExternalLink } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAccount } from '../context/AccountContext';
 import { Filter } from 'lucide-react';
@@ -17,7 +17,6 @@ const ManageWebhookSignals = () => {
         volume: ''
     });
     const [fetchingSignalId, setFetchingSignalId] = useState(null);
-    const [zoomedImage, setZoomedImage] = useState(null);
     const { accountSymbols, selectedAccount } = useAccount();
     const [selectedSymbolFilter, setSelectedSymbolFilter] = useState('');
 
@@ -318,8 +317,8 @@ const ManageWebhookSignals = () => {
                                 {executingSignal.image?.url ? (
                                     <div
                                         className="relative flex-1 rounded-lg overflow-hidden border border-gray-700 cursor-pointer group bg-gray-900"
-                                        onClick={() => setZoomedImage(executingSignal.image.url)}
-                                        title="Click to zoom"
+                                        onClick={() => window.open(executingSignal.image.url, '_blank')}
+                                        title="Click to open in new tab"
                                     >
                                         <img
                                             src={executingSignal.image.url}
@@ -328,7 +327,7 @@ const ManageWebhookSignals = () => {
                                         />
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-all">
                                             <div className="opacity-0 group-hover:opacity-100 bg-black/60 rounded-full p-2 transition-opacity">
-                                                <ZoomIn className="w-6 h-6 text-white" />
+                                                <ExternalLink className="w-6 h-6 text-white" />
                                             </div>
                                         </div>
                                     </div>

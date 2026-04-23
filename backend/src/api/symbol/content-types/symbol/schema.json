@@ -53,6 +53,9 @@
     },
     "sector": {
       "type": "string"
+    },
+    "chart_url": {
+      "type": "string"
     }
   }
 }

@@ -684,6 +684,7 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    chart_url: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

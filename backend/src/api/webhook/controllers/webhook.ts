@@ -163,9 +163,10 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
     const marketName = symbolParts.length > 1 ? symbolParts[0] : null;
 
     let linkedSymbolId = null;
+    let symbolMatch = null;
     if (ticker) {
       // Find symbol by Name
-      let symbolMatch = await strapi.db.query('api::symbol.symbol').findOne({
+      symbolMatch = await strapi.db.query('api::symbol.symbol').findOne({
         where: { Name: ticker }
       });
 
@@ -215,9 +216,9 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
         let imageBuffer: Buffer | null = null;
         let sourceLabel = '';
 
-        // 1. Try to get TradingView screenshot link from payload
-        // Supporting fields: screenshot, chart_url, imageUrl, or image
-        const screenshotUrl = payload.screenshot || payload.chart_url || payload.imageUrl || payload.image;
+        // 1. Try to get TradingView screenshot link
+        // Priority: Symbol table chart_url > payload fields
+        const screenshotUrl = symbolMatch?.chart_url || payload.screenshot || payload.chart_url || payload.imageUrl || payload.image;
         const tvDirectUrl = getTradingViewDirectImageUrl(screenshotUrl);
 
         if (tvDirectUrl) {
