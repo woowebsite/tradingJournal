@@ -8,5 +8,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/webhooks/screenshot',
+      handler: 'webhook.captureScreenshot',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

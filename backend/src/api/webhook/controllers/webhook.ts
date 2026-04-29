@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { factories } from '@strapi/strapi';
 import axios from 'axios';
 import * as fs from 'fs';
@@ -42,6 +43,14 @@ function getTradingViewDirectImageUrl(url: string): string | null {
     return `https://s3.tradingview.com/snapshots/${firstChar}/${id}.png`;
   }
   return null;
+}
+
+/**
+ * Build a direct S3 TradingView image URL from a snapshotId.
+ */
+function buildTradingViewDirectImageUrl(snapshotId: string): string {
+  const firstChar = snapshotId.charAt(0).toLowerCase();
+  return `https://s3.tradingview.com/snapshots/${firstChar}/${snapshotId}.png`;
 }
 
 /**
@@ -138,6 +147,173 @@ async function uploadChartImageToStrapi(imageBuffer: Buffer, filename: string): 
   }
 }
 
+/**
+ * Parse Netscape-format cookie file into puppeteer cookie objects.
+ */
+function parseCookieFile(filepath: string): any[] {
+  try {
+    const lines = fs.readFileSync(filepath, 'utf8').split('\n');
+    const cookies: any[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const parts = trimmed.split('\t');
+      if (parts.length < 7) continue;
+      const [domain, _, path, secure, expiry, name, value] = parts;
+      cookies.push({
+        domain,
+        name,
+        value,
+        path,
+        secure: secure === 'TRUE',
+        httpOnly: false,
+        expires: expiry !== '0' ? Number(expiry) : -1,
+      });
+    }
+    return cookies;
+  } catch (_) {
+    return [];
+  }
+}
+
+// Cached browser instance to avoid launch/connect overhead on every call
+let cachedBrowser: any = null;
+let cachedBrowserAt = 0;
+const BROWSER_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getOrLaunchBrowser(strapi: any): Promise<any> {
+  const now = Date.now();
+  if (cachedBrowser && now - cachedBrowserAt < BROWSER_TTL_MS) {
+    try {
+      // Verify browser is still connected
+      const pages = await cachedBrowser.pages();
+      if (pages.length >= 0) return cachedBrowser;
+    } catch (_) {
+      cachedBrowser = null;
+    }
+  }
+
+  if (cachedBrowser) {
+    try { await cachedBrowser.disconnect(); } catch (_) { /* ignore */ }
+    cachedBrowser = null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const puppeteer = require('puppeteer-core') as any;
+
+  const CHROME_PATHS = [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+  ];
+
+  let chromePath: string | null = null;
+  for (const p of CHROME_PATHS) {
+    try { fs.statSync(p); chromePath = p; break; } catch (_) { /* next */ }
+  }
+
+  if (!chromePath) {
+    strapi.log.warn('[webhook-screenshot] No Chrome found on server.');
+    return null;
+  }
+
+  // Try connecting to an existing debug port first
+  try {
+    cachedBrowser = await puppeteer.connect({ browserURL: 'http://localhost:9222' } as any);
+  } catch (_) {
+    cachedBrowser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--force-dark-mode',
+        '--window-size=1280,720',
+        '--disable-extensions',
+        '--disable-gpu',
+        '--disable-setuid-sandbox',
+      ],
+    } as any);
+  }
+
+  cachedBrowserAt = Date.now();
+  strapi.log.info('[webhook-screenshot] Browser instance ready');
+  return cachedBrowser;
+}
+
+/**
+ * Capture TradingView chart screenshot via puppeteer-core.
+ * 1. Load cookies from tradingview-cookie.txt
+ * 2. Navigate to TradingView chart
+ * 3. Intercept POST /snapshot/ response (triggered by Alt+S)
+ * 4. Extract snapshot URL and download image
+ */
+async function captureTradingViewScreenshot(ticker: string): Promise<string | null> {
+  const browser = await getOrLaunchBrowser(strapi);
+  if (!browser) return null;
+
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+
+  // Load cookies from cookie file
+  const COOKIE_FILE = process.env.TRADINGVIEW_COOKIE_PATH
+    || path.resolve(strapi.dirs.app.root, 'tradingview-cookie.txt');
+
+  const cookies = parseCookieFile(COOKIE_FILE);
+  if (cookies.length === 0) {
+    strapi.log.warn('[webhook-screenshot] No cookies loaded from tradingview-cookie.txt');
+    await page.close();
+    return null;
+  }
+  await page.setCookie(...cookies);
+  strapi.log.info(`[webhook-screenshot] Loaded ${cookies.length} cookies`);
+
+  const chartUrl = `https://in.tradingview.com/chart/lB15Tuc0/?symbol=${encodeURIComponent(ticker)}`;
+  strapi.log.info(`[webhook-screenshot] Navigating to ${chartUrl}`);
+
+  await page.goto(chartUrl, { waitUntil: 'load', timeout: 20000 });
+  await new Promise(r => setTimeout(r, 2500));
+
+  // Intercept POST /snapshot/ response — TradingView makes this request when Alt+S is pressed
+  let snapshotId: string | null = null;
+
+  page.on('response', async (res: any) => {
+    if (snapshotId) return;
+    if (res.url().includes('/snapshot/') && res.status() === 200) {
+      try {
+        const body: string = await res.text();
+        const id = body.trim();
+        // Snapshot ID is typically 8 alphanumeric characters
+        if (id && /^[a-zA-Z0-9]{6,12}$/.test(id)) {
+          snapshotId = id;
+          strapi.log.info(`[webhook-screenshot] Snapshot ID captured: ${id}`);
+        }
+      } catch (_) { /* ignore */ }
+    }
+  });
+
+  strapi.log.info('[webhook-screenshot] Pressing Alt+S...');
+  await page.keyboard.down('Alt');
+  await page.keyboard.press('s');
+  await page.keyboard.up('Alt');
+
+  // Wait up to 8s for the snapshot response (poll every 300ms)
+  const start = Date.now();
+  while (!snapshotId && Date.now() - start < 8000) {
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  await page.close();
+
+  if (!snapshotId) {
+    strapi.log.warn('[webhook-screenshot] No snapshot URL captured after Alt+S');
+    return null;
+  }
+
+  return snapshotId
+}
+
 export default factories.createCoreController('api::webhook.webhook', ({ strapi }) => ({
   async receive(ctx) {
     const { token } = ctx.params;
@@ -216,18 +392,29 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
         let imageBuffer: Buffer | null = null;
         let sourceLabel = '';
 
-        // 1. Try to get TradingView screenshot link
-        // Priority: Symbol table chart_url > payload fields
-        const screenshotUrl = symbolMatch?.chart_url || payload.screenshot || payload.chart_url || payload.imageUrl || payload.image;
-        const tvDirectUrl = getTradingViewDirectImageUrl(screenshotUrl);
+        // 1. Try to get TradingView screenshot via Alt+S (captures snapshotId)
+        // Fallback to symbol table chart_url if Alt+S returns no snapshotId
+        const snapshotId = await captureTradingViewScreenshot(payload.symbol);
 
-        if (tvDirectUrl) {
-          strapi.log.info(`[webhook-screenshot] Attempting to fetch TV screenshot from ${tvDirectUrl}`);
-          imageBuffer = await fetchImageBufferFromUrl(tvDirectUrl);
+        if (snapshotId) {
+          const directUrl = buildTradingViewDirectImageUrl(snapshotId);
+          strapi.log.info(`[webhook-screenshot] Downloading image from ${directUrl} (snapshotId=${snapshotId})`);
+          imageBuffer = await fetchImageBufferFromUrl(directUrl);
           if (imageBuffer) sourceLabel = 'TradingView';
         }
 
-        // 2. Fallback to chart-img if no image and symbol exists
+        // 2. Fallback to chart_url from symbol table or payload fields
+        if (!imageBuffer) {
+          const screenshotUrl = symbolMatch?.chart_url || payload.screenshot || payload.chart_url || payload.imageUrl || payload.image;
+          const tvDirectUrl = getTradingViewDirectImageUrl(screenshotUrl);
+          if (tvDirectUrl) {
+            strapi.log.info(`[webhook-screenshot] Attempting to fetch TV screenshot from ${tvDirectUrl}`);
+            imageBuffer = await fetchImageBufferFromUrl(tvDirectUrl);
+            if (imageBuffer) sourceLabel = 'TradingView';
+          }
+        }
+
+        // 3. Fallback to chart-img if still no image
         if (!imageBuffer && payload.symbol) {
           strapi.log.info(`[webhook-screenshot] Falling back to chart-img generation for ${payload.symbol}`);
           imageBuffer = await fetchChartImgScreenshot(payload.symbol, payload.tf || '1D');
@@ -278,5 +465,46 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
     }
 
     ctx.send({ status: 'success', message: 'Signal received' });
+  },
+
+  async captureScreenshot(ctx) {
+    const { symbol } = ctx.request.body || {};
+
+    if (!symbol) {
+      return ctx.badRequest('symbol is required');
+    }
+
+    let imageBuffer: Buffer | null = null;
+
+    // Only TradingView via Alt+S → capture snapshotId → download image
+    const snapshotId = await captureTradingViewScreenshot(symbol);
+
+    if (!snapshotId) {
+      return ctx.internalServerError('Failed to capture TradingView screenshot. Check logs for details.');
+    }
+
+    const directUrl = buildTradingViewDirectImageUrl(snapshotId);
+    imageBuffer = await fetchImageBufferFromUrl(directUrl);
+
+    if (!imageBuffer) {
+      return ctx.internalServerError('Failed to download TradingView screenshot from S3. Check logs for details.');
+    }
+
+    const safeSymbol = String(symbol).replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `chart_${safeSymbol}_${Date.now()}.png`;
+    const fileId = await uploadChartImageToStrapi(imageBuffer, filename);
+
+    if (!fileId) {
+      return ctx.internalServerError('Failed to upload screenshot to media library');
+    }
+
+    strapi.log.info(`[webhook-screenshot] Screenshot saved as fileId=${fileId}, snapshotId=${snapshotId}`);
+
+    ctx.send({
+      status: 'success',
+      imageFileId: fileId,
+      snapshotId,
+      imageUrl: buildTradingViewDirectImageUrl(snapshotId)
+    });
   }
 }));

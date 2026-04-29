@@ -1,21 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, Pencil, Search, AlertCircle, X, Webhook } from 'lucide-react';
+import { Plus, Pencil, Search, AlertCircle, X, Webhook, Camera } from 'lucide-react';
 import {
     fetchWebhooks,
     createWebhook,
     updateWebhook,
-    updateWebhookStatus
+    updateWebhookStatus,
+    captureScreenshot
 } from '../features/webhookSlice';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 const ManageWebhooks = () => {
     const dispatch = useDispatch();
-    const { items: webhooks, loading, error } = useSelector((state) => state.webhooks);
+    const { items: webhooks, loading, error, screenshotLoading, lastScreenshot } = useSelector((state) => state.webhooks);
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingWebhook, setEditingWebhook] = useState(null);
     const [signals, setSignals] = useState([]);
+    const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
+    const [screenshotSymbol, setScreenshotSymbol] = useState('');
+    const [screenshotError, setScreenshotError] = useState(null);
+    const [screenshotSuccess, setScreenshotSuccess] = useState(false);
+    const [screenshotImageUrl, setScreenshotImageUrl] = useState(null);
 
     const handleNewSignal = (data) => {
         setSignals(prev => [data, ...prev].slice(0, 50));
@@ -71,6 +77,31 @@ const ManageWebhooks = () => {
         dispatch(updateWebhookStatus({ id, status: newStatus }));
     };
 
+    const handleScreenshot = async () => {
+        if (!screenshotSymbol.trim()) {
+            setScreenshotError('Symbol is required');
+            return;
+        }
+        setScreenshotError(null);
+        setScreenshotSuccess(false);
+        setScreenshotImageUrl(null);
+        try {
+            const result = await dispatch(captureScreenshot({ symbol: screenshotSymbol.trim() })).unwrap();
+            setScreenshotImageUrl(result.imageUrl);
+            setScreenshotSuccess(true);
+        } catch (err) {
+            setScreenshotError(typeof err === 'string' ? err : err.message || 'Screenshot failed');
+        }
+    };
+
+    const handleOpenScreenshotModal = () => {
+        setScreenshotSymbol('BTCUSDT.P');
+        setScreenshotError(null);
+        setScreenshotSuccess(false);
+        setScreenshotImageUrl(null);
+        setIsScreenshotModalOpen(true);
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
@@ -102,13 +133,22 @@ const ManageWebhooks = () => {
                     </h1>
                     <p className="text-gray-400 text-sm mt-1">Manage your webhooks integrations</p>
                 </div>
-                <button
-                    onClick={() => handleOpenModal()}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                    <Plus className="w-4 h-4" />
-                    New Webhook
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={handleOpenScreenshotModal}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                        <Camera className="w-4 h-4" />
+                        Screenshot
+                    </button>
+                    <button
+                        onClick={() => handleOpenModal()}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        <Plus className="w-4 h-4" />
+                        New Webhook
+                    </button>
+                </div>
             </div>
 
             {error && (
@@ -224,6 +264,93 @@ const ManageWebhooks = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Screenshot Modal */}
+            {isScreenshotModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-md overflow-hidden shadow-2xl">
+                        <div className="flex items-center justify-between p-6 border-b border-gray-700">
+                            <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
+                                <Camera className="w-5 h-5 text-green-400" />
+                                TradingView Screenshot
+                            </h2>
+                            <button
+                                onClick={() => setIsScreenshotModalOpen(false)}
+                                className="text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">Symbol</label>
+                                <input
+                                    type="text"
+                                    value={screenshotSymbol}
+                                    onChange={(e) => setScreenshotSymbol(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleScreenshot()}
+                                    className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                                    placeholder="e.g. BYBIT:BTCUSDT.P or BTCUSDT"
+                                    autoFocus
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Enter symbol with or without exchange prefix</p>
+                            </div>
+
+                            {screenshotError && (
+                                <div className="p-3 bg-red-900/50 border border-red-500 rounded-lg text-red-200 text-sm">
+                                    <AlertCircle className="w-4 h-4 inline mr-2" />
+                                    {screenshotError}
+                                </div>
+                            )}
+
+                            {screenshotSuccess && screenshotImageUrl && (
+                                <div className="space-y-2">
+                                    <div className="p-3 bg-green-900/50 border border-green-500 rounded-lg text-green-200 text-sm flex items-center gap-2">
+                                        <span>Screenshot captured successfully!</span>
+                                    </div>
+                                    <div className="relative rounded-lg overflow-hidden border border-gray-600 bg-gray-900">
+                                        <img
+                                            src={screenshotImageUrl}
+                                            alt="Screenshot preview"
+                                            className="w-full max-h-80 object-contain"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="pt-2 flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsScreenshotModalOpen(false)}
+                                    className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
+                                >
+                                    Close
+                                </button>
+                                {!screenshotSuccess && (
+                                    <button
+                                        onClick={handleScreenshot}
+                                        disabled={screenshotLoading}
+                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {screenshotLoading ? (
+                                            <>
+                                                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                Capturing...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Camera className="w-4 h-4" />
+                                                Capture Screenshot
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modal */}
             {isModalOpen && (
