@@ -4,15 +4,15 @@
 
 .tradingview.com	TRUE	/	FALSE	1804318848	cookiePrivacyPreferenceBannerProduction	notApplicable
 .tradingview.com	TRUE	/	FALSE	1804318848	cookiesSettings	{"analytics":true,"advertising":true}
-.tradingview.com	TRUE	/	FALSE	1812009251	_ga	GA1.1.1221460170.1769758848
+.tradingview.com	TRUE	/	FALSE	1812183218	_ga	GA1.1.1221460170.1769758848
 in.tradingview.com	FALSE	/	FALSE	1785310881	g_state	{"i_l":0,"i_ll":1769758881840,"i_b":"OyXmL8VyOst0RUP2DocCFpk/rkRrmnceQzbhthiV5Dk","i_e":{"enable_itp_optimization":0}}
 .tradingview.com	TRUE	/	TRUE	1800862942	device_t	a29NVzowLGQ4cDhBUTox.aN3H6N2KFMH2yyKy0Iho97NSUo39wWBMXk8YPwBMApQ
-.tradingview.com	TRUE	/	TRUE	1784976928	sessionid	sigapcqkvkq1fuqwn2cuthuhscljolju
-.tradingview.com	TRUE	/	TRUE	1784976928	sessionid_sign	v3:K8wGfjQrVyqRh50BSh9Zgmk7wYK3snUC8hqNaHZf448=
+.tradingview.com	TRUE	/	TRUE	1785597698	sessionid	sigapcqkvkq1fuqwn2cuthuhscljolju
+.tradingview.com	TRUE	/	TRUE	1785597698	sessionid_sign	v3:K8wGfjQrVyqRh50BSh9Zgmk7wYK3snUC8hqNaHZf448=
 .tradingview.com	TRUE	/	FALSE	1804318946	tv_ecuid	ec094d13-63f3-4a09-8730-f35565aa6f1b
 .tradingview.com	TRUE	/	FALSE	1784628342	_gcl_au	1.1.1331780840.1776852342
 in.tradingview.com	FALSE	/	FALSE	0	backend	prod_backend
 in.tradingview.com	FALSE	/	FALSE	0	backend_sign	v3:6b++IEBp2YyLGIK3HHhCa0eb+xOx+CM1NkAgVtOp0CI=
-.tradingview.com	TRUE	/	TRUE	1777451050	_sp_ses.cf1a	*
-.tradingview.com	TRUE	/	TRUE	1812009250	_sp_id.cf1a	11358bb4-52ab-4719-a37a-1755cbfb780c.1769758848.202.1777449250.1777375283.4d9a2b6b-4000-47d4-bb3b-6c1feae20595.e28b45ee-50f9-4090-a04b-dfae25712b16.5cc589bb-98a1-4754-84c4-798c317cd6ad.1777449250037.3
-.tradingview.com	TRUE	/	FALSE	1812009251	_ga_YVVRYGL0E0	GS2.1.s1777449251$o319$g0$t1777449251$j60$l0$h0
+.tradingview.com	TRUE	/	TRUE	1777625031	_sp_ses.cf1a	*
+.tradingview.com	TRUE	/	FALSE	1812183224	_ga_YVVRYGL0E0	GS2.1.s1777623218$o327$g0$t1777623224$j54$l0$h0
+.tradingview.com	TRUE	/	TRUE	1812183231	_sp_id.cf1a	11358bb4-52ab-4719-a37a-1755cbfb780c.1769758848.208.1777623231.1777562517.6ccfdd4a-1bb5-4e17-ab0d-0cfda343c10d.8e914dd5-d651-41e9-a258-04fb8573fa57.1f1d3248-c47b-4e03-a111-07fcfdfe2763.1777623217404.8

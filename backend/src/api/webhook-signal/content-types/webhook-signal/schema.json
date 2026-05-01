@@ -20,6 +20,12 @@
     "tf": {
       "type": "string"
     },
+    "desc": {
+      "type": "string"
+    },
+    "price": {
+      "type": "decimal"
+    },
     "signalStatus": {
       "type": "enumeration",
       "enum": [

@@ -55,7 +55,7 @@ const ManageWebhookSignals = () => {
         try {
             const result = await dispatch(fetchWebhookSignalById(id)).unwrap();
             setExecutingSignal(result);
-            setExecuteForm({ price: '', volume: '' });
+            setExecuteForm({ price: result.price || '', volume: '' });
         } catch (error) {
             console.error("Failed to fetch signal details:", error);
             // Fallback to existing signal if fetch fails
@@ -268,6 +268,15 @@ const ManageWebhookSignals = () => {
                                         className="w-full bg-gray-900/50 border border-gray-700 text-gray-400 rounded-lg px-4 py-2 cursor-not-allowed outline-none"
                                     />
                                 </div>
+
+                                {executingSignal.desc && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-1">Description</label>
+                                        <div className="w-full bg-gray-900/50 border border-gray-700 text-gray-200 rounded-lg px-4 py-2">
+                                            {executingSignal.desc}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>

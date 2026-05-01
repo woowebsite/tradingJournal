@@ -849,6 +849,7 @@ export interface ApiWebhookSignalWebhookSignal
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     createdDate: Schema.Attribute.DateTime;
+    desc: Schema.Attribute.String;
     image: Schema.Attribute.Media<'images'>;
     linked_symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -857,6 +858,7 @@ export interface ApiWebhookSignalWebhookSignal
       'api::webhook-signal.webhook-signal'
     > &
       Schema.Attribute.Private;
+    price: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
     signal: Schema.Attribute.String;
     signalStatus: Schema.Attribute.Enumeration<

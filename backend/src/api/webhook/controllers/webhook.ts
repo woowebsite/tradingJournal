@@ -6,6 +6,24 @@ import * as os from 'os';
 import * as path from 'path';
 
 /**
+ * Fetch current price of a symbol from Binance API.
+ * Returns price as string or null if failed.
+ */
+async function getSymbolPrice(symbol: string): Promise<string | null> {
+  try {
+    // Convert TV symbol format (e.g. BINANCE:BTCUSDT.P -> BTCUSDT) to Binance API format
+    const ticker = symbol.replace(/^.*:/, '').replace('.P', '').replace('PERP', '');
+    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${ticker}`, {
+      timeout: 5000,
+    });
+    return response.data?.price || null;
+  } catch (err: any) {
+    strapi.log.warn(`[webhook] Failed to fetch price for ${symbol}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Map TradingView tf string to chart-img interval format.
  */
 function mapInterval(tf: string): string {
@@ -43,14 +61,6 @@ function getTradingViewDirectImageUrl(url: string): string | null {
     return `https://s3.tradingview.com/snapshots/${firstChar}/${id}.png`;
   }
   return null;
-}
-
-/**
- * Build a direct S3 TradingView image URL from a snapshotId.
- */
-function buildTradingViewDirectImageUrl(snapshotId: string): string {
-  const firstChar = snapshotId.charAt(0).toLowerCase();
-  return `https://s3.tradingview.com/snapshots/${firstChar}/${snapshotId}.png`;
 }
 
 /**
@@ -246,10 +256,9 @@ async function getOrLaunchBrowser(strapi: any): Promise<any> {
  * Capture TradingView chart screenshot via puppeteer-core.
  * 1. Load cookies from tradingview-cookie.txt
  * 2. Navigate to TradingView chart
- * 3. Intercept POST /snapshot/ response (triggered by Alt+S)
- * 4. Extract snapshot URL and download image
+ * 3. Screenshot the chart directly (cookies set so TV renders fully)
  */
-async function captureTradingViewScreenshot(ticker: string): Promise<string | null> {
+async function captureTradingViewScreenshot(ticker: string): Promise<Buffer | null> {
   const browser = await getOrLaunchBrowser(strapi);
   if (!browser) return null;
 
@@ -275,43 +284,15 @@ async function captureTradingViewScreenshot(ticker: string): Promise<string | nu
   await page.goto(chartUrl, { waitUntil: 'load', timeout: 20000 });
   await new Promise(r => setTimeout(r, 2500));
 
-  // Intercept POST /snapshot/ response — TradingView makes this request when Alt+S is pressed
-  let snapshotId: string | null = null;
-
-  page.on('response', async (res: any) => {
-    if (snapshotId) return;
-    if (res.url().includes('/snapshot/') && res.status() === 200) {
-      try {
-        const body: string = await res.text();
-        const id = body.trim();
-        // Snapshot ID is typically 8 alphanumeric characters
-        if (id && /^[a-zA-Z0-9]{6,12}$/.test(id)) {
-          snapshotId = id;
-          strapi.log.info(`[webhook-screenshot] Snapshot ID captured: ${id}`);
-        }
-      } catch (_) { /* ignore */ }
-    }
+  strapi.log.info(`[webhook-screenshot] Taking screenshot`);
+  const screenshot = await page.screenshot({
+    type: 'png',
+    encoding: 'binary',
+    captureBeyondViewport: true,
   });
 
-  strapi.log.info('[webhook-screenshot] Pressing Alt+S...');
-  await page.keyboard.down('Alt');
-  await page.keyboard.press('s');
-  await page.keyboard.up('Alt');
-
-  // Wait up to 8s for the snapshot response (poll every 300ms)
-  const start = Date.now();
-  while (!snapshotId && Date.now() - start < 8000) {
-    await new Promise(r => setTimeout(r, 300));
-  }
-
   await page.close();
-
-  if (!snapshotId) {
-    strapi.log.warn('[webhook-screenshot] No snapshot URL captured after Alt+S');
-    return null;
-  }
-
-  return snapshotId
+  return Buffer.from(screenshot as Buffer);
 }
 
 export default factories.createCoreController('api::webhook.webhook', ({ strapi }) => ({
@@ -372,12 +353,17 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
       linkedSymbolId = symbolMatch.documentId || symbolMatch.id;
     }
 
+    // Fetch current price for the symbol
+    const currentPrice = await getSymbolPrice(payload.symbol);
+
     // Create a new WebHookSignal record
     const newSignal = await strapi.documents('api::webhook-signal.webhook-signal').create({
       data: {
         symbol: payload.symbol,
         signal: signalValue,
         tf: payload.tf,
+        desc: payload.desc || null,
+        price: currentPrice || undefined,
         signalStatus: 'Unread',
         createdDate: new Date().toISOString(),
         webhook: match.documentId,
@@ -392,16 +378,10 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
         let imageBuffer: Buffer | null = null;
         let sourceLabel = '';
 
-        // 1. Try to get TradingView screenshot via Alt+S (captures snapshotId)
-        // Fallback to symbol table chart_url if Alt+S returns no snapshotId
-        const snapshotId = await captureTradingViewScreenshot(payload.symbol);
-
-        if (snapshotId) {
-          const directUrl = buildTradingViewDirectImageUrl(snapshotId);
-          strapi.log.info(`[webhook-screenshot] Downloading image from ${directUrl} (snapshotId=${snapshotId})`);
-          imageBuffer = await fetchImageBufferFromUrl(directUrl);
-          if (imageBuffer) sourceLabel = 'TradingView';
-        }
+        // 1. TradingView screenshot via puppeteer page.screenshot
+        //    Returns Buffer directly (browser has session cookies)
+        imageBuffer = await captureTradingViewScreenshot(payload.symbol);
+        if (imageBuffer) sourceLabel = 'TradingView';
 
         // 2. Fallback to chart_url from symbol table or payload fields
         if (!imageBuffer) {
@@ -474,20 +454,10 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
       return ctx.badRequest('symbol is required');
     }
 
-    let imageBuffer: Buffer | null = null;
-
-    // Only TradingView via Alt+S → capture snapshotId → download image
-    const snapshotId = await captureTradingViewScreenshot(symbol);
-
-    if (!snapshotId) {
-      return ctx.internalServerError('Failed to capture TradingView screenshot. Check logs for details.');
-    }
-
-    const directUrl = buildTradingViewDirectImageUrl(snapshotId);
-    imageBuffer = await fetchImageBufferFromUrl(directUrl);
+    const imageBuffer = await captureTradingViewScreenshot(symbol);
 
     if (!imageBuffer) {
-      return ctx.internalServerError('Failed to download TradingView screenshot from S3. Check logs for details.');
+      return ctx.internalServerError('Failed to capture TradingView screenshot. Check logs for details.');
     }
 
     const safeSymbol = String(symbol).replace(/[^a-zA-Z0-9]/g, '_');
@@ -498,13 +468,7 @@ export default factories.createCoreController('api::webhook.webhook', ({ strapi 
       return ctx.internalServerError('Failed to upload screenshot to media library');
     }
 
-    strapi.log.info(`[webhook-screenshot] Screenshot saved as fileId=${fileId}, snapshotId=${snapshotId}`);
-
-    ctx.send({
-      status: 'success',
-      imageFileId: fileId,
-      snapshotId,
-      imageUrl: buildTradingViewDirectImageUrl(snapshotId)
-    });
+    strapi.log.info(`[webhook-screenshot] Screenshot saved as fileId=${fileId}`);
+    ctx.send({ status: 'success', imageFileId: fileId });
   }
 }));
