@@ -179,6 +179,49 @@ export const saveTrade = createAsyncThunk(
     }
 );
 
+export const executeSignalTrade = createAsyncThunk(
+    'trades/executeSignalTrade',
+    async ({ signal, price, volume, accountId, symbolId }, { rejectWithValue }) => {
+        try {
+            const token = localStorage.getItem('strapi_token');
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:1337/api';
+
+            const tradeType = ['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'Long' : 'Short';
+            const tradeDetailType = ['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'Buy' : 'Sell';
+
+            // 1. Create the parent Trade
+            const tradePayload = {
+                type: tradeType,
+                trade_status: 'Open',
+                date: new Date().toISOString(),
+                account: accountId,
+                symbol: symbolId,
+            };
+
+            const tradeRes = await api.post('/trades', { data: tradePayload });
+            const savedTradeId = tradeRes.data.data.documentId || tradeRes.data.data.id;
+
+            // 2. Create the TradeDetail entry
+            const detailPayload = {
+                price: parseFloat(price),
+                type: tradeDetailType,
+                volume: parseFloat(volume),
+                signal: 'Entry',
+                date: new Date().toISOString(),
+                screenshot: signal.image?.id || signal.image?.documentId,
+                note: signal.desc ? createBlocksFromText(signal.desc) : null,
+                trade: savedTradeId,
+            };
+
+            await api.post('/trade-details', { data: detailPayload });
+
+            return { savedTradeId, tradeType, tradeDetailType };
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
 const tradeSlice = createSlice({
     name: 'trades',
     initialState: {
@@ -240,6 +283,16 @@ const tradeSlice = createSlice({
             .addCase(fetchClosedTrades.rejected, (state, action) => {
                 state.closedTradesLoading = false;
                 console.error("Failed to fetch closed trades:", action.payload);
+            })
+            // Execute Signal Trade
+            .addCase(executeSignalTrade.pending, (state) => {
+                state.error = null;
+            })
+            .addCase(executeSignalTrade.fulfilled, (state, action) => {
+                // Trade was successfully created
+            })
+            .addCase(executeSignalTrade.rejected, (state, action) => {
+                state.error = action.payload;
             });
     }
 });

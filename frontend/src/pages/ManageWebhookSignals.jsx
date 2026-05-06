@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchWebhookSignals, updateWebhookSignalStatus, fetchWebhookSignalById } from '../features/webhookSignalSlice';
+import { executeSignalTrade } from '../features/tradeSlice';
 import { Activity, Check, X, AlertCircle, Image, ExternalLink } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAccount } from '../context/AccountContext';
@@ -70,15 +71,25 @@ const ManageWebhookSignals = () => {
         setExecuteForm({ price: '', volume: '' });
     };
 
-    const handleConfirmExecute = (e) => {
+    const handleConfirmExecute = async (e) => {
         e.preventDefault();
         if (!executingSignal) return;
 
         const id = executingSignal.documentId || executingSignal.id;
-        // Proceed to update status to Execute
-        dispatch(updateWebhookSignalStatus({ id, status: 'Execute' }));
+        const accountId = selectedAccount?.documentId || selectedAccount?.id;
+        const symbolId = executingSignal.linked_symbol?.documentId || executingSignal.linked_symbol?.id;
 
-        // (Optional future step: actually call trade execution API here)
+        // 1. Create Trade and TradeDetail
+        dispatch(executeSignalTrade({
+            signal: executingSignal,
+            price: executeForm.price,
+            volume: executeForm.volume,
+            accountId,
+            symbolId,
+        }));
+
+        // 2. Update webhook signal status to Execute
+        dispatch(updateWebhookSignalStatus({ id, status: 'Execute' }));
 
         handleCloseExecuteModal();
     };

@@ -55,7 +55,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/journal']);
+    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>
