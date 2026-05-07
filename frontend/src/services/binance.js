@@ -1,26 +1,15 @@
 
 // Binance External API Service
 
-export const getCryptoHistory = async (symbol) => {
-    // Binance API: https://fapi.binance.com/fapi/v1/klines
-    // Symbol: BTCUSDT
-    // Interval: 1d
-    // Limit: 500 (or 1000)
+export const getCryptoHistory = async (ticker) => {
+    // Binance Futures API: https://fapi.binance.com/fapi/v1/klines (for .P perpetual tickers)
+    // Binance Spot API:   https://api.binance.com/api/v3/klines  (for regular tickers)
 
-    // We assume 'symbol' is passed as "BTCUSDT" or similar.
-    // If it has "Crypto" prefix or something, we might need to strip it, but usually user puts "BTCUSDT".
+    const isPerpetual = ticker.endsWith('.P');
+    const symbol = ticker.replace('.P', '');
 
-    // Using CORS proxy if needed?
-    // Binance usually allows CORS from anywhere for public data?
-    // "Code: -1002, msg: 'You are not authorized to execute this request.'" if IP restricted or blocked?
-    // Usually public market data is fine. If not, we might need a proxy.
-    // Let's try direct first. If blocked by CORS, we might need a backend proxy or Vite proxy.
-    // Vite proxy handles /api-tcbs for TCBS. We might need /api-binance if CORS fails.
-    // Let's assume direct works for now, or add proxy if it doesn't.
-    // However, user said "Use this API".
-
-    const baseUrl = 'https://fapi.binance.com';
-    const endpoint = '/fapi/v1/klines';
+    const baseUrl = isPerpetual ? 'https://fapi.binance.com' : 'https://api.binance.com';
+    const endpoint = isPerpetual ? '/fapi/v1/klines' : '/api/v3/klines';
     const interval = '1d';
     const limit = 500;
 
@@ -59,7 +48,7 @@ export const getCryptoHistory = async (symbol) => {
 
     } catch (error) {
         console.error("Failed to fetch from Binance:", error);
-        // Fallback or rethrow? 
+        // Fallback or rethrow?
         // If it fails, we return empty so as not to break the app flow
         return [];
     }

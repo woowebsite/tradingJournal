@@ -211,11 +211,13 @@ export const fetchLatestHistory = createAsyncThunk(
     'market/fetchLatestHistory',
     async (symbolId, { rejectWithValue }) => {
         try {
-            const url = `/symbol-histories?filters[symbol][documentId][$eq]=${symbolId}&sort=date:desc&pagination[pageSize]=1`;
+            const url = `/symbol-histories?filters[symbol][documentId][$eq]=${symbolId}&sort=date:desc&pagination[pageSize]=1&populate=symbol`;
             const res = await api.get(url);
             const data = res.data.data;
             if (data && data.length > 0) {
-                return data[0];
+                const item = data[0];
+                const symId = item.symbol?.documentId || item.symbol?.id || symbolId;
+                return { symbolId: symId, close: item.close };
             }
             return null;
         } catch (error) {
@@ -402,6 +404,13 @@ const marketSlice = createSlice({
         // Batch Latest Prices
         builder.addCase(fetchBatchLatestPrices.fulfilled, (state, action) => {
             state.latestPricesMap = { ...state.latestPricesMap, ...action.payload };
+        });
+
+        // Fetch Latest History
+        builder.addCase(fetchLatestHistory.fulfilled, (state, action) => {
+            if (action.payload && action.payload.symbolId) {
+                state.latestPricesMap[action.payload.symbolId] = action.payload.close;
+            }
         });
     }
 });
