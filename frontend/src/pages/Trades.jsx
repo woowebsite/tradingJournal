@@ -93,19 +93,6 @@ const Trades = () => {
         setIsModalOpen(true);
     };
 
-    const handleCloseTrade = async (tradeId) => {
-        if (!window.confirm('Are you sure you want to close this trade?')) return;
-        try {
-            await api.put(`/trades/${tradeId}`, { data: { trade_status: 'Closed' } });
-            if (selectedAccount) {
-                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
-            }
-        } catch (error) {
-            console.error('Error closing trade:', error);
-            alert('Failed to close trade');
-        }
-    };
-
     return (
         <div>
             <TradeModal
@@ -146,7 +133,7 @@ const Trades = () => {
                             <th className="p-4">Symbol</th>
                             <th className="p-4">Type</th>
                             <th className="p-4">Status</th>
-                            <th className="p-4 text-right">Net Cashflow</th>
+                            <th className="p-4 text-right">P&L</th>
                             <th className="p-4 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -172,8 +159,8 @@ const Trades = () => {
                                         {trade.trade_status}
                                     </span>
                                 </td>
-                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {formatNumber(trade.derivedPnl, selectedAccount?.moneyFormat || '#,###.##')}
+                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {trade.pnl != null ? formatNumber(trade.pnl, selectedAccount?.moneyFormat || '#,###.##') : '-'}
                                 </td>
                                 <td className="p-4 text-right flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                     <button
@@ -183,17 +170,6 @@ const Trades = () => {
                                     >
                                         <Edit2 size={16} />
                                     </button>
-                                    {trade.trade_status === 'Open' ? (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleCloseTrade(trade.documentId || trade.id); }}
-                                            className="p-2 text-gray-200 hover:text-red-400 transition cursor-pointer"
-                                            title="Close Trade"
-                                        >
-                                            <XCircle size={16} />
-                                        </button>
-                                    ) : (
-                                        <div className="p-2 text-gray-600 cursor-not-allowed"><XCircle size={16} /></div>
-                                    )}
                                 </td>
                             </tr>
                         ))}

@@ -776,6 +776,7 @@ export interface ApiTradeTrade extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'> &
       Schema.Attribute.Private;
     note: Schema.Attribute.Blocks;
+    pnl: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
     strategy: Schema.Attribute.Relation<'manyToOne', 'api::strategy.strategy'>;
     symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
