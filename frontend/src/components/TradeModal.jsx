@@ -213,6 +213,52 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     onClose();
   };
 
+  const handleCloseTrade = async () => {
+    if (!currentPrice) {
+      alert('Current price not available. Please wait for price data.');
+      return;
+    }
+
+    const sellDetails = formData.trade_details.filter(d => d.type === 'Sell');
+    const buyDetails = formData.trade_details.filter(d => d.type === 'Buy');
+    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
+    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
+    const openVol = totalBuyVol - totalSellVol;
+
+    if (openVol <= 0) {
+      alert('No open volume to close.');
+      return;
+    }
+
+    const closeSignal = formData.type === 'Long' ? 'Sell' : 'Buy';
+    const exitDetail = {
+      date: getLocalDateTimeInputValue(),
+      signal: 'Exit',
+      type: closeSignal,
+      price: parseFloat(currentPrice),
+      volume: openVol,
+      note: ''
+    };
+
+    const newDetails = [...formData.trade_details, exitDetail];
+    const realizedPnl = calculateRealizedPnl(newDetails, formData.type);
+
+    const payload = {
+      ...formData,
+      trade_details: newDetails.map(d => ({
+        ...d,
+        price: parseFloat(d.price) || 0,
+        volume: parseFloat(d.volume) || 0
+      })),
+      trade_status: 'Closed',
+      account: selectedAccount.documentId || Number(selectedAccount.id),
+      pnl: realizedPnl
+    };
+
+    onSubmit(payload);
+    onClose();
+  };
+
   // Calc metrics based on Trade Type (Long -> Buy, Short -> Sell)
   const relevantDetails = formData.trade_details.filter(d =>
     formData.type === 'Long' ? d.type === 'Buy' : d.type === 'Sell'
@@ -428,6 +474,16 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             >
               Cancel
             </button>
+            {formData.trade_status !== 'Closed' && (
+              <button
+                type="button"
+                onClick={handleCloseTrade}
+                disabled={!currentPrice}
+                className="px-6 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50"
+              >
+                Close Trade
+              </button>
+            )}
             <button
               type="submit"
               className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20"

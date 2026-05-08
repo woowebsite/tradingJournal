@@ -93,19 +93,6 @@ const Trades = () => {
         setIsModalOpen(true);
     };
 
-    const handleCloseTrade = async (tradeId) => {
-        if (!window.confirm('Are you sure you want to close this trade?')) return;
-        try {
-            await api.put(`/trades/${tradeId}`, { data: { trade_status: 'Closed' } });
-            if (selectedAccount) {
-                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
-            }
-        } catch (error) {
-            console.error('Error closing trade:', error);
-            alert('Failed to close trade');
-        }
-    };
-
     return (
         <div>
             <TradeModal
@@ -183,17 +170,6 @@ const Trades = () => {
                                     >
                                         <Edit2 size={16} />
                                     </button>
-                                    {trade.trade_status === 'Open' ? (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleCloseTrade(trade.documentId || trade.id); }}
-                                            className="p-2 text-gray-200 hover:text-red-400 transition cursor-pointer"
-                                            title="Close Trade"
-                                        >
-                                            <XCircle size={16} />
-                                        </button>
-                                    ) : (
-                                        <div className="p-2 text-gray-600 cursor-not-allowed"><XCircle size={16} /></div>
-                                    )}
                                 </td>
                             </tr>
                         ))}
