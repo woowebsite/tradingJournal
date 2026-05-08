@@ -7,6 +7,12 @@ import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
 
+const getLocalDateTimeInputValue = (date = new Date()) => {
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
 const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   const { selectedAccount } = useAccount();
   const dispatch = useDispatch();
@@ -16,7 +22,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     symbol: '',
     type: 'Long',
     trade_status: 'Open',
-    date: new Date().toISOString().slice(0, 16),
+    date: getLocalDateTimeInputValue(),
     note: '',
     trade_details: [] // List of details
   });
@@ -51,12 +57,12 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
           symbol: initialData.symbol?.documentId || initialData.symbol?.id || initialData.symbol || '',
           type: initialData.type || 'Long',
           trade_status: initialData.trade_status || 'Open',
-          date: initialData.date ? new Date(initialData.date).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+          date: initialData.date ? getLocalDateTimeInputValue(new Date(initialData.date)) : getLocalDateTimeInputValue(),
           note: extractTextFromBlocks(initialData.note),
           trade_details: initialData.trade_details ? initialData.trade_details.map(d => ({
             id: d.id,
             documentId: d.documentId,
-            date: d.date ? new Date(d.date).toISOString().slice(0, 16) : '',
+            date: d.date ? getLocalDateTimeInputValue(new Date(d.date)) : getLocalDateTimeInputValue(),
             signal: d.signal || 'Entry',
             type: d.type || 'Buy',
             price: d.price || '',
@@ -71,11 +77,11 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
           symbol: '',
           type: 'Long',
           trade_status: 'Open',
-          date: new Date().toISOString().slice(0, 16),
+          date: getLocalDateTimeInputValue(),
           note: '',
           trade_details: [
             // Default first row
-            { date: new Date().toISOString().slice(0, 16), signal: 'Entry', type: 'Buy', price: '', volume: '', note: '' }
+            { date: getLocalDateTimeInputValue(), signal: 'Entry', type: 'Buy', price: '', volume: '', note: '' }
           ]
         });
       }
@@ -108,7 +114,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     setFormData(prev => ({
       ...prev,
       trade_details: [...prev.trade_details, {
-        date: new Date().toISOString().slice(0, 16),
+        date: getLocalDateTimeInputValue(),
         signal: 'Entry', // Default
         type: formData.type === 'Long' ? 'Buy' : 'Sell', // Smart default
         price: '',
@@ -320,7 +326,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
             {/* Totals */}
             <div className="mt-4 pt-3 border-t border-gray-700 flex justify-end gap-6 text-sm">
-              <div className="text-gray-400">Total Vol: <span className="text-white font-mono">{formatNumber(totalVolume)}</span></div>
+              <div className="text-gray-400">Total Vol: <span className="text-white font-mono">{formatNumber(totalVolume, '#,###.####')}</span></div>
               <div className="text-gray-400">Avg Price: <span className="text-white font-mono">{formatPrice(avgPrice)}</span></div>
             </div>
           </div>
