@@ -146,7 +146,7 @@ const Trades = () => {
                             <th className="p-4">Symbol</th>
                             <th className="p-4">Type</th>
                             <th className="p-4">Status</th>
-                            <th className="p-4 text-right">Net Cashflow</th>
+                            <th className="p-4 text-right">P&L</th>
                             <th className="p-4 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -172,8 +172,8 @@ const Trades = () => {
                                         {trade.trade_status}
                                     </span>
                                 </td>
-                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {formatNumber(trade.derivedPnl, selectedAccount?.moneyFormat || '#,###.##')}
+                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {trade.pnl != null ? formatNumber(trade.pnl, selectedAccount?.moneyFormat || '#,###.##') : '-'}
                                 </td>
                                 <td className="p-4 text-right flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                     <button

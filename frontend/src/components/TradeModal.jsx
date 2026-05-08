@@ -6,6 +6,7 @@ import api from '../services/api'; // Ensure this path is correct
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
+import { fetchLatestHistory } from '../features/marketSlice';
 
 const getLocalDateTimeInputValue = (date = new Date()) => {
   const offset = date.getTimezoneOffset();
@@ -28,10 +29,51 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   });
 
   const [riskSetting, setRiskSetting] = useState(null);
+  const [currentPrice, setCurrentPrice] = useState('');
 
   // Helper to format currency
   const formatPrice = (price) => {
     return price ? formatNumber(price, selectedAccount?.moneyFormat || '#,###.##') : '-';
+  };
+
+  // Helper to calculate Realized P&L (closed positions only - TP exits)
+  // Long: Realized = SellValue - (AvgBuyPrice × SellVolume)
+  // Short: Realized = (AvgSellPrice × BuyVolume) - BuyValue
+  const calculateRealizedPnl = (details, tradeType = 'Long') => {
+    const sellDetails = details.filter(d => d.type === 'Sell');
+    const buyDetails = details.filter(d => d.type === 'Buy');
+
+    const sellValue = sellDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0);
+    const buyValue = buyDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0);
+    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
+    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
+
+    if (totalSellVol === 0) return 0;
+
+    const avgBuyPrice = totalBuyVol > 0 ? buyValue / totalBuyVol : 0;
+    const avgSellPrice = totalSellVol > 0 ? sellValue / totalSellVol : 0;
+
+    if (tradeType === 'Long') {
+      return sellValue - (avgBuyPrice * totalSellVol);
+    } else {
+      return (avgSellPrice * totalBuyVol) - buyValue;
+    }
+  };
+
+  // Helper to calculate Unrealized PnL (open positions - entry buys not yet closed)
+  const calculateUnrealizedPnl = (details, currentPrice) => {
+    const buyDetails = details.filter(d => d.type === 'Buy');
+    const sellDetails = details.filter(d => d.type === 'Sell');
+
+    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
+    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
+    const openVol = totalBuyVol - totalSellVol;
+
+    if (!currentPrice || openVol <= 0) return 0;
+    const avgBuyPrice = totalBuyVol > 0
+      ? buyDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0) / totalBuyVol
+      : 0;
+    return openVol * (parseFloat(currentPrice) - avgBuyPrice);
   };
 
   useEffect(() => {
@@ -48,6 +90,19 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     };
     fetchSettings();
   }, []);
+
+  // Fetch current price when symbol changes
+  useEffect(() => {
+    if (isOpen && formData.symbol) {
+      setCurrentPrice('');
+      const symbolId = formData.symbol;
+      dispatch(fetchLatestHistory(symbolId)).then(resultAction => {
+        if (fetchLatestHistory.fulfilled.match(resultAction) && resultAction.payload?.close) {
+          setCurrentPrice(resultAction.payload.close);
+        }
+      });
+    }
+  }, [isOpen, formData.symbol, dispatch]);
 
   useEffect(() => {
     if (isOpen) {
@@ -144,7 +199,8 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
         price: parseFloat(d.price) || 0,
         volume: parseFloat(d.volume) || 0
       })),
-      account: selectedAccount.documentId || Number(selectedAccount.id)
+      account: selectedAccount.documentId || Number(selectedAccount.id),
+      pnl: calculateRealizedPnl(formData.trade_details, formData.type)
     };
 
     // Separate file from data - NOT NEEDED for per-detail logic?
@@ -237,6 +293,23 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             </div>
           </div>
 
+          {/* PnL Display */}
+          {formData.trade_details.length > 0 && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-gray-900/30 p-3 rounded-lg border border-gray-700/50">
+                <span className="text-gray-400 text-xs block mb-1">Realized P&L (closed positions)</span>
+                <span className={`text-lg font-mono font-bold ${calculateRealizedPnl(formData.trade_details, formData.type) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {(calculateRealizedPnl(formData.trade_details, formData.type) > 0 ? '+' : '') + formatPrice(calculateRealizedPnl(formData.trade_details, formData.type))}
+                </span>
+              </div>
+              <div className="bg-gray-900/30 p-3 rounded-lg border border-gray-700/50">
+                <span className="text-gray-400 text-xs block mb-1">Est. Unrealized P&L (open @ {currentPrice || '-'})</span>
+                <span className={`text-lg font-mono font-bold ${currentPrice ? (calculateUnrealizedPnl(formData.trade_details, currentPrice) >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-500'}`}>
+                  {currentPrice ? ((calculateUnrealizedPnl(formData.trade_details, currentPrice) > 0 ? '+' : '') + formatPrice(calculateUnrealizedPnl(formData.trade_details, currentPrice))) : '-'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Trade Details List */}
           <div className="bg-gray-900/30 p-4 rounded-xl border border-gray-700/50">
