@@ -3,13 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { ArrowLeft, Wallet } from 'lucide-react';
 import api from '../services/api';
-import { fetchTrades, fetchOpenTrades } from '../features/tradeSlice';
+import { fetchTrades, fetchOpenTrades, saveTrade } from '../features/tradeSlice';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { calculateSymbolOpenVolume, calculateSymbolOpenPnL } from '../utils/tradeCalculations';
 import TradeDetailModal from '../components/TradeDetailModal';
+import TradeModal from '../components/TradeModal';
 import RecentTradeBox from '../components/RecentTradeBox';
 
 const AccountDetail = () => {
@@ -24,6 +25,8 @@ const AccountDetail = () => {
     const [selectedSymbol, setSelectedSymbol] = useState(null);
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+    const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
+    const [tradeToEdit, setTradeToEdit] = useState(null);
 
     const handleTradeClick = (trade) => {
         setSelectedTrade(trade);
@@ -31,7 +34,7 @@ const AccountDetail = () => {
     };
 
     // Redux State
-    const { items: trades, openTrades, loading: tradesLoading } = useSelector(state => state.trades);
+    const { items: trades, openTrades } = useSelector(state => state.trades);
     const { items: watchlists } = useSelector(state => state.watchlists);
     const { items: strategies } = useSelector(state => state.strategies);
 
@@ -60,7 +63,7 @@ const AccountDetail = () => {
         if (id) {
             loadData();
         }
-    }, [id, dispatch]);
+    }, [id, dispatch, setSelectedAccount]);
 
     // Separate effect for fetching trades to handle symbol changes
     useEffect(() => {
@@ -108,6 +111,32 @@ const AccountDetail = () => {
         } catch (error) {
             console.error('Failed to update strategy:', error);
             alert('Failed to update strategy');
+        }
+    };
+
+    const handleEditTrade = (trade) => {
+        setIsDetailModalOpen(false);
+        setSelectedTrade(null);
+        setTradeToEdit(trade);
+        setIsTradeModalOpen(true);
+    };
+
+    const handleSaveTrade = async (tradeData) => {
+        try {
+            await dispatch(saveTrade({ tradeData, tradeToEdit })).unwrap();
+
+            const params = { accountId: id, pageSize: 20 };
+            if (selectedSymbol) {
+                params.symbolId = selectedSymbol.documentId || selectedSymbol.id;
+            }
+            dispatch(fetchTrades(params));
+            dispatch(fetchOpenTrades({ accountId: id }));
+
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Error saving trade sequence:', error);
+            alert(`Failed to save trade: ${error.message || error}`);
         }
     };
 
@@ -230,8 +259,15 @@ const AccountDetail = () => {
                     isOpen={isDetailModalOpen}
                     onClose={() => setIsDetailModalOpen(false)}
                     trade={selectedTrade}
+                    onEdit={handleEditTrade}
                 />
             )}
+            <TradeModal
+                isOpen={isTradeModalOpen}
+                onClose={() => setIsTradeModalOpen(false)}
+                onSubmit={handleSaveTrade}
+                initialData={tradeToEdit}
+            />
         </div>
     );
 };

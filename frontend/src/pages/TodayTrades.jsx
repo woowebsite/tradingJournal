@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { fetchOpenTrades } from '../features/tradeSlice';
+import { fetchOpenTrades, saveTrade } from '../features/tradeSlice';
 import { fetchLatestHistory } from '../features/marketSlice';
-import { XCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { calculateTradePnL } from '../utils/tradeCalculations';
+import TradeDetailModal from '../components/TradeDetailModal';
+import TradeModal from '../components/TradeModal';
 
 const TodayTrades = () => {
     const { selectedAccount } = useAccount();
@@ -13,6 +14,8 @@ const TodayTrades = () => {
     const { openTrades, openTradesLoading } = useSelector(state => state.trades);
     const { latestPricesMap } = useSelector(state => state.market);
     const [selectedTrade, setSelectedTrade] = useState(null);
+    const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
+    const [tradeToEdit, setTradeToEdit] = useState(null);
 
     useEffect(() => {
         if (selectedAccount) {
@@ -73,21 +76,44 @@ const TodayTrades = () => {
         return trades.reduce((sum, t) => sum + (t.derivedPnl || 0), 0);
     }, [trades]);
 
+    const handleEditTrade = (trade) => {
+        setSelectedTrade(null);
+        setTradeToEdit(trade);
+        setIsTradeModalOpen(true);
+    };
+
+    const handleSaveTrade = async (tradeData) => {
+        try {
+            await dispatch(saveTrade({ tradeData, tradeToEdit })).unwrap();
+
+            if (selectedAccount) {
+                dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+            }
+
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Error saving trade sequence:', error);
+            alert(`Failed to save trade: ${error.message || error}`);
+        }
+    };
+
     return (
-        <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
-                        Today&apos;s Trades
-                    </h1>
-                    <p className="text-gray-400 text-sm mt-1">
-                        Open trades for {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                    </p>
-                </div>
+        <>
+            <div className="p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
+                            Today&apos;s Trades
+                        </h1>
+                        <p className="text-gray-400 text-sm mt-1">
+                            Open trades for {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        </p>
+                    </div>
                 <div className={`text-lg font-mono font-bold ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                     Total: {formatNumber(totalPnl)} USD
                 </div>
-            </div>
+                </div>
 
             {openTradesLoading ? (
                 <div className="text-center text-gray-400 py-12">Loading...</div>
@@ -152,6 +178,21 @@ const TodayTrades = () => {
                 </div>
             )}
         </div>
+
+        <TradeDetailModal
+            isOpen={!!selectedTrade}
+            onClose={() => setSelectedTrade(null)}
+            trade={selectedTrade}
+            onEdit={handleEditTrade}
+        />
+
+        <TradeModal
+            isOpen={isTradeModalOpen}
+            onClose={() => setIsTradeModalOpen(false)}
+            onSubmit={handleSaveTrade}
+            initialData={tradeToEdit}
+        />
+        </>
     );
 };
 
