@@ -1,7 +1,7 @@
 
 // Binance External API Service
 
-export const getCryptoHistory = async (ticker) => {
+export const getCryptoHistory = async (ticker, interval = '1d', limit = 500) => {
     // Binance Futures API: https://fapi.binance.com/fapi/v1/klines (for .P perpetual tickers)
     // Binance Spot API:   https://api.binance.com/api/v3/klines  (for regular tickers)
 
@@ -10,9 +10,6 @@ export const getCryptoHistory = async (ticker) => {
 
     const baseUrl = isPerpetual ? 'https://fapi.binance.com' : 'https://api.binance.com';
     const endpoint = isPerpetual ? '/fapi/v1/klines' : '/api/v3/klines';
-    const interval = '1d';
-    const limit = 500;
-
     const url = `${baseUrl}${endpoint}?symbol=${symbol}&interval=${interval}&limit=${limit}`;
 
     try {

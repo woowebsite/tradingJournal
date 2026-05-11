@@ -181,7 +181,7 @@ export const saveTrade = createAsyncThunk(
 
 export const executeSignalTrade = createAsyncThunk(
     'trades/executeSignalTrade',
-    async ({ signal, price, volume, accountId, symbolId }, { rejectWithValue }) => {
+    async ({ signal, price, volume, accountId, symbolId, screenshotFile }, { rejectWithValue }) => {
         try {
             const token = localStorage.getItem('strapi_token');
             const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:1337/api';
@@ -201,14 +201,31 @@ export const executeSignalTrade = createAsyncThunk(
             const tradeRes = await api.post('/trades', { data: tradePayload });
             const savedTradeId = tradeRes.data.data.documentId || tradeRes.data.data.id;
 
-            // 2. Create the TradeDetail entry
+            // 2. Upload screenshot if a new file was provided
+            let screenshotId = signal.image?.id || signal.image?.documentId;
+            if (screenshotFile) {
+                const formData = new FormData();
+                formData.append('files', screenshotFile);
+                const uploadRes = await fetch(`${API_URL}/upload`, {
+                    method: 'POST',
+                    headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                    body: formData
+                });
+                if (uploadRes.ok) {
+                    const files = await uploadRes.json();
+                    const fileObj = Array.isArray(files) ? files[0] : files;
+                    screenshotId = fileObj.id || fileObj.documentId;
+                }
+            }
+
+            // 3. Create the TradeDetail entry
             const detailPayload = {
                 price: parseFloat(price),
                 type: tradeDetailType,
                 volume: parseFloat(volume),
                 signal: 'Entry',
                 date: new Date().toISOString(),
-                screenshot: signal.image?.id || signal.image?.documentId,
+                screenshot: screenshotId,
                 note: signal.desc ? createBlocksFromText(signal.desc) : null,
                 trade: savedTradeId,
             };

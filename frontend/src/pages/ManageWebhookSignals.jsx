@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchWebhookSignals, updateWebhookSignalStatus, fetchWebhookSignalById } from '../features/webhookSignalSlice';
 import { executeSignalTrade } from '../features/tradeSlice';
-import { Activity, Check, X, AlertCircle, Image, ExternalLink } from 'lucide-react';
+import api from '../services/api';
+import { Activity, Check, X, Image, ExternalLink } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAccount } from '../context/AccountContext';
 import { Filter } from 'lucide-react';
@@ -17,6 +18,9 @@ const ManageWebhookSignals = () => {
         price: '',
         volume: ''
     });
+    const [screenshotFile, setScreenshotFile] = useState(null);
+    const [screenshotPreview, setScreenshotPreview] = useState(null);
+    const [savingImage, setSavingImage] = useState(false);
     const [fetchingSignalId, setFetchingSignalId] = useState(null);
     const { accountSymbols, selectedAccount } = useAccount();
     const [selectedSymbolFilter, setSelectedSymbolFilter] = useState('');
@@ -69,6 +73,8 @@ const ManageWebhookSignals = () => {
     const handleCloseExecuteModal = () => {
         setExecutingSignal(null);
         setExecuteForm({ price: '', volume: '' });
+        setScreenshotFile(null);
+        setScreenshotPreview(null);
     };
 
     const handleConfirmExecute = async (e) => {
@@ -86,12 +92,66 @@ const ManageWebhookSignals = () => {
             volume: executeForm.volume,
             accountId,
             symbolId,
+            screenshotFile,
         }));
 
         // 2. Update webhook signal status to Execute
         dispatch(updateWebhookSignalStatus({ id, status: 'Execute' }));
 
         handleCloseExecuteModal();
+    };
+
+    const handleScreenshotChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setScreenshotFile(file);
+        setScreenshotPreview(URL.createObjectURL(file));
+    };
+
+    const handleRemoveScreenshot = () => {
+        if (screenshotPreview) URL.revokeObjectURL(screenshotPreview);
+        setScreenshotFile(null);
+        setScreenshotPreview(null);
+    };
+
+    const handleSaveScreenshot = async () => {
+        if (!screenshotFile || !executingSignal) return;
+        setSavingImage(true);
+        try {
+            const token = localStorage.getItem('strapi_token');
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:1337/api';
+
+            // Upload file
+            const formData = new FormData();
+            formData.append('files', screenshotFile);
+            const uploadRes = await fetch(`${API_URL}/upload`, {
+                method: 'POST',
+                headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                body: formData
+            });
+
+            if (!uploadRes.ok) throw new Error('Upload failed');
+            const files = await uploadRes.json();
+            const fileObj = Array.isArray(files) ? files[0] : files;
+            const fileId = fileObj.id || fileObj.documentId;
+
+            // Update webhook signal image relation
+            const id = executingSignal.documentId || executingSignal.id;
+            await api.put(`/webhook-signals/${id}`, {
+                data: { image: fileId }
+            });
+
+            // Refresh signal data
+            const result = await dispatch(fetchWebhookSignalById(id)).unwrap();
+            setExecutingSignal(result);
+            URL.revokeObjectURL(screenshotPreview);
+            setScreenshotFile(null);
+            setScreenshotPreview(null);
+        } catch (err) {
+            console.error('Failed to save screenshot:', err);
+        } finally {
+            setSavingImage(false);
+        }
     };
 
     const handleUpdateStatus = (signal, status) => {
@@ -349,22 +409,44 @@ const ManageWebhookSignals = () => {
                             </form>
 
                             {/* Right Column: Screenshot */}
-                            <div className="p-6 bg-gray-900/30 flex flex-col">
-                                <label className="block text-xs font-medium text-gray-400 mb-2 uppercase tracking-wide">Chart Screenshot</label>
-                                {executingSignal.image?.url ? (
-                                    <div
-                                        className="relative flex-1 rounded-lg overflow-hidden border border-gray-700 cursor-pointer group bg-gray-900"
-                                        onClick={() => window.open(executingSignal.image.url, '_blank')}
-                                        title="Click to open in new tab"
-                                    >
+                            <div className="p-6 bg-gray-900/30 flex flex-col gap-3">
+                                <div className="flex items-center justify-between">
+                                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-wide">Chart Screenshot</label>
+                                    <div className="flex items-center gap-2">
+                                        {screenshotPreview && (
+                                            <button
+                                                onClick={handleSaveScreenshot}
+                                                disabled={savingImage}
+                                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white text-xs font-medium rounded-lg transition-colors"
+                                            >
+                                                {savingImage ? 'Saving...' : 'Save'}
+                                            </button>
+                                        )}
+                                        <label className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors">
+                                            Upload
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={handleScreenshotChange}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                                {(screenshotPreview || executingSignal.image?.url) ? (
+                                    <div className="relative flex-1 rounded-lg overflow-hidden border border-gray-700 cursor-pointer group bg-gray-900">
                                         <img
-                                            src={executingSignal.image.url}
+                                            src={screenshotPreview || executingSignal.image.url}
                                             alt={`Chart ${executingSignal.symbol}`}
                                             className="w-full h-full object-contain transition-transform group-hover:scale-[1.01]"
                                         />
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-all">
                                             <div className="opacity-0 group-hover:opacity-100 bg-black/60 rounded-full p-2 transition-opacity">
-                                                <ExternalLink className="w-6 h-6 text-white" />
+                                                {screenshotPreview ? (
+                                                    <button onClick={(e) => { e.stopPropagation(); handleRemoveScreenshot(); }} className="text-white"><X className="w-6 h-6" /></button>
+                                                ) : (
+                                                    <ExternalLink className="w-6 h-6 text-white" />
+                                                )}
                                             </div>
                                         </div>
                                     </div>

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { X, Calendar, DollarSign, Image as ImageIcon, Activity } from 'lucide-react';
+import { X, DollarSign, Image as ImageIcon, Pencil } from 'lucide-react';
 import { formatNumber } from '../utils/formatNumber';
 import { useAccount } from '../context/AccountContext';
-import { useSelector, useDispatch } from 'react-redux';
+import { useDispatch } from 'react-redux';
 import { fetchLatestHistory } from '../features/marketSlice';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 
-const TradeDetailModal = ({ isOpen, onClose, trade }) => {
+const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const [currentPrice, setCurrentPrice] = useState('');
@@ -50,25 +50,6 @@ const TradeDetailModal = ({ isOpen, onClose, trade }) => {
         return vol ? formatNumber(vol, selectedAccount?.volumeFormat || '###') : '-';
     };
 
-    // Helper to calculate PnL for a leg
-    const calculateLegPnl = (entry, tp, vol) => {
-        const e = parseFloat(entry) || 0;
-        const v = parseFloat(vol) || 0;
-        if (v === 0) return 0;
-
-        // Prioritize Current Price input if valid
-        const curP = parseFloat(currentPrice);
-        const effectiveExit = (!isNaN(curP) && currentPrice !== '')
-            ? curP
-            : (tp ? parseFloat(tp) : 0);
-
-        // If no exit price available (no Current Price and no TP), PnL is usually considered 0 or undefined.
-        // But previously it might have been 0.
-        if (effectiveExit === 0) return 0;
-
-        return trade.type === 'Long' ? (effectiveExit - e) * v : (e - effectiveExit) * v;
-    };
-
     // Helper to format date
     const formatDate = (dateString) => {
         if (!dateString) return '-';
@@ -90,12 +71,6 @@ const TradeDetailModal = ({ isOpen, onClose, trade }) => {
         return type === 'Long' ? 'text-green-400' : 'text-red-400';
     };
 
-    const imageUrl = trade.screenshot?.url
-        ? (trade.screenshot.url.startsWith('http')
-            ? trade.screenshot.url
-            : `${import.meta.env.VITE_API_URL || 'http://localhost:1337'}${trade.screenshot.url}`)
-        : null;
-
     const relevantDetails = (trade.trade_details || []).filter(d =>
         trade.type === 'Long' ? d.type === 'Buy' : d.type === 'Sell'
     );
@@ -106,6 +81,11 @@ const TradeDetailModal = ({ isOpen, onClose, trade }) => {
         : 0;
 
     const totalCalculatedPnl = calculateTradePnL(trade, currentPrice);
+
+    const handleEditTrade = () => {
+        onEdit?.(trade);
+        onClose();
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -123,6 +103,14 @@ const TradeDetailModal = ({ isOpen, onClose, trade }) => {
                             <span className={`px-3 py-1 rounded-full text-sm font-bold ${getStatusColor(trade.trade_status)}`}>
                                 {trade.trade_status}
                             </span>
+
+                            <button
+                                onClick={handleEditTrade}
+                                className="flex items-center gap-2 px-3 py-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:border-blue-400 transition"
+                            >
+                                <Pencil size={14} />
+                                Edit Trade
+                            </button>
                         </div>
                         <div className="flex items-center gap-4 text-gray-400 text-sm">
 

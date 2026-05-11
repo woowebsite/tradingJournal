@@ -4,7 +4,6 @@ import { fetchTrades, saveTrade } from '../features/tradeSlice';
 import { Plus, Filter, Edit2, XCircle } from 'lucide-react';
 import TradeModal from '../components/TradeModal';
 import TradeDetailModal from '../components/TradeDetailModal';
-import api from '../services/api';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { calculateTradePnL } from '../utils/tradeCalculations';
@@ -84,6 +83,7 @@ const Trades = () => {
     };
 
     const handleEditTrade = (trade) => {
+        setSelectedTrade(null);
         setTradeToEdit(trade);
         setIsModalOpen(true);
     };
@@ -106,6 +106,7 @@ const Trades = () => {
                 isOpen={!!selectedTrade}
                 onClose={() => setSelectedTrade(null)}
                 trade={selectedTrade}
+                onEdit={handleEditTrade}
             />
 
             <div className="flex justify-between items-center mb-6">

@@ -2,7 +2,7 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { getCryptoHistory } from '../services/binance';
 
-import { getStockHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
+import { getStockHistory, getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
 // Async Thunks
 export const fetchSymbols = createAsyncThunk(
@@ -198,6 +198,56 @@ export const fetchBatchLatestPrices = createAsyncThunk(
                     pricesMap[symId] = item.close;
                 }
             });
+
+            return pricesMap;
+        } catch (error) {
+            console.error(error);
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
+export const fetchBatchLatestMinutePrices = createAsyncThunk(
+    'market/fetchBatchLatestMinutePrices',
+    async (symbolsList, { rejectWithValue }) => {
+        try {
+            if (!symbolsList || symbolsList.length === 0) return {};
+
+            const pricesMap = {};
+
+            await Promise.all(symbolsList.map(async (symbol) => {
+                const symbolId = symbol?.documentId || symbol?.id;
+                const symbolName = symbol?.Name || symbol?.name || '';
+                const marketName = symbol?.market?.Name || symbol?.market?.name || '';
+                const isCrypto = /crypto|binance/i.test(marketName)
+                    || /^BINANCE:/i.test(symbolName)
+                    || /(?:USDT|USDC|BUSD)(?:\.P)?$/i.test(symbolName);
+                const ticker = isCrypto
+                    ? (symbolName.includes(':') ? symbolName.split(':').pop() : symbolName)
+                    : symbolName.split(':')[0];
+                if (!symbolId || !ticker) return;
+
+                const isDerivative = /derivative|future|phái sinh|phai sinh/i.test(marketName)
+                    || /\d/.test(ticker);
+
+                try {
+                    const minuteBars = isCrypto
+                        ? await getCryptoHistory(ticker, '1m', 2)
+                        : isDerivative
+                        ? await getFuturesHistory(ticker, 'derivative', '1')
+                        : await getStockHistory(ticker, 'stock', '1');
+
+                    if (!Array.isArray(minuteBars) || minuteBars.length === 0) return;
+
+                    const latestBar = [...minuteBars].sort((a, b) => new Date(b.tradingDate) - new Date(a.tradingDate))[0];
+                    const price = latestBar?.close ?? latestBar?.price;
+                    if (price !== undefined && price !== null) {
+                        pricesMap[symbolId] = price;
+                    }
+                } catch (error) {
+                    console.warn(`Failed to fetch latest 1-minute market price for ${ticker}:`, error);
+                }
+            }));
 
             return pricesMap;
         } catch (error) {
@@ -403,6 +453,11 @@ const marketSlice = createSlice({
 
         // Batch Latest Prices
         builder.addCase(fetchBatchLatestPrices.fulfilled, (state, action) => {
+            state.latestPricesMap = { ...state.latestPricesMap, ...action.payload };
+        });
+
+        // Batch Latest Minute Market Prices
+        builder.addCase(fetchBatchLatestMinutePrices.fulfilled, (state, action) => {
             state.latestPricesMap = { ...state.latestPricesMap, ...action.payload };
         });
 
