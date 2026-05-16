@@ -147,7 +147,7 @@ const MarketFlow = () => {
         setLoadingAnalytics(true);
         try {
             const response = await getMarketAnalytics({
-                sort: 'date:desc',
+                sort: ['bsi:desc', 'psi:desc'],
                 pagination: { pageSize: 50 }
             });
             setAnalytics(response.data || []);
@@ -209,7 +209,7 @@ const MarketFlow = () => {
                 industry: selectedIndustry,
             }));
             const response = await saveMarketFlow(entries);
-            
+
             // Save Analytics
             const { bsi, psi } = calculateAnalytics(rowsInc, rowsDesc);
             await saveMarketAnalytic({
@@ -267,7 +267,7 @@ const MarketFlow = () => {
                             industry: ind.code,
                         }));
                         const response = await saveMarketFlow(entries);
-                        
+
                         // Save Analytics for this industry
                         const { bsi, psi } = calculateAnalytics(listInc, listDesc);
                         await saveMarketAnalytic({
@@ -505,169 +505,159 @@ const MarketFlow = () => {
                 </div>
             )}
 
-            {/* Monthly Leaderboard Section */}
-            <div className="mt-12 space-y-6">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
-                            Monthly Leaderboard
-                        </h2>
-                        <p className="text-xs text-gray-400 mt-1">Ranking tickers by cumulative score for the current month</p>
-                    </div>
-                    <button
-                        onClick={loadLeaderboard}
-                        className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors"
-                        title="Refresh Leaderboard"
-                    >
-                        <RefreshCw size={16} className={loadingLeaderboard ? 'animate-spin' : ''} />
-                    </button>
-                </div>
-
-                <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
-                    {loadingLeaderboard && leaderboard.length === 0 ? (
-                        <div className="p-12 text-center text-gray-500">
-                            <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
-                            Calculating leaderboard...
+            {/* Dashboard Bottom Section: Leaderboard & Analytics */}
+            <div className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Monthly Leaderboard Column */}
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                                Monthly Leaderboard
+                            </h2>
+                            <p className="text-xs text-gray-400 mt-1 h-[40px]">Ranking tickers by cumulative score for the current month</p>
                         </div>
-                    ) : leaderboard.length > 0 ? (
-                        <div className="overflow-auto max-h-[600px]">
-                            <table className="w-full text-left text-sm border-collapse">
-                                <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
-                                    <tr>
-                                        <th className="p-4 w-16 text-center font-bold">Rank</th>
-                                        <th className="p-4 font-bold">Ticker</th>
-                                        <th className="p-4 text-right font-bold">Monthly Score</th>
-                                        <th className="p-4 text-center font-bold">Appearances</th>
-                                        <th className="p-4 font-bold">Last Industry</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700/50">
-                                    {leaderboard.map((item, index) => (
-                                        <tr key={item.ticker} className="hover:bg-gray-700/30 transition-colors group">
-                                            <td className="p-4 text-center">
-                                                <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${index === 0 ? 'bg-yellow-500/20 text-yellow-500' :
-                                                    index === 1 ? 'bg-gray-400/20 text-gray-400' :
-                                                        index === 2 ? 'bg-orange-500/20 text-orange-500' :
-                                                            'bg-gray-700/50 text-gray-500'
-                                                    }`}>
-                                                    {index + 1}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 font-bold text-gray-100 group-hover:text-blue-400 transition-colors">
-                                                {item.ticker}
-                                            </td>
-                                            <td className="p-4 text-right">
-                                                <span className={`font-mono font-bold ${item.score >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                    {item.score > 0 ? '+' : ''}{item.score.toLocaleString()}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 text-center text-gray-400 font-mono text-xs">
-                                                {item.count}
-                                            </td>
-                                            <td className="p-4 text-gray-500 text-xs italic">
-                                                {industries.find(i => i.code === item.lastIndustry)?.name || item.lastIndustry}
-                                            </td>
+                        <button
+                            onClick={loadLeaderboard}
+                            className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors"
+                            title="Refresh Leaderboard"
+                        >
+                            <RefreshCw size={16} className={loadingLeaderboard ? 'animate-spin' : ''} />
+                        </button>
+                    </div>
+
+                    <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl h-[500px] flex flex-col">
+                        {loadingLeaderboard && leaderboard.length === 0 ? (
+                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
+                                <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
+                                Calculating leaderboard...
+                            </div>
+                        ) : leaderboard.length > 0 ? (
+                            <div className="overflow-auto flex-1">
+                                <table className="w-full text-left text-sm border-collapse">
+                                    <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
+                                        <tr>
+                                            <th className="p-4 w-16 text-center font-bold">Rank</th>
+                                            <th className="p-4 font-bold">Ticker</th>
+                                            <th className="p-4 text-right font-bold">Monthly Score</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="p-12 text-center text-gray-500">
-                            No data for the current month. Sync and Save data to see rankings.
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Market Analytics Section */}
-            <div className="mt-12 space-y-6">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
-                            Market Analytics (BSI & PSI)
-                        </h2>
-                        <div className="text-[10px] text-gray-400 mt-1 space-y-0.5 font-mono uppercase tracking-wider">
-                            <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng</p>
-                            <p>PSI = ∑positive_impact − ∑negative_impact</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={loadAnalytics}
-                        className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors"
-                        title="Refresh Analytics"
-                    >
-                        <RefreshCw size={16} className={loadingAnalytics ? 'animate-spin' : ''} />
-                    </button>
-                </div>
-
-                <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
-                    {loadingAnalytics && analytics.length === 0 ? (
-                        <div className="p-12 text-center text-gray-500">
-                            <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
-                            Loading analytics...
-                        </div>
-                    ) : analytics.length > 0 ? (
-                        <div className="overflow-auto max-h-[600px]">
-                            <table className="w-full text-left text-sm border-collapse">
-                                <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
-                                    <tr>
-                                        <th className="p-4 font-bold">Time</th>
-                                        <th className="p-4 font-bold">Industry</th>
-                                        <th className="p-4 text-center font-bold">BSI (Breadth)</th>
-                                        <th className="p-4 text-center font-bold">PSI (Pressure)</th>
-                                        <th className="p-4 font-bold">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700/50">
-                                    {analytics.map((item) => (
-                                        <tr key={item.id} className="hover:bg-gray-700/30 transition-colors group">
-                                            <td className="p-4 text-gray-300 font-mono text-xs">
-                                                {new Date(item.date).toLocaleString('vi-VN')}
-                                            </td>
-                                            <td className="p-4 text-gray-300 font-medium">
-                                                {industries.find(i => i.code === item.industry)?.name || item.industry}
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <div className="flex flex-col items-center gap-1">
-                                                    <span className={`font-bold font-mono ${item.bsi >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
-                                                        {(item.bsi * 100).toFixed(1)}%
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/50">
+                                        {leaderboard.map((item, index) => (
+                                            <tr key={item.ticker} className="hover:bg-gray-700/30 transition-colors group">
+                                                <td className="p-4 text-center">
+                                                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${index === 0 ? 'bg-yellow-500/20 text-yellow-500' :
+                                                        index === 1 ? 'bg-gray-400/20 text-gray-400' :
+                                                            index === 2 ? 'bg-orange-500/20 text-orange-500' :
+                                                                'bg-gray-700/50 text-gray-500'
+                                                        }`}>
+                                                        {index + 1}
                                                     </span>
-                                                    <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                                                        <div 
-                                                            className={`h-full transition-all ${item.bsi >= 0.5 ? 'bg-green-500' : 'bg-red-500'}`}
-                                                            style={{ width: `${item.bsi * 100}%` }}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="p-4 text-center font-mono font-bold">
-                                                <span className={item.psi >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                                    {item.psi > 0 ? '+' : ''}{item.psi.toLocaleString()}
-                                                </span>
-                                            </td>
-                                            <td className="p-4">
-                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                                    item.bsi >= 0.7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                    item.bsi >= 0.5 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                                                    item.bsi >= 0.3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                                                    'bg-red-500/20 text-red-400 border border-red-500/30'
-                                                }`}>
-                                                    {item.bsi >= 0.7 ? 'Strong Bull' :
-                                                     item.bsi >= 0.5 ? 'Healthy' :
-                                                     item.bsi >= 0.3 ? 'Weak' : 'Bearish'}
-                                                </span>
-                                            </td>
+                                                </td>
+                                                <td className="p-4 font-bold text-gray-100 group-hover:text-blue-400 transition-colors">
+                                                    {item.ticker}
+                                                </td>
+                                                <td className="p-4 text-right">
+                                                    <span className={`font-mono font-bold ${item.score >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                        {item.score > 0 ? '+' : ''}{item.score.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
+                                No data for the current month.
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Market Analytics Column */}
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                                Market Analytics (BSI & PSI)
+                            </h2>
+                            <div className="text-[10px] text-gray-400 mt-1 space-y-0.5 font-mono uppercase tracking-wider h-[40px]">
+                                <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng</p>
+                                <p>PSI = ∑positive_impact − ∑negative_impact</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={loadAnalytics}
+                            className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors"
+                            title="Refresh Analytics"
+                        >
+                            <RefreshCw size={16} className={loadingAnalytics ? 'animate-spin' : ''} />
+                        </button>
+                    </div>
+
+                    <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl h-[500px] flex flex-col">
+                        {loadingAnalytics && analytics.length === 0 ? (
+                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
+                                <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
+                                Loading analytics...
+                            </div>
+                        ) : analytics.length > 0 ? (
+                            <div className="overflow-auto flex-1">
+                                <table className="w-full text-left text-sm border-collapse">
+                                    <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
+                                        <tr>
+                                            <th className="p-4 font-bold text-xs uppercase">Industry</th>
+                                            <th className="p-4 text-center font-bold text-xs uppercase">BSI</th>
+                                            <th className="p-4 text-center font-bold text-xs uppercase">PSI</th>
+                                            <th className="p-4 font-bold text-xs uppercase">Status</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="p-12 text-center text-gray-500">
-                            No analytics data available yet.
-                        </div>
-                    )}
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/50">
+                                        {analytics.map((item) => (
+                                            <tr key={item.id} className="hover:bg-gray-700/30 transition-colors group">
+                                                <td className="p-4 text-gray-300 font-medium text-xs">
+                                                    {industries.find(i => i.code === item.industry)?.name || item.industry}
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        <span className={`font-bold font-mono text-xs ${item.bsi >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
+                                                            {(item.bsi * 100).toFixed(1)}%
+                                                        </span>
+                                                        <div className="w-12 h-1 bg-gray-700 rounded-full overflow-hidden">
+                                                            <div
+                                                                className={`h-full transition-all ${item.bsi >= 0.5 ? 'bg-green-500' : 'bg-red-500'}`}
+                                                                style={{ width: `${item.bsi * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 text-center font-mono font-bold text-xs">
+                                                    <span className={item.psi >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                                        {item.psi > 0 ? '+' : ''}{item.psi.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${item.bsi >= 0.7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                                        item.bsi >= 0.5 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                                                            item.bsi >= 0.3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                                                                'bg-red-500/20 text-red-400 border border-red-500/30'
+                                                        }`}>
+                                                        {item.bsi >= 0.7 ? 'Strong' :
+                                                            item.bsi >= 0.5 ? 'Healthy' :
+                                                                item.bsi >= 0.3 ? 'Weak' : 'Bearish'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
+                                No analytics data available yet.
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
