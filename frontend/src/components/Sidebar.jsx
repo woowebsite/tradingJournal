@@ -16,7 +16,8 @@ const Sidebar = () => {
                 {
                     icon: BarChart2, label: 'Trade Station', path: '/trade-station',
                     subItems: [
-                        { label: 'Today', path: '/today-trades' }
+                        { label: 'Today', path: '/today-trades' },
+                        { label: 'Market Flow', path: '/market-flow' },
                     ]
                 },
                 { icon: TrendingUp, label: 'Derivation', path: '/derivation' },

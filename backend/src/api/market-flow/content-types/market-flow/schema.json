@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "market_flows",
+  "info": {
+    "singularName": "market-flow",
+    "pluralName": "market-flows",
+    "displayName": "Market Flow"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "ticker": {
+      "type": "string",
+      "required": true
+    },
+    "score": {
+      "type": "float"
+    },
+    "date": {
+      "type": "datetime",
+      "required": true
+    },
+    "industry": {
+      "type": "string"
+    },
+    "td": {
+      "type": "biginteger"
+    }
+  }
+}

@@ -130,7 +130,7 @@ export const getIntradaySnapshots = async (tickers) => {
         'Content-Type': 'application/json',
     };
 
-    if (token && !/[^\x00-\x7F]/.test(token)) {
+    if (token && [...token].every(char => char.charCodeAt(0) <= 127)) {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
@@ -143,6 +143,33 @@ export const getIntradaySnapshots = async (tickers) => {
         return jsonData.data || [];
     } catch (error) {
         console.error("Failed to fetch snapshots:", error);
+        throw error;
+    }
+};
+
+export const getMarketFlowLeader = async ({ exchange = 'ALL', industry = '2300', type = '1d' } = {}) => {
+    const params = new URLSearchParams({ exchange, industry, type });
+    const url = `/api-tcbs/stock-insight/v1/intraday/flow-market-leader?${params.toString()}`;
+    const token = import.meta.env.VITE_TCBS_TOKEN;
+
+    const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    };
+
+    if (token && [...token].every(char => char.charCodeAt(0) <= 127)) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    try {
+        const response = await fetch(url, { method: 'GET', headers });
+        if (!response.ok) {
+            throw new Error(`TCBS Market Flow API Error: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to fetch market flow:", error);
         throw error;
     }
 };

@@ -71,6 +71,11 @@ export default {
         'api::webhook-signal.webhook-signal.findOne',
         'api::webhook-signal.webhook-signal.update',
         'api::webhook-signal.webhook-signal.delete',
+        'api::market-flow.market-flow.find',
+        'api::market-flow.market-flow.findOne',
+        'api::market-flow.market-flow.create',
+        'api::industry.industry.find',
+        'api::industry.industry.findOne',
       ];
 
       // Find permission IDs
