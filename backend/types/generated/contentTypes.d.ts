@@ -502,6 +502,38 @@ export interface ApiIndustryIndustry extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiMarketAnalyticMarketAnalytic
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'market_analytics';
+  info: {
+    displayName: 'Market Analytics';
+    pluralName: 'market-analytics';
+    singularName: 'market-analytic';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bsi: Schema.Attribute.Float;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    industry: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::market-analytic.market-analytic'
+    > &
+      Schema.Attribute.Private;
+    psi: Schema.Attribute.Float;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiMarketFlowMarketFlow extends Struct.CollectionTypeSchema {
   collectionName: 'market_flows';
   info: {
@@ -1484,6 +1516,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::account.account': ApiAccountAccount;
       'api::industry.industry': ApiIndustryIndustry;
+      'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;
       'api::rule.rule': ApiRuleRule;
