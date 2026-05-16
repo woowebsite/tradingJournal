@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Save, ChevronDown, Loader2, CloudDownload } from 'lucide-react';
+import { RefreshCw, Save, ChevronDown, Loader2, CloudDownload, X, CheckCircle2 } from 'lucide-react';
 import { getMarketFlowLeader } from '../services/tcbs';
 import { saveMarketFlow } from '../services/marketFlow';
 import { getIndustries, syncIndustriesFromTCBS, syncIndustries } from '../services/industry';
@@ -22,6 +22,14 @@ const MarketFlow = () => {
     const [industryOpen, setIndustryOpen] = useState(false);
     const [loadingIndustries, setLoadingIndustries] = useState(false);
     const [syncing, setSyncing] = useState(false);
+
+    // Auto-hide toast after 3 seconds
+    useEffect(() => {
+        if (saveSuccess) {
+            const timer = setTimeout(() => setSaveSuccess(false), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [saveSuccess]);
 
     const rowsInc = useMemo(() => payload?.body?.listInc || [], [payload]);
     const rowsDesc = useMemo(() => payload?.body?.listDesc || [], [payload]);
@@ -100,6 +108,13 @@ const MarketFlow = () => {
         loadIndustries();
     }, []);
 
+    // Auto-load market flow when industry changes
+    useEffect(() => {
+        if (selectedIndustry) {
+            loadMarketFlow();
+        }
+    }, [selectedIndustry]);
+
     const parseDate = (td) => {
         if (!td) return new Date().toISOString();
         const d = new Date(td * 1000);
@@ -108,11 +123,16 @@ const MarketFlow = () => {
             : d.toISOString();
     };
 
+    const [saveStats, setSaveStats] = useState(null);
+    const [savingAll, setSavingAll] = useState(false);
+    const [saveAllProgress, setSaveAllProgress] = useState({ current: 0, total: 0 });
+
     const handleSave = async () => {
         const allEntries = [...rowsInc, ...rowsDesc];
         if (!allEntries.length) return;
         setSaving(true);
         setSaveSuccess(false);
+        setSaveStats(null);
         setError('');
 
         try {
@@ -123,12 +143,72 @@ const MarketFlow = () => {
                 date: parseDate(payload?.body?.time),
                 industry: selectedIndustry,
             }));
-            await saveMarketFlow(entries);
+            const response = await saveMarketFlow(entries);
+            setSaveStats(response.data);
             setSaveSuccess(true);
         } catch (err) {
             setError(err.message || 'Failed to save market flow.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleSaveAll = async () => {
+        if (!industries.length) return;
+        setSavingAll(true);
+        setSaveSuccess(false);
+        setError('');
+        setSaveStats(null);
+        setSaveAllProgress({ current: 0, total: industries.length });
+
+        try {
+            let totalCreated = 0;
+            let totalSkipped = 0;
+
+            for (let i = 0; i < industries.length; i++) {
+                const ind = industries[i];
+                setSaveAllProgress({ current: i + 1, total: industries.length });
+
+                // Fetch data for this specific industry
+                const data = await getMarketFlowLeader({
+                    exchange: 'ALL',
+                    industry: ind.code,
+                    type: '1d',
+                });
+
+                if (data?.body) {
+                    const listInc = data.body.listInc || [];
+                    const listDesc = data.body.listDesc || [];
+                    const allEntries = [...listInc, ...listDesc];
+
+                    if (allEntries.length > 0) {
+                        const entries = allEntries.map(row => ({
+                            ticker: row?.ticker || '',
+                            score: parseFloat(row?.s) || 0,
+                            td: row?.td,
+                            date: parseDate(data.body.time),
+                            industry: ind.code,
+                        }));
+                        const response = await saveMarketFlow(entries);
+                        if (response.data) {
+                            totalCreated += response.data.created || 0;
+                            totalSkipped += response.data.skipped || 0;
+                        }
+                    }
+                }
+            }
+
+            setSaveStats({
+                created: totalCreated,
+                skipped: totalSkipped,
+                message: `Successfully processed all ${industries.length} industries.`
+            });
+            setSaveSuccess(true);
+        } catch (err) {
+            console.error('Save All failed:', err);
+            setError(`Failed at industry ${saveAllProgress.current}: ${err.message}`);
+        } finally {
+            setSavingAll(false);
         }
     };
 
@@ -248,23 +328,33 @@ const MarketFlow = () => {
                         className="flex items-center gap-2 px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg hover:bg-gray-800 disabled:opacity-50 transition text-gray-300 text-sm"
                     >
                         <CloudDownload size={14} className={syncing ? 'animate-spin' : ''} />
-                        Sync
+                        Sync Industries
                     </button>
+
 
                     <button
                         type="button"
-                        onClick={loadMarketFlow}
-                        disabled={loading}
-                        className="flex items-center gap-2 px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg hover:bg-gray-800 disabled:opacity-50 transition text-gray-300 text-sm"
+                        onClick={handleSaveAll}
+                        disabled={savingAll || syncing || loading}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 border border-emerald-500 rounded-lg hover:bg-emerald-500 disabled:opacity-50 transition text-white text-sm font-semibold shadow-lg shadow-emerald-900/20"
                     >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        Refresh
+                        {savingAll ? (
+                            <>
+                                <Loader2 size={14} className="animate-spin text-blue-400" />
+                                <span className="text-blue-400">{saveAllProgress.current}/{saveAllProgress.total}</span>
+                            </>
+                        ) : (
+                            <>
+                                <CloudDownload size={14} />
+                                Save All
+                            </>
+                        )}
                     </button>
 
                     <button
                         type="button"
                         onClick={handleSave}
-                        disabled={saving || !rowsInc.length}
+                        disabled={saving || savingAll || (!rowsInc.length && !rowsDesc.length)}
                         className="flex items-center gap-2 px-5 py-2 bg-blue-600 border border-blue-500 rounded-lg hover:bg-blue-500 disabled:opacity-50 transition text-white text-sm font-semibold shadow-lg shadow-blue-900/20"
                     >
                         <Save size={14} />
@@ -281,9 +371,27 @@ const MarketFlow = () => {
             )}
 
             {saveSuccess && (
-                <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-green-300 text-sm flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                    Saved successfully!
+                <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-right-10 fade-in duration-300">
+                    <div className="flex items-center gap-3 px-5 py-4 bg-gray-900 border border-green-500/50 rounded-2xl shadow-2xl shadow-green-500/10 backdrop-blur-xl">
+                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <CheckCircle2 size={20} className="text-green-500" />
+                        </div>
+                        <div className="min-w-[200px]">
+                            <p className="text-sm font-bold text-gray-100">Sync Complete!</p>
+                            <div className="text-xs text-gray-400 mt-1 space-y-0.5">
+                                {saveStats?.created > 0 && <p className="text-green-400">Created: {saveStats.created}</p>}
+                                {saveStats?.skipped > 0 && <p className="text-orange-400">Skipped (duplicates): {saveStats.skipped}</p>}
+                                {saveStats?.errors > 0 && <p className="text-red-400">Errors: {saveStats.errors}</p>}
+                                {!saveStats && <p>Data has been synced to backend.</p>}
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setSaveSuccess(false)}
+                            className="p-1 hover:bg-gray-800 rounded-lg transition-colors text-gray-500"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
                 </div>
             )}
 
