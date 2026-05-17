@@ -16,7 +16,7 @@ const Sidebar = () => {
                 {
                     icon: BarChart2, label: 'Trade Station', path: '/trade-station',
                     subItems: [
-                        { label: 'Today', path: '/today-trades' }
+                        { label: 'Today', path: '/today-trades' },
                     ]
                 },
                 { icon: TrendingUp, label: 'Derivation', path: '/derivation' },
@@ -38,7 +38,12 @@ const Sidebar = () => {
         {
             label: 'Management',
             items: [
-                { icon: LineChart, label: 'Market', path: '/manage-market' },
+                {
+                    icon: LineChart, label: 'Market', path: '/manage-market',
+                    subItems: [
+                        { label: 'Market Flow', path: '/market-flow' },
+                    ]
+                },
                 { icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies' },
                 { icon: Activity, label: 'Rules', path: '/manage-rules' },
                 {
@@ -60,7 +65,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station']);
+    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>

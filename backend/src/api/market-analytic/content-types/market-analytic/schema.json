@@ -1,0 +1,28 @@
+{
+  "kind": "collectionType",
+  "collectionName": "market_analytics",
+  "info": {
+    "singularName": "market-analytic",
+    "pluralName": "market-analytics",
+    "displayName": "Market Analytics"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "datetime",
+      "required": true
+    },
+    "bsi": {
+      "type": "float"
+    },
+    "psi": {
+      "type": "float"
+    },
+    "industry": {
+      "type": "string"
+    }
+  }
+}
