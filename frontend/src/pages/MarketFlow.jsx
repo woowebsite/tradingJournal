@@ -172,11 +172,34 @@ const MarketFlow = () => {
     }, [selectedIndustry]);
 
     const parseDate = (td) => {
-        if (!td) return new Date().toISOString();
-        const d = new Date(td * 1000);
-        return isNaN(d.getTime()) || d.getFullYear() < 2020
-            ? new Date().toISOString()
-            : d.toISOString();
+        if (typeof td === 'string' && td.includes('/')) {
+            // Parse "DD/MM HH:mm" (e.g., "18/05 14:59")
+            try {
+                const [datePart, timePart] = td.split(' ');
+                const [day, month] = datePart.split('/');
+                const [hour, minute] = timePart ? timePart.split(':') : ['14', '59']; // Default to 14:59 if no time
+                
+                const currentYear = new Date().getFullYear();
+                // Construct string in Vietnam time (UTC+7)
+                const isoString = `${currentYear}-${month}-${day}T${hour}:${minute}:00+07:00`;
+                const d = new Date(isoString);
+                
+                if (!isNaN(d.getTime())) {
+                    return d.toISOString();
+                }
+            } catch (e) {
+                console.error("Failed to parse time:", td, e);
+            }
+        }
+        
+        let d = td && !isNaN(td) ? new Date(td * 1000) : new Date();
+        if (isNaN(d.getTime()) || d.getFullYear() < 2020) {
+            d = new Date();
+        }
+        
+        // Extract UTC date part (trading date) and set to 14:59 VN time (07:59 UTC)
+        const dateStr = d.toISOString().split('T')[0];
+        return `${dateStr}T07:59:00.000Z`;
     };
 
     const [saveStats, setSaveStats] = useState(null);
