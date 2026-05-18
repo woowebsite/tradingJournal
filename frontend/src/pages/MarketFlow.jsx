@@ -147,10 +147,27 @@ const MarketFlow = () => {
         setLoadingAnalytics(true);
         try {
             const response = await getMarketAnalytics({
-                sort: ['bsi:desc', 'psi:desc'],
-                pagination: { pageSize: 50 }
+                sort: ['date:desc', 'createdAt:desc'],
+                pagination: { pageSize: 2000 }
             });
-            setAnalytics(response.data || []);
+
+            const data = response.data || [];
+            const uniqueIndustries = new Map();
+
+            // Keep only the most recent entry for each industry
+            data.forEach(item => {
+                if (!uniqueIndustries.has(item.industry)) {
+                    uniqueIndustries.set(item.industry, item);
+                }
+            });
+
+            // Sort by BSI and PSI descending
+            const analyticsData = Array.from(uniqueIndustries.values()).sort((a, b) => {
+                if (b.bsi !== a.bsi) return b.bsi - a.bsi;
+                return b.psi - a.psi;
+            });
+
+            setAnalytics(analyticsData);
         } catch (err) {
             console.error('Failed to load analytics:', err);
         } finally {
@@ -178,12 +195,12 @@ const MarketFlow = () => {
                 const [datePart, timePart] = td.split(' ');
                 const [day, month] = datePart.split('/');
                 const [hour, minute] = timePart ? timePart.split(':') : ['14', '59']; // Default to 14:59 if no time
-                
+
                 const currentYear = new Date().getFullYear();
                 // Construct string in Vietnam time (UTC+7)
                 const isoString = `${currentYear}-${month}-${day}T${hour}:${minute}:00+07:00`;
                 const d = new Date(isoString);
-                
+
                 if (!isNaN(d.getTime())) {
                     return d.toISOString();
                 }
@@ -191,12 +208,12 @@ const MarketFlow = () => {
                 console.error("Failed to parse time:", td, e);
             }
         }
-        
+
         let d = td && !isNaN(td) ? new Date(td * 1000) : new Date();
         if (isNaN(d.getTime()) || d.getFullYear() < 2020) {
             d = new Date();
         }
-        
+
         // Extract UTC date part (trading date) and set to 14:59 VN time (07:59 UTC)
         const dateStr = d.toISOString().split('T')[0];
         return `${dateStr}T07:59:00.000Z`;
