@@ -19,6 +19,7 @@ import Derivation from './pages/Derivation';
 import AccountDetail from './pages/AccountDetail';
 import Journal from './pages/Journal';
 import JournalTrade from './pages/JournalTrade';
+import TCBSStrategySignals from './pages/TCBSStrategySignals';
 import { AccountProvider } from './context/AccountContext';
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
             <Route path="journal-trade" element={<JournalTrade />} />
             <Route path="settings" element={<Settings />} />
             <Route path="signals" element={<Signals />} />
+            <Route path="tcbs-strategy-signals" element={<TCBSStrategySignals />} />
             <Route path="manage-market" element={<ManageMarket />} />
             <Route path="manage-rules" element={<ManageRules />} />
             <Route path="manage-strategies" element={<ManageStrategies />} />

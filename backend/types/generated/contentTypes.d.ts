@@ -809,6 +809,79 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiTcbsStrategySignalTcbsStrategySignal
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'tcbs_strategy_signals';
+  info: {
+    displayName: 'TCBSStrategySignal';
+    pluralName: 'tcbs-strategy-signals';
+    singularName: 'tcbs-strategy-signal';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    CPrice: Schema.Attribute.Decimal;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::tcbs-strategy-signal.tcbs-strategy-signal'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    Sig: Schema.Attribute.Integer;
+    strategy: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::tcbs-strategy.tcbs-strategy'
+    >;
+    strategyKey: Schema.Attribute.String & Schema.Attribute.Required;
+    TDate: Schema.Attribute.Date & Schema.Attribute.Required;
+    ticker: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    Volume: Schema.Attribute.BigInteger;
+  };
+}
+
+export interface ApiTcbsStrategyTcbsStrategy
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'tcbs_strategies';
+  info: {
+    displayName: 'TCBSStrategy';
+    pluralName: 'tcbs-strategies';
+    singularName: 'tcbs-strategy';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::tcbs-strategy.tcbs-strategy'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    signals: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::tcbs-strategy-signal.tcbs-strategy-signal'
+    >;
+    strategyKey: Schema.Attribute.String & Schema.Attribute.Required;
+    strategyName: Schema.Attribute.String;
+    ticker: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiTradeDetailTradeDetail extends Struct.CollectionTypeSchema {
   collectionName: 'trade_details';
   info: {
@@ -1525,6 +1598,8 @@ declare module '@strapi/strapi' {
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
       'api::symbol.symbol': ApiSymbolSymbol;
+      'api::tcbs-strategy-signal.tcbs-strategy-signal': ApiTcbsStrategySignalTcbsStrategySignal;
+      'api::tcbs-strategy.tcbs-strategy': ApiTcbsStrategyTcbsStrategy;
       'api::trade-detail.trade-detail': ApiTradeDetailTradeDetail;
       'api::trade.trade': ApiTradeTrade;
       'api::watch-list.watch-list': ApiWatchListWatchList;
