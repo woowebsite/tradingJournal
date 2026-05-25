@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchWebhookSignals, updateWebhookSignalStatus, fetchWebhookSignalById } from '../features/webhookSignalSlice';
 import { executeSignalTrade } from '../features/tradeSlice';
 import api from '../services/api';
 import { Activity, Check, X, Image, ExternalLink } from 'lucide-react';
+import getDecimalPlaces from '../utils/getDecimalPlaces';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAccount } from '../context/AccountContext';
 import { Filter } from 'lucide-react';
@@ -16,7 +17,9 @@ const ManageWebhookSignals = () => {
     const [executingSignal, setExecutingSignal] = useState(null);
     const [executeForm, setExecuteForm] = useState({
         price: '',
-        volume: ''
+        volume: '',
+        slPnL: '', // SL theo PnL
+        tpPnL: '', // TP theo PnL
     });
     const [screenshotFile, setScreenshotFile] = useState(null);
     const [screenshotPreview, setScreenshotPreview] = useState(null);
@@ -24,6 +27,10 @@ const ManageWebhookSignals = () => {
     const [fetchingSignalId, setFetchingSignalId] = useState(null);
     const { accountSymbols, selectedAccount } = useAccount();
     const [selectedSymbolFilter, setSelectedSymbolFilter] = useState('');
+    
+    // Binance execution states
+    const [isExecuting, setIsExecuting] = useState(false);
+    const [modalError, setModalError] = useState('');
 
 
     useEffect(() => {
@@ -34,7 +41,7 @@ const ManageWebhookSignals = () => {
     useEffect(() => {
         const handleEsc = (event) => {
             if (event.key === 'Escape') {
-                handleCloseExecuteModal();
+                if (!isExecuting) handleCloseExecuteModal();
             }
         };
 
@@ -45,7 +52,7 @@ const ManageWebhookSignals = () => {
         return () => {
             window.removeEventListener('keydown', handleEsc);
         };
-    }, [executingSignal]);
+    }, [executingSignal, isExecuting]);
 
     // Handle incoming realtime signals to refresh the list automatically
     useWebSocket({
@@ -60,45 +67,68 @@ const ManageWebhookSignals = () => {
         try {
             const result = await dispatch(fetchWebhookSignalById(id)).unwrap();
             setExecutingSignal(result);
-            setExecuteForm({ price: result.price || '', volume: '' });
+            setExecuteForm({ price: result.price || '', volume: '', slPnL: '', tpPnL: '' });
+            setModalError('');
         } catch (error) {
             console.error("Failed to fetch signal details:", error);
             // Fallback to existing signal if fetch fails
             setExecutingSignal(signal);
+            setModalError('');
         } finally {
             setFetchingSignalId(null);
         }
     };
 
     const handleCloseExecuteModal = () => {
+        if (isExecuting) return;
         setExecutingSignal(null);
-        setExecuteForm({ price: '', volume: '' });
+        setExecuteForm({ price: '', volume: '', slPnL: '', tpPnL: '' });
         setScreenshotFile(null);
         setScreenshotPreview(null);
+        setModalError('');
     };
 
     const handleConfirmExecute = async (e) => {
         e.preventDefault();
-        if (!executingSignal) return;
+        if (!executingSignal || isExecuting) return;
 
         const id = executingSignal.documentId || executingSignal.id;
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
         const symbolId = executingSignal.linked_symbol?.documentId || executingSignal.linked_symbol?.id;
 
-        // 1. Create Trade and TradeDetail
-        dispatch(executeSignalTrade({
-            signal: executingSignal,
-            price: executeForm.price,
-            volume: executeForm.volume,
-            accountId,
-            symbolId,
-            screenshotFile,
-        }));
+        setIsExecuting(true);
+        setModalError('');
 
-        // 2. Update webhook signal status to Execute
-        dispatch(updateWebhookSignalStatus({ id, status: 'Execute' }));
+        const decimals = getDecimalPlaces(executeForm.price);
+        const slPriceFormatted = calculatedSlPrice !== null ? calculatedSlPrice.toFixed(Math.max(2, decimals)) : '';
+        const tpPriceFormatted = calculatedTpPrice !== null ? calculatedTpPrice.toFixed(Math.max(2, decimals)) : '';
 
-        handleCloseExecuteModal();
+        try {
+            await dispatch(executeSignalTrade({
+                signal: executingSignal,
+                price: executeForm.price,
+                volume: executeForm.volume,
+                accountId,
+                symbolId,
+                screenshotFile,
+                account: selectedAccount,
+                slPnL: executeForm.slPnL,
+                tpPnL: executeForm.tpPnL,
+                slPrice: slPriceFormatted,
+                tpPrice: tpPriceFormatted,
+            })).unwrap();
+
+            await dispatch(updateWebhookSignalStatus({ id, status: 'Execute' })).unwrap();
+            handleCloseExecuteModal();
+        } catch (err) {
+            console.error("Execution failed:", err);
+            const errorMsg = typeof err === 'string' 
+                ? err 
+                : err?.message || err?.error || 'An error occurred during execution. Please check your inputs and Binance API credentials.';
+            setModalError(errorMsg);
+        } finally {
+            setIsExecuting(false);
+        }
     };
 
     const handleScreenshotChange = (e) => {
@@ -161,6 +191,33 @@ const ManageWebhookSignals = () => {
 
     // Calculate USD value dynamically
     const usdValue = (parseFloat(executeForm.price || 0) * parseFloat(executeForm.volume || 0)).toFixed(2);
+
+    // Tính giá TP/SL dựa trên PnL nhập vào
+    const signalType = executingSignal?.signal?.toUpperCase() || '';
+    const entryPrice = parseFloat(executeForm.price);
+    const slPnL = parseFloat(executeForm.slPnL);
+    const tpPnL = parseFloat(executeForm.tpPnL);
+
+    // Tính toán giá SL/TP
+    const calculatedSlPrice = useMemo(() => {
+        if (!entryPrice || !slPnL) return null;
+        if (["LONG", "BUY"].includes(signalType)) {
+            return entryPrice - Math.abs(slPnL);
+        } else if (["SHORT", "SELL"].includes(signalType)) {
+            return entryPrice + Math.abs(slPnL);
+        }
+        return null;
+    }, [entryPrice, slPnL, signalType]);
+
+    const calculatedTpPrice = useMemo(() => {
+        if (!entryPrice || !tpPnL) return null;
+        if (["LONG", "BUY"].includes(signalType)) {
+            return (entryPrice + Math.abs(tpPnL))
+        } else if (["SHORT", "SELL"].includes(signalType)) {
+            return (entryPrice - Math.abs(tpPnL))
+        }
+        return null;
+    }, [entryPrice, tpPnL, signalType]);
 
     return (
         <div className="p-6">
@@ -330,6 +387,12 @@ const ManageWebhookSignals = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2">
                             {/* Left Column: Form */}
                             <form onSubmit={handleConfirmExecute} className="p-6 space-y-4 border-r border-gray-700">
+                                {modalError && (
+                                    <div className="p-3 bg-red-900/40 border border-red-500/50 rounded-lg text-red-200 text-xs whitespace-pre-wrap break-words">
+                                        {modalError}
+                                    </div>
+                                )}
+
                                 <div>
                                     <label className="block text-sm font-medium text-gray-300 mb-1">Symbol</label>
                                     <input
@@ -356,9 +419,10 @@ const ManageWebhookSignals = () => {
                                             type="number"
                                             step="any"
                                             required
+                                            disabled={isExecuting}
                                             value={executeForm.price}
                                             onChange={(e) => setExecuteForm(prev => ({ ...prev, price: e.target.value }))}
-                                            className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                            className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                                             placeholder="0.00"
                                         />
                                     </div>
@@ -368,19 +432,47 @@ const ManageWebhookSignals = () => {
                                             type="number"
                                             step="any"
                                             required
+                                            disabled={isExecuting}
                                             value={executeForm.volume}
                                             onChange={(e) => setExecuteForm(prev => ({ ...prev, volume: e.target.value }))}
-                                            className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                            className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                                             placeholder="0.00"
                                         />
+                                        <p className="text-s text-blue-500 mt-1 ml-2">
+                                            <span>{isNaN(usdValue) ? '0.00' : usdValue} $</span>
+                                        </p>
                                     </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-300 mb-1">USD Value</label>
-                                    <div className="w-full bg-gray-900 border border-gray-700 text-green-400 font-mono rounded-lg px-4 py-2 flex items-center justify-between">
-                                        <span>$</span>
-                                        <span>{isNaN(usdValue) ? '0.00' : usdValue}</span>
+                                {/* TP/SL theo PnL */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-1">SL (PnL)</label>
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            min="0"
+                                            disabled={isExecuting}
+                                            value={executeForm.slPnL}
+                                            onChange={e => setExecuteForm(prev => ({ ...prev, slPnL: e.target.value }))}
+                                            className="w-full bg-gray-900 border border-gray-700 text-red-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-red-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                                            placeholder="Nhập SL theo PnL"
+                                        />
+                                        <div className="text-xs text-red-400 mt-1">Giá Stoploss: <span className="font-mono">{calculatedSlPrice || '--'}</span></div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-1">TP (PnL)</label>
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            min="0"
+                                            disabled={isExecuting}
+                                            value={executeForm.tpPnL}
+                                            onChange={e => setExecuteForm(prev => ({ ...prev, tpPnL: e.target.value }))}
+                                            className="w-full bg-gray-900 border border-gray-700 text-green-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-green-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                                            placeholder="Nhập TP theo PnL"
+                                        />
+                                        <div className="text-xs text-green-400 mt-1">Giá Takeprofit: <span className="font-mono">{calculatedTpPrice || '--'}</span></div>
                                     </div>
                                 </div>
 
@@ -388,22 +480,29 @@ const ManageWebhookSignals = () => {
                                     <button
                                         type="button"
                                         onClick={handleCloseExecuteModal}
-                                        className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
+                                        disabled={isExecuting}
+                                        className="px-4 py-2 text-gray-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         Cancel
                                     </button>
                                     <button
                                         type="submit"
-                                        className={`px-6 py-2 text-white font-medium rounded-lg transition-colors shadow-lg ${['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase())
+                                        disabled={isExecuting}
+                                        className={`px-6 py-2 text-white font-medium rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase())
                                             ? 'bg-green-600 hover:bg-green-700 shadow-green-600/20'
                                             : ['SHORT', 'SELL'].includes(executingSignal.signal?.toUpperCase())
                                                 ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
                                                 : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
                                             }`}
                                     >
-                                        {['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase()) ? 'Long' :
+                                        {isExecuting && (
+                                            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                        )}
+                                        {isExecuting ? 'Executing...' : (
+                                            ['LONG', 'BUY'].includes(executingSignal.signal?.toUpperCase()) ? 'Long' :
                                             ['SHORT', 'SELL'].includes(executingSignal.signal?.toUpperCase()) ? 'Short' :
-                                                'Execute'}
+                                            'Execute'
+                                        )}
                                     </button>
                                 </div>
                             </form>

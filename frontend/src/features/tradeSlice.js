@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { createBlocksFromText } from '../utils/textUtils';
+import { executeBinanceOrder } from '../services/binanceExecution';
 
 export const fetchTrades = createAsyncThunk(
     'trades/fetchTrades',
@@ -181,7 +182,7 @@ export const saveTrade = createAsyncThunk(
 
 export const executeSignalTrade = createAsyncThunk(
     'trades/executeSignalTrade',
-    async ({ signal, price, volume, accountId, symbolId, screenshotFile }, { rejectWithValue }) => {
+    async ({ signal, price, volume, accountId, symbolId, screenshotFile, account }, { rejectWithValue }) => {
         try {
             const token = localStorage.getItem('strapi_token');
             const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:1337/api';
@@ -189,7 +190,43 @@ export const executeSignalTrade = createAsyncThunk(
             const tradeType = ['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'Long' : 'Short';
             const tradeDetailType = ['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'Buy' : 'Sell';
 
-            // 1. Create the parent Trade
+            // 1. Check if the selected account is a Binance account
+            const accountName = (account?.name || account?.Name || '').toUpperCase();
+            const isBinanceAccount = accountName.includes('BINANCE');
+
+            let binanceOrderResult = null;
+
+            if (isBinanceAccount) {
+                // Determine if we should trade on Futures or Spot
+                const symbolUpper = (signal.symbol || '').toUpperCase();
+                const marketName = (account?.market?.Name || account?.market?.name || '').toUpperCase();
+                const isFutures = symbolUpper.endsWith('.P') || 
+                                  symbolUpper.includes('PERP') || 
+                                  accountName.includes('FUTURES') || 
+                                  accountName.includes('DERIVATIVE') ||
+                                  marketName.includes('FUTURES') ||
+                                  marketName.includes('DERIVATIVE');
+
+                const side = ['LONG', 'BUY'].includes(signal.signal?.toUpperCase()) ? 'BUY' : 'SELL';
+
+                try {
+                    // Call Binance Execution Service
+                    binanceOrderResult = await executeBinanceOrder({
+                        symbol: signal.symbol,
+                        side,
+                        type: 'LIMIT',
+                        quantity: parseFloat(volume),
+                        price: parseFloat(price),
+                        isFutures
+                    });
+                } catch (binanceError) {
+                    console.error('Binance API Execution failed:', binanceError);
+                    // Throw the exact error back to reject the thunk
+                    return rejectWithValue(binanceError.message || 'Binance Execution failed');
+                }
+            }
+
+            // 2. Create the parent Trade in Strapi
             const tradePayload = {
                 type: tradeType,
                 trade_status: 'Open',
@@ -201,7 +238,7 @@ export const executeSignalTrade = createAsyncThunk(
             const tradeRes = await api.post('/trades', { data: tradePayload });
             const savedTradeId = tradeRes.data.data.documentId || tradeRes.data.data.id;
 
-            // 2. Upload screenshot if a new file was provided
+            // 3. Upload screenshot if a new file was provided
             let screenshotId = signal.image?.id || signal.image?.documentId;
             if (screenshotFile) {
                 const formData = new FormData();
@@ -218,7 +255,15 @@ export const executeSignalTrade = createAsyncThunk(
                 }
             }
 
-            // 3. Create the TradeDetail entry
+            // 4. Enrich note text with Binance Order ID if executed
+            let noteText = signal.desc || '';
+            if (binanceOrderResult && (binanceOrderResult.orderId || binanceOrderResult.orderId === 0 || binanceOrderResult.id)) {
+                const orderId = binanceOrderResult.orderId ?? binanceOrderResult.id;
+                const executionNote = `[Binance Executed] Order ID: ${orderId}`;
+                noteText = noteText ? `${executionNote}\n\n${noteText}` : executionNote;
+            }
+
+            // 5. Create the TradeDetail entry in Strapi
             const detailPayload = {
                 price: parseFloat(price),
                 type: tradeDetailType,
@@ -226,7 +271,7 @@ export const executeSignalTrade = createAsyncThunk(
                 signal: 'Entry',
                 date: new Date().toISOString(),
                 screenshot: screenshotId,
-                note: signal.desc ? createBlocksFromText(signal.desc) : null,
+                note: noteText ? createBlocksFromText(noteText) : null,
                 trade: savedTradeId,
             };
 
