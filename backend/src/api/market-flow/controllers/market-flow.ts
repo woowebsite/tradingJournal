@@ -60,4 +60,17 @@ export default factories.createCoreController('api::market-flow.market-flow', ({
       }
     };
   },
+  // Return all market-flow items from the last 30 days (no page limit)
+  async listLast30(ctx) {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    strapi.log.info(`Fetching market-flow items since ${thirtyDaysAgo}`);
+
+    const items = await strapi.db.query('api::market-flow.market-flow').findMany({
+      where: { date: { $gte: thirtyDaysAgo } },
+      orderBy: { date: 'desc' },
+    });
+
+    ctx.body = { data: items };
+  },
 }));

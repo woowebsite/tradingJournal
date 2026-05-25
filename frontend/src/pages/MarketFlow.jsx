@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Save, ChevronDown, Loader2, CloudDownload, X, CheckCircle2 } from 'lucide-react';
 import { getMarketFlowLeader } from '../services/tcbs';
-import { saveMarketFlow, getSavedMarketFlow } from '../services/marketFlow';
+import { saveMarketFlow, getSavedMarketFlow, getSavedMarketFlowLast30 } from '../services/marketFlow';
 import { getIndustries, syncIndustriesFromTCBS, syncIndustries } from '../services/industry';
-import { saveMarketAnalytic, getMarketAnalytics } from '../services/marketAnalytic';
+import { saveMarketAnalytic, getMarketAnalytics, getMarketAnalyticsLast30 } from '../services/marketAnalytic';
 
 const formatValue = (value) => {
     if (value === null || value === undefined) return '-';
@@ -113,23 +113,24 @@ const MarketFlow = () => {
         setLoadingLeaderboard(true);
         try {
             const now = new Date();
-            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-            const response = await getSavedMarketFlow({
-                filters: {
-                    date: { $gte: firstDay }
-                },
-                pagination: { pageSize: 1000 }
-            });
-
-            const data = response.data || [];
+            const resp = await getSavedMarketFlowLast30();
+            const data = Array.isArray(resp) ? resp : (resp?.data || []);
 
             const scores = data.reduce((acc, item) => {
-                const ticker = item.ticker;
+                // tolerate different field names
+                const ticker = item.ticker || item.symbol || item.tickerSymbol || item.code || '';
+                if (!ticker) return acc;
+
+                const scoreValue = (item.score !== undefined && item.score !== null)
+                    ? Number(item.score)
+                    : (item.s !== undefined ? Number(item.s) : 0);
+
                 if (!acc[ticker]) {
                     acc[ticker] = { ticker, score: 0, count: 0, lastIndustry: item.industry };
                 }
-                acc[ticker].score += item.score || 0;
+                if(ticker === "VGI") console.log("Processing VGI item:", scoreValue);
+
+                acc[ticker].score += isNaN(scoreValue) ? 0 : scoreValue;
                 acc[ticker].count += 1;
                 return acc;
             }, {});
@@ -146,12 +147,9 @@ const MarketFlow = () => {
     const loadAnalytics = async () => {
         setLoadingAnalytics(true);
         try {
-            const response = await getMarketAnalytics({
-                sort: ['date:desc', 'createdAt:desc'],
-                pagination: { pageSize: 2000 }
-            });
-
-            const data = response.data || [];
+            // Use backend endpoint that returns all analytics for last 30 days
+            const items = await getMarketAnalyticsLast30();
+            const data = Array.isArray(items) ? items : (items?.data || []);
             const uniqueIndustries = new Map();
 
             // Keep only the most recent entry for each industry

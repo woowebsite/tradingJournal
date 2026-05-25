@@ -8,5 +8,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'GET',
+      path: '/market-flows/all-last-30',
+      handler: 'market-flow.listLast30',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };
