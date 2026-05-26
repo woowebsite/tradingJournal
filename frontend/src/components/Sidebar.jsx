@@ -29,7 +29,14 @@ const Sidebar = () => {
                         { label: 'Journal', path: '/journal-trade' }
                     ]
                 },
-                { icon: Activity, label: 'Signals', path: '/signals' },
+                {
+                    icon: Activity,
+                    label: 'Signals',
+                    path: '/signals',
+                    subItems: [
+                        { label: 'TCBS Strategy', path: '/tcbs-strategy-signals' },
+                    ]
+                },
                 { icon: List, label: 'Watchlists', path: '/manage-watchlists' },
                 { icon: Tag, label: 'Symbols', path: '/manage-symbols' },
                 { icon: Wallet, label: 'Accounts', path: '/accounts' },
@@ -65,7 +72,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market']);
+    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market', '/signals']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>

@@ -37,6 +37,78 @@ export default defineConfig({
           });
         }
       },
+      '/api-binance': {
+        target: 'https://api.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-binance/, ''),
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+            proxyReq.removeHeader('sec-fetch-dest');
+            proxyReq.removeHeader('sec-fetch-mode');
+            proxyReq.removeHeader('sec-fetch-site');
+            proxyReq.removeHeader('sec-ch-ua');
+            proxyReq.removeHeader('sec-ch-ua-mobile');
+            proxyReq.removeHeader('sec-ch-ua-platform');
+          });
+        }
+      },
+      '/fapi-binance': {
+        target: 'https://fapi.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/fapi-binance/, ''),
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+            proxyReq.removeHeader('sec-fetch-dest');
+            proxyReq.removeHeader('sec-fetch-mode');
+            proxyReq.removeHeader('sec-fetch-site');
+            proxyReq.removeHeader('sec-ch-ua');
+            proxyReq.removeHeader('sec-ch-ua-mobile');
+            proxyReq.removeHeader('sec-ch-ua-platform');
+          });
+        }
+      },
+      '/api-binance-testnet': {
+        target: 'https://testnet.binance.vision',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-binance-testnet/, ''),
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+            proxyReq.removeHeader('sec-fetch-dest');
+            proxyReq.removeHeader('sec-fetch-mode');
+            proxyReq.removeHeader('sec-fetch-site');
+            proxyReq.removeHeader('sec-ch-ua');
+            proxyReq.removeHeader('sec-ch-ua-mobile');
+            proxyReq.removeHeader('sec-ch-ua-platform');
+          });
+        }
+      },
+      '/fapi-binance-testnet': {
+        target: 'https://demo-fapi.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/fapi-binance-testnet/, ''),
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+            proxyReq.removeHeader('sec-fetch-dest');
+            proxyReq.removeHeader('sec-fetch-mode');
+            proxyReq.removeHeader('sec-fetch-site');
+            proxyReq.removeHeader('sec-ch-ua');
+            proxyReq.removeHeader('sec-ch-ua-mobile');
+            proxyReq.removeHeader('sec-ch-ua-platform');
+          });
+        }
+      },
       '/api': {
         target: 'http://localhost:1337',
         changeOrigin: true,
