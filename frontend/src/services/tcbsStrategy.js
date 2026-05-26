@@ -48,6 +48,37 @@ export const getStrategyDetail = async (strategyKey, ticker = 'NNC') => {
     return response.data.data;
 };
 
+export const getAllStrategyDetails = async (ticker = '') => {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    const pageSize = 100;
+    let page = 1;
+    let allDetails = [];
+    let pageCount = 1;
+
+    do {
+        const params = new URLSearchParams({
+            'pagination[page]': String(page),
+            'pagination[pageSize]': String(pageSize),
+            'sort[0]': 'ticker:asc',
+            'sort[1]': 'strategyKey:asc',
+        });
+
+        if (normalizedTicker) {
+            params.set('filters[ticker][$eq]', normalizedTicker);
+        }
+
+        const response = await api.get(
+            `/tcbs-strategy-details?${params.toString()}`
+        );
+        const data = response.data.data || [];
+        allDetails = allDetails.concat(data);
+        pageCount = response.data.meta?.pagination?.pageCount || 1;
+        page += 1;
+    } while (page <= pageCount);
+
+    return allDetails;
+};
+
 export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NNC') => {
     const normalizedTicker = ticker.trim().toUpperCase();
 

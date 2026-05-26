@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, TrendingUp, Loader2, X } from 'lucide-react';
-import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals, getStrategyDetail, syncStrategyDetail } from '../services/tcbsStrategy';
+import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals, getStrategyDetail, syncStrategyDetail, getAllStrategyDetails } from '../services/tcbsStrategy';
 
 const DEFAULT_PARAMS = {
     strategyKey: 'price_volume_increase',
@@ -61,6 +61,8 @@ const TCBS_STRATEGIES = [
     },
 ];
 
+const PROBABILITY_PERIOD_KEYS = ['T+3', 'T+5', 'T+10', 'T+20', 'T+60', 'T+180'];
+
 const sortSignalsByNewestDate = (items) => {
     return [...items].sort((a, b) => new Date(b.TDate || 0) - new Date(a.TDate || 0));
 };
@@ -71,13 +73,135 @@ const getStrategyName = (signal) => {
     return strategy?.StrategyName || signal.strategyKey || '-';
 };
 
+const getStrategyDescription = (strategyKey) => {
+    const strategy = TCBS_STRATEGIES.find(item => item.StrategyKey === strategyKey);
+    return strategy?.Decs || '';
+};
+
+const formatPercent = (value) => {
+    if (value === undefined || value === null || Number.isNaN(Number(value))) return '-';
+    return `${(Number(value) * 100).toFixed(1)}%`;
+};
+
+const getProbabilityTone = (value) => {
+    if (value === undefined || value === null || Number.isNaN(Number(value))) {
+        return {
+            label: 'No data',
+            textClass: 'text-gray-500',
+            badgeClass: 'bg-gray-700/50 text-gray-400 border-gray-700',
+        };
+    }
+
+    const numericValue = Number(value);
+    if (numericValue >= 0.7) {
+        return {
+            label: 'Strong',
+            textClass: 'text-emerald-300',
+            badgeClass: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25',
+        };
+    }
+
+    if (numericValue >= 0.55) {
+        return {
+            label: 'Good',
+            textClass: 'text-green-400',
+            badgeClass: 'bg-green-500/10 text-green-300 border-green-500/25',
+        };
+    }
+
+    if (numericValue >= 0.45) {
+        return {
+            label: 'Neutral',
+            textClass: 'text-amber-300',
+            badgeClass: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
+        };
+    }
+
+    return {
+        label: 'Weak',
+        textClass: 'text-red-300',
+        badgeClass: 'bg-red-500/10 text-red-300 border-red-500/25',
+    };
+};
+
+const getStrategyProbabilityTotals = (details) => {
+    const totalsByStrategy = new Map();
+
+    details.forEach((detail) => {
+        const normalizedTicker = String(detail.ticker || '').trim().toUpperCase();
+        const strategyKey = detail.strategyKey || 'unknown';
+        const strategyName = detail.strategyName || getStrategyName(detail);
+        const totalRow = detail.probPeriodDetail?.find(row => row.Year === 'TBC') || detail.probPeriodDetail?.at(-1);
+
+        if (!totalRow) return;
+
+        const mapKey = `${normalizedTicker || 'UNKNOWN'}-${strategyKey}`;
+        const current = totalsByStrategy.get(mapKey) || {
+            ticker: normalizedTicker || detail.ticker || '-',
+            strategyKey,
+            strategyName,
+            totals: PROBABILITY_PERIOD_KEYS.reduce((acc, period) => ({ ...acc, [period]: 0 }), {}),
+        };
+
+        PROBABILITY_PERIOD_KEYS.forEach((period) => {
+            const value = Number(totalRow[period]);
+            if (Number.isFinite(value)) {
+                current.totals[period] += value;
+            }
+        });
+
+        totalsByStrategy.set(mapKey, current);
+    });
+
+    return Array.from(totalsByStrategy.values()).sort((a, b) => a.strategyName.localeCompare(b.strategyName));
+};
+
+const getProbabilityTotalScore = (strategy) => {
+    return PROBABILITY_PERIOD_KEYS.reduce((total, period) => {
+        const value = Number(strategy.totals?.[period]);
+        return Number.isFinite(value) ? total + value : total;
+    }, 0);
+};
+
+const getProbabilityAverageScore = (strategy) => getProbabilityTotalScore(strategy) / PROBABILITY_PERIOD_KEYS.length;
+
+const getBestProbabilityPeriod = (strategy) => {
+    return PROBABILITY_PERIOD_KEYS.reduce((bestPeriod, period) => {
+        const value = Number(strategy.totals?.[period]);
+        const bestValue = Number(strategy.totals?.[bestPeriod]);
+
+        if (!Number.isFinite(value)) return bestPeriod;
+        if (!bestPeriod || !Number.isFinite(bestValue) || value > bestValue) return period;
+        return bestPeriod;
+    }, '');
+};
+
+const getBestStrategiesByTicker = (probabilityTotals) => {
+    const bestByTicker = new Map();
+
+    probabilityTotals.forEach((strategy) => {
+        const normalizedTicker = String(strategy.ticker || '').trim().toUpperCase();
+        if (!normalizedTicker) return;
+
+        const currentBest = bestByTicker.get(normalizedTicker);
+        if (!currentBest || getProbabilityTotalScore(strategy) > getProbabilityTotalScore(currentBest)) {
+            bestByTicker.set(normalizedTicker, strategy);
+        }
+    });
+
+    return Array.from(bestByTicker.values()).sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
+};
+
 const TCBSStrategySignals = () => {
     const [strategyKey, setStrategyKey] = useState(DEFAULT_PARAMS.strategyKey);
     const [ticker, setTicker] = useState(DEFAULT_PARAMS.ticker);
     const [summary, setSummary] = useState(null);
     const [signals, setSignals] = useState([]);
     const [recentSignals, setRecentSignals] = useState([]);
+    const [bestStrategies, setBestStrategies] = useState([]);
+    const [strategyProbabilityTotals, setStrategyProbabilityTotals] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [loadingBestStrategies, setLoadingBestStrategies] = useState(false);
     const [error, setError] = useState(null);
     const [syncingAll, setSyncingAll] = useState(false);
     const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
@@ -124,6 +248,7 @@ const TCBSStrategySignals = () => {
         try {
             const data = await syncStrategyDetail(nextStrategyKey, selectedStrategy.StrategyName, nextTicker);
             setDetailData(data);
+            await loadBestStrategies(nextTicker);
         } catch (err) {
             console.error('Failed to sync strategy details:', err);
             setError(err.response?.data?.error?.message || err.message || 'Failed to sync strategy details');
@@ -138,6 +263,35 @@ const TCBSStrategySignals = () => {
 
         const data = await fetchRecentTcbsStrategySignals(normalizedTicker);
         setRecentSignals(sortSignalsByNewestDate(data).slice(0, 10));
+    };
+
+    const handleTickerBlur = async (nextTicker) => {
+        const normalizedTicker = nextTicker.trim().toUpperCase();
+        if (!normalizedTicker) return;
+
+        setTicker(normalizedTicker);
+        await Promise.all([
+            loadRecentSignals(normalizedTicker),
+            loadBestStrategies(normalizedTicker),
+        ]);
+    };
+
+    const loadBestStrategies = async (nextTicker = ticker) => {
+        const normalizedTicker = nextTicker.trim().toUpperCase();
+        if (!normalizedTicker) return;
+
+        setLoadingBestStrategies(true);
+        try {
+            const details = await getAllStrategyDetails(normalizedTicker);
+            const probabilityTotals = getStrategyProbabilityTotals(details);
+            setStrategyProbabilityTotals(probabilityTotals);
+            setBestStrategies(getBestStrategiesByTicker(probabilityTotals));
+        } catch (err) {
+            console.error('Failed to load best strategy details:', err);
+            setError(err.response?.data?.error?.message || err.message || 'Failed to load best strategy details');
+        } finally {
+            setLoadingBestStrategies(false);
+        }
     };
 
     const loadSignals = async () => {
@@ -243,6 +397,10 @@ const TCBSStrategySignals = () => {
         }
     }, [strategyKey]);
 
+    useEffect(() => {
+        loadBestStrategies(ticker);
+    }, []);
+
     return (
         <div>
             <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -318,7 +476,7 @@ const TCBSStrategySignals = () => {
                         id="tcbs-ticker"
                         value={ticker}
                         onChange={(event) => setTicker(event.target.value.toUpperCase())}
-                        onBlur={(event) => loadRecentSignals(event.target.value)}
+                        onBlur={(event) => handleTickerBlur(event.target.value)}
                         className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         disabled={loading || syncingAll}
                     />
@@ -337,15 +495,138 @@ const TCBSStrategySignals = () => {
                 </div>
             </div>
 
-            <div className="mb-6 bg-gray-800 border border-gray-700 rounded-lg p-4">
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <span className="text-white font-semibold">{selectedStrategy.StrategyName}</span>
-                    <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded">{selectedStrategy.StrategyKey}</span>
+            <div id="best-strategy-table" className="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
+                <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
+                    <TrendingUp size={18} className="text-yellow-400" />
+                    <span className="font-semibold text-white">Best Strategy By Ticker</span>
+                    <span className="text-sm text-gray-500">({bestStrategies.length})</span>
                 </div>
-                <p className="text-sm leading-6 text-gray-400">{selectedStrategy.Decs}</p>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                        <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
+                            <tr>
+                                <th className="px-4 py-3">Ticker</th>
+                                <th className="px-4 py-3">Strategy</th>
+                                <th className="px-4 py-3 text-right">Total Score</th>
+                                <th className="px-4 py-3 text-right">Average</th>
+                                <th className="px-4 py-3 text-right">Best Period</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700">
+                            {loadingBestStrategies ? (
+                                <tr>
+                                    <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                        Loading best strategies...
+                                    </td>
+                                </tr>
+                            ) : bestStrategies.length === 0 ? (
+                                <tr>
+                                    <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                        No strategy details found.
+                                    </td>
+                                </tr>
+                            ) : (
+                                bestStrategies.map((strategy) => {
+                                    const averageScore = getProbabilityAverageScore(strategy);
+                                    const averageTone = getProbabilityTone(averageScore);
+                                    const bestPeriod = getBestProbabilityPeriod(strategy);
+
+                                    return (
+                                        <tr key={`best-${strategy.ticker}-${strategy.strategyKey}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-4 py-4 text-gray-200 font-bold">{strategy.ticker}</td>
+                                            <td className="px-4 py-4 text-gray-300">
+                                                <div className="font-medium text-white">{strategy.strategyName || getStrategyName(strategy)}</div>
+                                                <div className="text-xs text-gray-500 font-mono">{strategy.strategyKey}</div>
+                                                {getStrategyDescription(strategy.strategyKey) && (
+                                                    <div className="mt-2 max-w-3xl text-[11px] leading-5 text-gray-400">
+                                                        {getStrategyDescription(strategy.strategyKey)}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-4 text-right text-emerald-300 font-mono font-semibold">
+                                                {formatPercent(getProbabilityTotalScore(strategy))}
+                                            </td>
+                                            <td className={`px-4 py-4 text-right font-mono font-semibold ${averageTone.textClass}`}>
+                                                <div>{formatPercent(averageScore)}</div>
+                                                <div className={`mt-1 inline-flex rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${averageTone.badgeClass}`}>
+                                                    {averageTone.label}
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4 text-right">
+                                                <div className="font-mono font-semibold text-blue-300">{bestPeriod || '-'}</div>
+                                                {bestPeriod && (
+                                                    <div className="text-[11px] text-gray-400">{formatPercent(strategy.totals[bestPeriod])}</div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm mb-6">
+                <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
+                    <TrendingUp size={18} className="text-purple-400" />
+                    <span className="font-semibold text-white">Probability Period Detail Totals</span>
+                    <span className="text-sm text-gray-500">({strategyProbabilityTotals.length})</span>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                        <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
+                            <tr>
+                                <th className="px-6 py-3">Strategy Name</th>
+                                {PROBABILITY_PERIOD_KEYS.map((period) => (
+                                    <th key={`prob-total-head-${period}`} className="px-6 py-3 text-right">{period.toLowerCase()}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700">
+                            {loadingBestStrategies ? (
+                                <tr>
+                                    <td colSpan={PROBABILITY_PERIOD_KEYS.length + 1} className="px-6 py-8 text-center text-gray-400">
+                                        Loading probability totals...
+                                    </td>
+                                </tr>
+                            ) : strategyProbabilityTotals.length === 0 ? (
+                                <tr>
+                                    <td colSpan={PROBABILITY_PERIOD_KEYS.length + 1} className="px-6 py-8 text-center text-gray-400">
+                                        No probability period details found.
+                                    </td>
+                                </tr>
+                            ) : (
+                                strategyProbabilityTotals.map((strategy) => (
+                                    <tr key={`prob-total-${strategy.strategyKey}`} className="hover:bg-gray-700/30 transition">
+                                        <td className="px-6 py-4 text-white font-medium">
+                                            <div>{strategy.strategyName}</div>
+                                            <div className="text-xs text-gray-500 font-mono">{strategy.strategyKey}</div>
+                                        </td>
+                                        {PROBABILITY_PERIOD_KEYS.map((period) => {
+                                            const tone = getProbabilityTone(strategy.totals[period]);
+                                            return (
+                                                <td key={`prob-total-${strategy.strategyKey}-${period}`} className="px-6 py-4 text-right">
+                                                    <div className={`font-mono font-semibold ${tone.textClass}`}>
+                                                        {formatPercent(strategy.totals[period])}
+                                                    </div>
+                                                    <div className={`mt-1 inline-flex rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badgeClass}`}>
+                                                        {tone.label}
+                                                    </div>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
                 <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
                     <TrendingUp size={18} className="text-green-400" />
                     <span className="font-semibold text-white">Recently Signals</span>
@@ -353,8 +634,8 @@ const TCBSStrategySignals = () => {
                 </div>
 
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
+                    <table className="w-full text-left text-xs">
+                        <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
                             <tr>
                                 <th className="px-6 py-3">Date</th>
                                 <th className="px-6 py-3">Strategy Name</th>
@@ -542,7 +823,7 @@ const TCBSStrategySignals = () => {
                                                 <div className="flex justify-between">
                                                     <span className="text-gray-400">Loss / Draw</span>
                                                     <span className="font-bold text-red-400">
-                                                        {detailData.probByPeriod?.Loss !== undefined && detailData.probByPeriod?.Loss !== null ? `${(detailData.probByPeriod.Loss * 100).toFixed(1)}%` : '-'} 
+                                                        {detailData.probByPeriod?.Loss !== undefined && detailData.probByPeriod?.Loss !== null ? `${(detailData.probByPeriod.Loss * 100).toFixed(1)}%` : '-'}
                                                         <span className="text-xs text-gray-500 font-normal ml-1">/ {detailData.probByPeriod?.Draw !== undefined && detailData.probByPeriod?.Draw !== null ? `${(detailData.probByPeriod.Draw * 100).toFixed(1)}%` : '0%'}</span>
                                                     </span>
                                                 </div>
