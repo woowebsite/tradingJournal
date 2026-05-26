@@ -30,3 +30,12 @@ export const fetchRecentTcbsStrategySignals = async (ticker = 'NNC') => {
 
     return response.data.data || [];
 };
+
+export const getTcbsStrategySignals = async (strategyKey, ticker = 'NNC') => {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    const response = await api.get(
+        `/tcbs-strategy-signals?filters[ticker][$eq]=${encodeURIComponent(normalizedTicker)}&filters[strategyKey][$eq]=${encodeURIComponent(strategyKey)}&sort=TDate:desc&pagination[pageSize]=1000`
+    );
+
+    return response.data.data || [];
+};

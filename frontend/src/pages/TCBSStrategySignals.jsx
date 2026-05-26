@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, TrendingUp } from 'lucide-react';
-import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals } from '../services/tcbsStrategy';
+import { RefreshCw, TrendingUp, Loader2 } from 'lucide-react';
+import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals } from '../services/tcbsStrategy';
 
 const DEFAULT_PARAMS = {
     strategyKey: 'price_volume_increase',
@@ -79,6 +79,8 @@ const TCBSStrategySignals = () => {
     const [recentSignals, setRecentSignals] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [syncingAll, setSyncingAll] = useState(false);
+    const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
     const selectedStrategy = TCBS_STRATEGIES.find(strategy => strategy.StrategyKey === strategyKey) || TCBS_STRATEGIES[0];
 
     const loadRecentSignals = async (nextTicker = ticker) => {
@@ -103,14 +105,28 @@ const TCBSStrategySignals = () => {
         setTicker(nextTicker);
 
         try {
-            const data = await syncTcbsStrategySignals({
-                strategyKey: nextStrategyKey,
-                strategyName: selectedStrategy.StrategyName,
-                ticker: nextTicker,
-            });
-            setSummary(data);
-            setSignals(sortSignalsByNewestDate(data.signals || []));
-            await loadRecentSignals(nextTicker);
+            // Try loading from database first for performance optimization
+            const existingSignals = await getTcbsStrategySignals(nextStrategyKey, nextTicker);
+
+            if (existingSignals && existingSignals.length > 0) {
+                setSignals(sortSignalsByNewestDate(existingSignals));
+                setSummary({
+                    totalSigOne: existingSignals.length,
+                    created: 0,
+                    skipped: 0
+                });
+                await loadRecentSignals(nextTicker);
+            } else {
+                // If no signals are in the database, fetch and sync from TCBS
+                const data = await syncTcbsStrategySignals({
+                    strategyKey: nextStrategyKey,
+                    strategyName: selectedStrategy.StrategyName,
+                    ticker: nextTicker,
+                });
+                setSummary(data);
+                setSignals(sortSignalsByNewestDate(data.signals || []));
+                await loadRecentSignals(nextTicker);
+            }
         } catch (err) {
             setError(err.response?.data?.error?.message || err.message || 'Failed to sync TCBS signals');
         } finally {
@@ -118,8 +134,64 @@ const TCBSStrategySignals = () => {
         }
     };
 
+    const handleSyncAll = async () => {
+        const nextTicker = ticker.trim().toUpperCase();
+
+        if (!nextTicker) {
+            setError('Ticker is required.');
+            return;
+        }
+
+        setSyncingAll(true);
+        setError(null);
+        setSyncProgress({ current: 0, total: TCBS_STRATEGIES.length });
+
+        try {
+            let currentSelectedSummary = null;
+            let currentSelectedSignals = [];
+
+            for (let i = 0; i < TCBS_STRATEGIES.length; i++) {
+                const strategy = TCBS_STRATEGIES[i];
+                setSyncProgress({ current: i + 1, total: TCBS_STRATEGIES.length });
+
+                const data = await syncTcbsStrategySignals({
+                    strategyKey: strategy.StrategyKey,
+                    strategyName: strategy.StrategyName,
+                    ticker: nextTicker,
+                });
+
+                if (data && strategy.StrategyKey === strategyKey) {
+                    currentSelectedSummary = data;
+                    currentSelectedSignals = data.signals || [];
+                }
+            }
+
+            if (currentSelectedSummary) {
+                setSummary(currentSelectedSummary);
+                setSignals(sortSignalsByNewestDate(currentSelectedSignals));
+            } else {
+                const currentSelected = TCBS_STRATEGIES.find(s => s.StrategyKey === strategyKey) || TCBS_STRATEGIES[0];
+                const data = await syncTcbsStrategySignals({
+                    strategyKey: strategyKey,
+                    strategyName: currentSelected.StrategyName,
+                    ticker: nextTicker,
+                });
+                setSummary(data);
+                setSignals(sortSignalsByNewestDate(data?.signals || []));
+            }
+
+            await loadRecentSignals(nextTicker);
+        } catch (err) {
+            setError(err.response?.data?.error?.message || err.message || 'Failed to sync TCBS signals');
+        } finally {
+            setSyncingAll(false);
+        }
+    };
+
     useEffect(() => {
-        loadSignals();
+        if (!syncingAll) {
+            loadSignals();
+        }
     }, [strategyKey]);
 
     return (
@@ -133,12 +205,21 @@ const TCBSStrategySignals = () => {
                 </div>
 
                 <button
-                    onClick={loadSignals}
-                    disabled={loading}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-blue-600/20"
+                    onClick={handleSyncAll}
+                    disabled={loading || syncingAll}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-blue-600/20 font-semibold"
                 >
-                    <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-                    <span>Sync</span>
+                    {syncingAll ? (
+                        <>
+                            <Loader2 size={18} className="animate-spin text-blue-400" />
+                            <span className="text-blue-400">{syncProgress.current}/{syncProgress.total}</span>
+                        </>
+                    ) : (
+                        <>
+                            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                            <span>Sync</span>
+                        </>
+                    )}
                 </button>
             </div>
 
@@ -156,7 +237,7 @@ const TCBSStrategySignals = () => {
                         value={strategyKey}
                         onChange={(event) => setStrategyKey(event.target.value)}
                         className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading}
+                        disabled={loading || syncingAll}
                     >
                         {TCBS_STRATEGIES.map(strategy => (
                             <option key={strategy.StrategyKey} value={strategy.StrategyKey}>
@@ -173,7 +254,7 @@ const TCBSStrategySignals = () => {
                         onChange={(event) => setTicker(event.target.value.toUpperCase())}
                         onBlur={(event) => loadRecentSignals(event.target.value)}
                         className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading}
+                        disabled={loading || syncingAll}
                     />
                 </div>
                 <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
@@ -216,7 +297,7 @@ const TCBSStrategySignals = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {loading && recentSignals.length === 0 ? (
+                            {(loading || syncingAll) && recentSignals.length === 0 ? (
                                 <tr>
                                     <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
                                         Loading recent signals...
@@ -257,12 +338,10 @@ const TCBSStrategySignals = () => {
                                 <th className="px-6 py-3">Date</th>
                                 <th className="px-6 py-3">Close Price</th>
                                 <th className="px-6 py-3">Volume</th>
-                                <th className="px-6 py-3">Signal</th>
-                                <th className="px-6 py-3">Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {loading && signals.length === 0 ? (
+                            {(loading || syncingAll) && signals.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
                                         Loading TCBS signals...
@@ -280,19 +359,6 @@ const TCBSStrategySignals = () => {
                                         <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
                                         <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
                                         <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4">
-                                            <span className={signal.Sig ? 'text-green-400 font-semibold' : 'text-gray-500'}>
-                                                {signal.Sig}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${signal.syncStatus === 'created'
-                                                ? 'bg-green-500/10 text-green-400'
-                                                : 'bg-gray-700 text-gray-300'
-                                                }`}>
-                                                {signal.syncStatus}
-                                            </span>
-                                        </td>
                                     </tr>
                                 ))
                             )}
