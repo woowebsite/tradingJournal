@@ -1,0 +1,44 @@
+{
+  "kind": "collectionType",
+  "collectionName": "tcbs_strategy_details",
+  "info": {
+    "singularName": "tcbs-strategy-detail",
+    "pluralName": "tcbs-strategy-details",
+    "displayName": "TCBSStrategyDetail"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "ticker": {
+      "type": "string",
+      "required": true
+    },
+    "strategyKey": {
+      "type": "string",
+      "required": true
+    },
+    "strategyName": {
+      "type": "string"
+    },
+    "volaStatistic": {
+      "type": "json"
+    },
+    "probStatistic": {
+      "type": "json"
+    },
+    "volaByPeriod": {
+      "type": "json"
+    },
+    "probByPeriod": {
+      "type": "json"
+    },
+    "volaPeriodDetail": {
+      "type": "json"
+    },
+    "probPeriodDetail": {
+      "type": "json"
+    }
+  }
+}

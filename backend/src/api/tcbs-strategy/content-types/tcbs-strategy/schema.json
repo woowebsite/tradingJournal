@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "tcbs_strategies",
+  "info": {
+    "singularName": "tcbs-strategy",
+    "pluralName": "tcbs-strategies",
+    "displayName": "TCBSStrategy"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "strategyKey": {
+      "type": "string",
+      "required": true
+    },
+    "strategyName": {
+      "type": "string"
+    },
+    "ticker": {
+      "type": "string",
+      "required": true
+    },
+    "signals": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::tcbs-strategy-signal.tcbs-strategy-signal",
+      "mappedBy": "strategy"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "kind": "collectionType",
+  "collectionName": "tcbs_strategy_signals",
+  "info": {
+    "singularName": "tcbs-strategy-signal",
+    "pluralName": "tcbs-strategy-signals",
+    "displayName": "TCBSStrategySignal"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "TDate": {
+      "type": "date",
+      "required": true
+    },
+    "CPrice": {
+      "type": "decimal"
+    },
+    "Volume": {
+      "type": "biginteger"
+    },
+    "Sig": {
+      "type": "integer"
+    },
+    "strategyKey": {
+      "type": "string",
+      "required": true
+    },
+    "ticker": {
+      "type": "string",
+      "required": true
+    },
+    "strategy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::tcbs-strategy.tcbs-strategy",
+      "inversedBy": "signals"
+    }
+  }
+}
