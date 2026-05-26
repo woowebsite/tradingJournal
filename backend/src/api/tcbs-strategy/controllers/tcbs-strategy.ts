@@ -130,4 +130,89 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       },
     };
   },
+
+  async syncDetail(ctx) {
+    const strategyKey = String(ctx.query.strategyKey || DEFAULT_STRATEGY_KEY);
+    const strategyName = String(ctx.query.strategyName || DEFAULT_STRATEGY_NAME);
+    const ticker = String(ctx.query.ticker || DEFAULT_TICKER).toUpperCase();
+
+    const documents = (strapi as any).documents;
+    const detailUid = 'api::tcbs-strategy-detail.tcbs-strategy-detail';
+
+    const tcbsToken = ctx.get('x-tcbs-token') || process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN;
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+
+    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
+      headers.Authorization = `Bearer ${tcbsToken}`;
+    }
+
+    const response = await axios.get('https://apiextaws.tcbs.com.vn/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-detail', {
+      params: {
+        strategyKey,
+        strategyName,
+        ticker,
+      },
+      headers,
+      timeout: 20000,
+    });
+
+    const body = response.data || {};
+
+    let existing = await documents(detailUid).findFirst({
+      filters: {
+        strategyKey,
+        ticker,
+      },
+    });
+
+    const dataToSave = {
+      ticker,
+      strategyKey,
+      strategyName,
+      volaStatistic: body.VolaStatistic || null,
+      probStatistic: body.ProbStatistic || null,
+      volaByPeriod: body.VolaByPeriod || null,
+      probByPeriod: body.ProbByPeriod || null,
+      volaPeriodDetail: body.VolaPeriodDetail || [],
+      probPeriodDetail: body.ProbPeriodDetail || [],
+    };
+
+    let result;
+    if (existing) {
+      result = await documents(detailUid).update({
+        documentId: existing.documentId,
+        data: dataToSave,
+      });
+    } else {
+      result = await documents(detailUid).create({
+        data: dataToSave,
+      });
+    }
+
+    ctx.body = {
+      data: result,
+    };
+  },
+
+  async getDetail(ctx) {
+    const strategyKey = String(ctx.query.strategyKey || DEFAULT_STRATEGY_KEY);
+    const ticker = String(ctx.query.ticker || DEFAULT_TICKER).toUpperCase();
+
+    const documents = (strapi as any).documents;
+    const detailUid = 'api::tcbs-strategy-detail.tcbs-strategy-detail';
+
+    const existing = await documents(detailUid).findFirst({
+      filters: {
+        strategyKey,
+        ticker,
+      },
+    });
+
+    ctx.body = {
+      data: existing || null,
+    };
+  }
 }));

@@ -809,6 +809,43 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiTcbsStrategyDetailTcbsStrategyDetail
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'tcbs_strategy_details';
+  info: {
+    displayName: 'TCBSStrategyDetail';
+    pluralName: 'tcbs-strategy-details';
+    singularName: 'tcbs-strategy-detail';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::tcbs-strategy-detail.tcbs-strategy-detail'
+    > &
+      Schema.Attribute.Private;
+    probByPeriod: Schema.Attribute.JSON;
+    probPeriodDetail: Schema.Attribute.JSON;
+    probStatistic: Schema.Attribute.JSON;
+    publishedAt: Schema.Attribute.DateTime;
+    strategyKey: Schema.Attribute.String & Schema.Attribute.Required;
+    strategyName: Schema.Attribute.String;
+    ticker: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    volaByPeriod: Schema.Attribute.JSON;
+    volaPeriodDetail: Schema.Attribute.JSON;
+    volaStatistic: Schema.Attribute.JSON;
+  };
+}
+
 export interface ApiTcbsStrategySignalTcbsStrategySignal
   extends Struct.CollectionTypeSchema {
   collectionName: 'tcbs_strategy_signals';
@@ -1598,6 +1635,7 @@ declare module '@strapi/strapi' {
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
       'api::symbol.symbol': ApiSymbolSymbol;
+      'api::tcbs-strategy-detail.tcbs-strategy-detail': ApiTcbsStrategyDetailTcbsStrategyDetail;
       'api::tcbs-strategy-signal.tcbs-strategy-signal': ApiTcbsStrategySignalTcbsStrategySignal;
       'api::tcbs-strategy.tcbs-strategy': ApiTcbsStrategyTcbsStrategy;
       'api::trade-detail.trade-detail': ApiTradeDetailTradeDetail;

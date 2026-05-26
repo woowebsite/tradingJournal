@@ -39,3 +39,31 @@ export const getTcbsStrategySignals = async (strategyKey, ticker = 'NNC') => {
 
     return response.data.data || [];
 };
+
+export const getStrategyDetail = async (strategyKey, ticker = 'NNC') => {
+    const normalizedTicker = ticker.trim().toUpperCase();
+    const response = await api.get(
+        `/tcbs-strategies/get-detail?strategyKey=${encodeURIComponent(strategyKey)}&ticker=${encodeURIComponent(normalizedTicker)}`
+    );
+    return response.data.data;
+};
+
+export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NNC') => {
+    const normalizedTicker = ticker.trim().toUpperCase();
+
+    const tcbsToken = import.meta.env.VITE_TCBS_TOKEN;
+    const headers = {};
+
+    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
+        headers['X-TCBS-Token'] = tcbsToken;
+    }
+
+    const params = new URLSearchParams({
+        strategyKey,
+        strategyName,
+        ticker: normalizedTicker,
+    });
+
+    const response = await api.get(`/tcbs-strategies/sync-detail?${params.toString()}`, { headers });
+    return response.data.data;
+};
