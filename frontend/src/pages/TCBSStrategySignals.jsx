@@ -203,6 +203,8 @@ const TCBSStrategySignals = () => {
     const [loading, setLoading] = useState(false);
     const [loadingBestStrategies, setLoadingBestStrategies] = useState(false);
     const [error, setError] = useState(null);
+    const [syncingDetailAll, setSyncingDetailAll] = useState(false);
+    const [syncDetailProgress, setSyncDetailProgress] = useState({ current: 0, total: 0 });
     const [syncingAll, setSyncingAll] = useState(false);
     const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
     const selectedStrategy = TCBS_STRATEGIES.find(strategy => strategy.StrategyKey === strategyKey) || TCBS_STRATEGIES[0];
@@ -229,6 +231,7 @@ const TCBSStrategySignals = () => {
             let data = await getStrategyDetail(nextStrategyKey, nextTicker);
             if (!data) {
                 data = await syncStrategyDetail(nextStrategyKey, selectedStrategy.StrategyName, nextTicker);
+                await loadRecentSignals(nextTicker);
             }
             setDetailData(data);
         } catch (err) {
@@ -249,11 +252,64 @@ const TCBSStrategySignals = () => {
             const data = await syncStrategyDetail(nextStrategyKey, selectedStrategy.StrategyName, nextTicker);
             setDetailData(data);
             await loadBestStrategies(nextTicker);
+            await loadRecentSignals(nextTicker);
         } catch (err) {
             console.error('Failed to sync strategy details:', err);
             setError(err.response?.data?.error?.message || err.message || 'Failed to sync strategy details');
         } finally {
             setLoadingDetail(false);
+        }
+    };
+
+    const handleSyncAllDetails = async () => {
+        const nextTicker = ticker.trim().toUpperCase();
+
+        if (!nextTicker) {
+            setError('Ticker is required.');
+            return;
+        }
+
+        setSyncingDetailAll(true);
+        setError(null);
+        setSyncDetailProgress({ current: 0, total: TCBS_STRATEGIES.length });
+
+        try {
+            const failedStrategies = [];
+            const currentSelectedStrategy = TCBS_STRATEGIES.find(strategy => strategy.StrategyKey === strategyKey) || TCBS_STRATEGIES[0];
+            let currentSelectedDetail = null;
+
+            for (let i = 0; i < TCBS_STRATEGIES.length; i++) {
+                const strategy = TCBS_STRATEGIES[i];
+                setSyncDetailProgress({ current: i + 1, total: TCBS_STRATEGIES.length });
+
+                try {
+                    const data = await syncStrategyDetail(strategy.StrategyKey, strategy.StrategyName, nextTicker);
+                    if (strategy.StrategyKey === currentSelectedStrategy.StrategyKey) {
+                        currentSelectedDetail = data;
+                    }
+                } catch (err) {
+                    console.error(`Failed to sync strategy detail for ${strategy.StrategyKey}:`, err);
+                    failedStrategies.push(strategy.StrategyKey);
+                }
+            }
+
+            if (currentSelectedDetail) {
+                setDetailData(currentSelectedDetail);
+            } else if (detailOpen) {
+                await handleOpenDetail();
+            }
+
+            await loadBestStrategies(nextTicker);
+            await loadRecentSignals(nextTicker);
+
+            if (failedStrategies.length > 0) {
+                setError(`Failed to sync detail for: ${failedStrategies.join(', ')}`);
+            }
+        } catch (err) {
+            console.error('Failed to sync all strategy details:', err);
+            setError(err.response?.data?.error?.message || err.message || 'Failed to sync all strategy details');
+        } finally {
+            setSyncingDetailAll(false);
         }
     };
 
@@ -273,6 +329,7 @@ const TCBSStrategySignals = () => {
         await Promise.all([
             loadRecentSignals(normalizedTicker),
             loadBestStrategies(normalizedTicker),
+            loadSignals(strategyKey, normalizedTicker)
         ]);
     };
 
@@ -294,22 +351,22 @@ const TCBSStrategySignals = () => {
         }
     };
 
-    const loadSignals = async () => {
-        const nextStrategyKey = strategyKey.trim();
-        const nextTicker = ticker.trim().toUpperCase();
+    const loadSignals = async (nextStrategyKey = strategyKey, nextTicker = ticker) => {
+        const normalizedStrategyKey = nextStrategyKey.trim();
+        const normalizedTicker = nextTicker.trim().toUpperCase();
 
-        if (!nextStrategyKey || !nextTicker) {
+        if (!normalizedStrategyKey || !normalizedTicker) {
             setError('Strategy Key and Ticker are required.');
             return;
         }
 
         setLoading(true);
         setError(null);
-        setTicker(nextTicker);
+        setTicker(normalizedTicker);
 
         try {
             // Try loading from database first for performance optimization
-            const existingSignals = await getTcbsStrategySignals(nextStrategyKey, nextTicker);
+            const existingSignals = await getTcbsStrategySignals(normalizedStrategyKey, normalizedTicker);
 
             if (existingSignals && existingSignals.length > 0) {
                 setSignals(sortSignalsByNewestDate(existingSignals));
@@ -318,17 +375,17 @@ const TCBSStrategySignals = () => {
                     created: 0,
                     skipped: 0
                 });
-                await loadRecentSignals(nextTicker);
+                await loadRecentSignals(normalizedTicker);
             } else {
                 // If no signals are in the database, fetch and sync from TCBS
                 const data = await syncTcbsStrategySignals({
-                    strategyKey: nextStrategyKey,
+                    strategyKey: normalizedStrategyKey,
                     strategyName: selectedStrategy.StrategyName,
-                    ticker: nextTicker,
+                    ticker: normalizedTicker,
                 });
                 setSummary(data);
                 setSignals(sortSignalsByNewestDate(data.signals || []));
-                await loadRecentSignals(nextTicker);
+                await loadRecentSignals(normalizedTicker);
             }
         } catch (err) {
             setError(err.response?.data?.error?.message || err.message || 'Failed to sync TCBS signals');
@@ -414,7 +471,7 @@ const TCBSStrategySignals = () => {
                 <div className="flex items-center gap-2">
                     <button
                         onClick={handleOpenDetail}
-                        disabled={loading || syncingAll || loadingDetail}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
                         className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:cursor-not-allowed text-white rounded-lg transition border border-gray-700 shadow-lg font-semibold"
                     >
                         {loadingDetail ? (
@@ -428,8 +485,26 @@ const TCBSStrategySignals = () => {
                     </button>
 
                     <button
+                        onClick={handleSyncAllDetails}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-emerald-600/20 font-semibold"
+                    >
+                        {syncingDetailAll ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin text-emerald-200" />
+                                <span className="text-emerald-100">{syncDetailProgress.current}/{syncDetailProgress.total}</span>
+                            </>
+                        ) : (
+                            <>
+                                <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                                <span>Sync Detail</span>
+                            </>
+                        )}
+                    </button>
+
+                    <button
                         onClick={handleSyncAll}
-                        disabled={loading || syncingAll}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-blue-600/20 font-semibold"
                     >
                         {syncingAll ? (
@@ -461,7 +536,7 @@ const TCBSStrategySignals = () => {
                         value={strategyKey}
                         onChange={(event) => setStrategyKey(event.target.value)}
                         className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading || syncingAll}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
                     >
                         {TCBS_STRATEGIES.map(strategy => (
                             <option key={strategy.StrategyKey} value={strategy.StrategyKey}>
@@ -478,7 +553,7 @@ const TCBSStrategySignals = () => {
                         onChange={(event) => setTicker(event.target.value.toUpperCase())}
                         onBlur={(event) => handleTickerBlur(event.target.value)}
                         className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading || syncingAll}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
                     />
                 </div>
                 <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
@@ -568,6 +643,98 @@ const TCBSStrategySignals = () => {
                 </div>
             </div>
 
+            
+
+            <div className="mb-6 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+                <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm h-full">
+                    <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
+                        <TrendingUp size={18} className="text-green-400" />
+                        <span className="font-semibold text-white">Recently Signals</span>
+                        <span className="text-sm text-gray-500">({recentSignals.length})</span>
+                    </div>
+
+                    <div className="max-h-[540px] overflow-auto">
+                        <table className="w-full text-left text-xs">
+                            <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
+                                <tr>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Strategy Name</th>
+                                    <th className="px-6 py-3">Closed Price</th>
+                                    <th className="px-6 py-3">Volume</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {(loading || syncingAll) && recentSignals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                            Loading recent signals...
+                                        </td>
+                                    </tr>
+                                ) : recentSignals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                            No recent signals found.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    recentSignals.map((signal) => (
+                                        <tr key={`recent-${signal.id || signal.documentId || signal.TDate}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
+                                            <td className="px-6 py-4 text-gray-300">{getStrategyName(signal)}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm h-full">
+                    <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
+                        <TrendingUp size={18} className="text-blue-400" />
+                        <span className="font-semibold text-white">Signals: {selectedStrategy.StrategyName}</span>
+                        <span className="text-sm text-gray-500">({signals.length})</span>
+                    </div>
+
+                    <div className="max-h-[540px] overflow-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
+                                <tr>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Close Price</th>
+                                    <th className="px-6 py-3">Volume</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {(loading || syncingAll) && signals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
+                                            Loading TCBS signals...
+                                        </td>
+                                    </tr>
+                                ) : signals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
+                                            No TCBS signals found.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    signals.map((signal) => (
+                                        <tr key={signal.id || `${signal.TDate}-${signal.syncStatus}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm mb-6">
                 <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
                     <TrendingUp size={18} className="text-purple-400" />
@@ -626,94 +793,6 @@ const TCBSStrategySignals = () => {
                 </div>
             </div>
 
-            <div className="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
-                <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
-                    <TrendingUp size={18} className="text-green-400" />
-                    <span className="font-semibold text-white">Recently Signals</span>
-                    <span className="text-sm text-gray-500">({recentSignals.length})</span>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                        <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Strategy Name</th>
-                                <th className="px-6 py-3">Closed Price</th>
-                                <th className="px-6 py-3">Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {(loading || syncingAll) && recentSignals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                        Loading recent signals...
-                                    </td>
-                                </tr>
-                            ) : recentSignals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                        No recent signals found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                recentSignals.map((signal) => (
-                                    <tr key={`recent-${signal.id || signal.documentId || signal.TDate}`} className="hover:bg-gray-700/30 transition">
-                                        <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
-                                        <td className="px-6 py-4 text-gray-300">{getStrategyName(signal)}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
-                <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
-                    <TrendingUp size={18} className="text-blue-400" />
-                    <span className="font-semibold text-white">Signals</span>
-                    <span className="text-sm text-gray-500">({signals.length})</span>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Close Price</th>
-                                <th className="px-6 py-3">Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {(loading || syncingAll) && signals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
-                                        Loading TCBS signals...
-                                    </td>
-                                </tr>
-                            ) : signals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
-                                        No TCBS signals found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                signals.map((signal) => (
-                                    <tr key={signal.id || `${signal.TDate}-${signal.syncStatus}`} className="hover:bg-gray-700/30 transition">
-                                        <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
             {detailOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto">
                     <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col text-gray-200">
@@ -729,7 +808,7 @@ const TCBSStrategySignals = () => {
                             <div className="flex items-center gap-3">
                                 <button
                                     onClick={handleSyncDetailExplicit}
-                                    disabled={loadingDetail}
+                                    disabled={loadingDetail || syncingDetailAll}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-xs font-semibold text-gray-300 rounded-lg transition border border-gray-700"
                                 >
                                     <RefreshCw size={12} className={loadingDetail ? 'animate-spin' : ''} />
