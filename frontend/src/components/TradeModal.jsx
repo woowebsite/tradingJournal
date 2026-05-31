@@ -39,6 +39,29 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     return price ? formatNumber(price, selectedAccount?.moneyFormat || '#,###.##') : '-';
   };
 
+  const calculatePositionVolumes = (details) => {
+    return details.reduce((acc, d) => {
+      const volume = parseFloat(d.volume) || 0;
+
+      if (d.type === 'Buy') {
+        acc.totalBuyVol += volume;
+      } else if (d.type === 'Sell') {
+        acc.totalSellVol += volume;
+      }
+
+      return acc;
+    }, { totalBuyVol: 0, totalSellVol: 0 });
+  };
+
+  const calculateOpenVolume = (details, tradeType = 'Long') => {
+    const { totalBuyVol, totalSellVol } = calculatePositionVolumes(details);
+    const openVol = tradeType === 'Short'
+      ? totalSellVol - totalBuyVol
+      : totalBuyVol - totalSellVol;
+
+    return openVol > 0 ? openVol : 0;
+  };
+
   // Helper to calculate Realized P&L (closed positions only - TP exits)
   // Long: Realized = SellValue - (AvgBuyPrice × SellVolume)
   // Short: Realized = (AvgSellPrice × BuyVolume) - BuyValue
@@ -64,15 +87,21 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   };
 
   // Helper to calculate Unrealized PnL (open positions - entry buys not yet closed)
-  const calculateUnrealizedPnl = (details, currentPrice) => {
+  const calculateUnrealizedPnl = (details, currentPrice, tradeType = 'Long') => {
     const buyDetails = details.filter(d => d.type === 'Buy');
     const sellDetails = details.filter(d => d.type === 'Sell');
-
-    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const openVol = totalBuyVol - totalSellVol;
+    const { totalBuyVol, totalSellVol } = calculatePositionVolumes(details);
+    const openVol = calculateOpenVolume(details, tradeType);
 
     if (!currentPrice || openVol <= 0) return 0;
+
+    if (tradeType === 'Short') {
+      const avgSellPrice = totalSellVol > 0
+        ? sellDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0) / totalSellVol
+        : 0;
+      return openVol * (avgSellPrice - parseFloat(currentPrice));
+    }
+
     const avgBuyPrice = totalBuyVol > 0
       ? buyDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0) / totalBuyVol
       : 0;
@@ -244,11 +273,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
       return;
     }
 
-    const sellDetails = formData.trade_details.filter(d => d.type === 'Sell');
-    const buyDetails = formData.trade_details.filter(d => d.type === 'Buy');
-    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const openVol = totalBuyVol - totalSellVol;
+    const openVol = calculateOpenVolume(formData.trade_details, formData.type);
 
     if (openVol <= 0) {
       alert('No open volume to close.');
@@ -419,8 +444,8 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
               </div>
               <div className="bg-gray-900/30 p-3 rounded-lg border border-gray-700/50">
                 <span className="text-gray-400 text-xs block mb-1">Est. Unrealized P&L (open @ {currentPrice || '-'})</span>
-                <span className={`text-lg font-mono font-bold ${currentPrice ? (calculateUnrealizedPnl(formData.trade_details, currentPrice) >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-500'}`}>
-                  {currentPrice ? ((calculateUnrealizedPnl(formData.trade_details, currentPrice) > 0 ? '+' : '') + formatPrice(calculateUnrealizedPnl(formData.trade_details, currentPrice))) : '-'}
+                <span className={`text-lg font-mono font-bold ${currentPrice ? (calculateUnrealizedPnl(formData.trade_details, currentPrice, formData.type) >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-500'}`}>
+                  {currentPrice ? ((calculateUnrealizedPnl(formData.trade_details, currentPrice, formData.type) > 0 ? '+' : '') + formatPrice(calculateUnrealizedPnl(formData.trade_details, currentPrice, formData.type))) : '-'}
                 </span>
               </div>
             </div>
