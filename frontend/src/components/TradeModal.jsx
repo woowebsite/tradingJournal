@@ -6,8 +6,9 @@ import api from '../services/api'; // Ensure this path is correct
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
-import { fetchLatestHistory } from '../features/marketSlice';
+import { fetchLatestHistory, fetchBatchLatestMinutePrices } from '../features/marketSlice';
 import useEscapeKey from '../hooks/useEscapeKey';
+import { executeBinanceOrder } from '../services/binanceExecution';
 
 const getLocalDateTimeInputValue = (date = new Date()) => {
   const offset = date.getTimezoneOffset();
@@ -31,6 +32,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
   const [riskSetting, setRiskSetting] = useState(null);
   const [currentPrice, setCurrentPrice] = useState('');
+  const [executingOrder, setExecutingOrder] = useState(false);
 
   // Helper to format currency
   const formatPrice = (price) => {
@@ -97,13 +99,33 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     if (isOpen && formData.symbol) {
       setCurrentPrice('');
       const symbolId = formData.symbol;
-      dispatch(fetchLatestHistory(symbolId)).then(resultAction => {
-        if (fetchLatestHistory.fulfilled.match(resultAction) && resultAction.payload?.close) {
-          setCurrentPrice(resultAction.payload.close);
-        }
-      });
+      const selectedSymbol = symbols.find(s => (s.documentId || s.id) === symbolId);
+
+      const marketName = selectedSymbol?.market?.Name || selectedSymbol?.market?.name || '';
+      const symbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
+      const isCrypto = /crypto|binance/i.test(marketName)
+          || /^BINANCE:/i.test(symbolName)
+          || /(?:USDT|USDC|BUSD)(?:\.P)?$/i.test(symbolName);
+
+      if (isCrypto && selectedSymbol) {
+        dispatch(fetchBatchLatestMinutePrices([selectedSymbol])).then(resultAction => {
+          if (fetchBatchLatestMinutePrices.fulfilled.match(resultAction)) {
+            const pricesMap = resultAction.payload || {};
+            const realTimePrice = pricesMap[symbolId];
+            if (realTimePrice !== undefined && realTimePrice !== null) {
+              setCurrentPrice(realTimePrice);
+            }
+          }
+        });
+      } else {
+        dispatch(fetchLatestHistory(symbolId)).then(resultAction => {
+          if (fetchLatestHistory.fulfilled.match(resultAction) && resultAction.payload?.close) {
+            setCurrentPrice(resultAction.payload.close);
+          }
+        });
+      }
     }
-  }, [isOpen, formData.symbol, dispatch]);
+  }, [isOpen, formData.symbol, symbols, dispatch]);
 
   useEffect(() => {
     if (isOpen) {
@@ -234,13 +256,57 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     }
 
     const closeSignal = formData.type === 'Long' ? 'Sell' : 'Buy';
+    const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
+    const isBinanceAccount = accountName.includes('BINANCE');
+    let noteText = '';
+
+    if (isBinanceAccount) {
+      setExecutingOrder(true);
+      try {
+        const selectedSymbol = symbols.find(s => (s.documentId || s.id) === formData.symbol);
+        const symbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
+        if (!symbolName) {
+          throw new Error('Symbol details not found to place order on Binance.');
+        }
+
+        const symbolUpper = symbolName.toUpperCase();
+        const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
+        const isFutures = symbolUpper.endsWith('.P') || 
+                          symbolUpper.includes('PERP') || 
+                          accountName.includes('FUTURES') || 
+                          accountName.includes('DERIVATIVE') ||
+                          marketName.includes('FUTURES') ||
+                          marketName.includes('DERIVATIVE');
+
+        const binanceOrderResult = await executeBinanceOrder({
+          symbol: symbolName,
+          side: closeSignal.toUpperCase(), // SELL for Long, BUY for Short
+          type: 'MARKET',
+          quantity: openVol,
+          isFutures
+        });
+
+        if (binanceOrderResult && (binanceOrderResult.orderId !== undefined || binanceOrderResult.id !== undefined)) {
+          const orderId = binanceOrderResult.orderId ?? binanceOrderResult.id;
+          noteText = `[Binance Closed] Order ID: ${orderId}`;
+        }
+      } catch (err) {
+        console.error('Binance Exit Order Execution failed:', err);
+        alert(`Failed to close position on Binance: ${err.message || err}`);
+        setExecutingOrder(false);
+        return;
+      } finally {
+        setExecutingOrder(false);
+      }
+    }
+
     const exitDetail = {
       date: getLocalDateTimeInputValue(),
       signal: 'Exit',
       type: closeSignal,
       price: parseFloat(currentPrice),
       volume: openVol,
-      note: ''
+      note: noteText
     };
 
     const newDetails = [...formData.trade_details, exitDetail];
@@ -474,6 +540,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
               type="button"
               onClick={onClose}
               className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition"
+              disabled={executingOrder}
             >
               Cancel
             </button>
@@ -481,15 +548,16 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
               <button
                 type="button"
                 onClick={handleCloseTrade}
-                disabled={!currentPrice}
+                disabled={!currentPrice || executingOrder}
                 className="px-6 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50"
               >
-                Close Trade
+                {executingOrder ? 'Executing Close...' : 'Close Trade'}
               </button>
             )}
             <button
               type="submit"
-              className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20"
+              disabled={executingOrder}
+              className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 disabled:opacity-50"
             >
               Save Trade
             </button>

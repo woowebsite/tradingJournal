@@ -7,3 +7,5 @@ build
 .DS_Store
 .vscode
 coverage
+frontend/.env.fe
+frontend/tcbs-cookie.json
