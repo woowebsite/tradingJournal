@@ -6,6 +6,7 @@ import { useDispatch } from 'react-redux';
 import { fetchLatestHistory } from '../features/marketSlice';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     const { selectedAccount } = useAccount();
@@ -37,6 +38,8 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
 
         fetchPrice();
     }, [isOpen, trade, dispatch]);
+
+    useEscapeKey(onClose, isOpen);
 
     if (!isOpen || !trade) return null;
 

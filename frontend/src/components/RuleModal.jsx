@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Save, Code, Sliders } from 'lucide-react';
 import RuleBuilder from './RuleBuilder';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     const [formData, setFormData] = useState({
@@ -60,6 +61,8 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             alert('Invalid JSON in Rule field');
         }
     };
+
+    useEscapeKey(onClose, isOpen);
 
     if (!isOpen) return null;
 

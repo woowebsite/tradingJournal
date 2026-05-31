@@ -34,7 +34,8 @@ const Sidebar = () => {
                     label: 'Signals',
                     path: '/signals',
                     subItems: [
-                        { label: 'TCBS Strategy', path: '/tcbs-strategy-signals' },
+                        { label: 'TCBS Signals', path: '/tcbs-strategy-signals' },
+                        { label: 'Webhook Signals', path: '/webhook-signals' }
                     ]
                 },
                 { icon: List, label: 'Watchlists', path: '/manage-watchlists' },
@@ -59,7 +60,6 @@ const Sidebar = () => {
                     path: '/webhooks',
                     subItems: [
                         { label: 'Manage', path: '/manage-webhooks' },
-                        { label: 'Signals', path: '/webhook-signals' }
                     ]
                 },
             ]

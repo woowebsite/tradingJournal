@@ -474,24 +474,50 @@ const TCBSStrategySignals = () => {
         }
     };
 
+    // Load signals when strategyKey or ticker changes
     useEffect(() => {
         if (!syncingAll) {
             loadSignals(strategyKey, ticker);
-            loadBestStrategies(ticker);
         }
     }, [strategyKey, ticker]);
+
+    // Load ticker-specific best strategies when ticker changes
+    useEffect(() => {
+        if (!syncingAll) {
+            loadBestStrategies(ticker);
+        }
+    }, [ticker]);
 
     return (
         <div>
             <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                 <div>
                     <h2 className="text-3xl font-bold text-white">TCBS Strategy Signals</h2>
-                    <p className="text-gray-400">
-                        {selectedStrategy.StrategyName} · {selectedAccount?.name || DEFAULT_PARAMS.ticker} · {tickerOptions.length} symbols
-                    </p>
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {/* Ticker Selector */}
+                    <div className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 shadow-lg">
+                        <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider" htmlFor="tcbs-ticker">Ticker</label>
+                        <select
+                            id="tcbs-ticker"
+                            value={ticker}
+                            onChange={(event) => setTicker(event.target.value.toUpperCase())}
+                            className="bg-transparent text-white text-sm font-semibold outline-none cursor-pointer focus:ring-0 focus:border-transparent"
+                            disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
+                        >
+                            {tickerOptions.length === 0 ? (
+                                <option value="" className="bg-gray-900">No symbols</option>
+                            ) : (
+                                tickerOptions.map((symbol) => (
+                                    <option key={symbol.documentId || symbol.id || symbol.Name} value={symbol.Name} className="bg-gray-900">
+                                        {symbol.Name}
+                                    </option>
+                                ))
+                            )}
+                        </select>
+                    </div>
+
                     <button
                         onClick={handleOpenDetail}
                         disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
@@ -551,56 +577,6 @@ const TCBSStrategySignals = () => {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <label className="text-sm text-gray-400" htmlFor="tcbs-strategy-key">Strategy Key</label>
-                    <select
-                        id="tcbs-strategy-key"
-                        value={strategyKey}
-                        onChange={(event) => setStrategyKey(event.target.value)}
-                        className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
-                    >
-                        {TCBS_STRATEGIES.map(strategy => (
-                            <option key={strategy.StrategyKey} value={strategy.StrategyKey}>
-                                {strategy.StrategyName}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <label className="text-sm text-gray-400" htmlFor="tcbs-ticker">Ticker</label>
-                    <select
-                        id="tcbs-ticker"
-                        value={ticker}
-                        onChange={(event) => setTicker(event.target.value.toUpperCase())}
-                        className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
-                    >
-                        {tickerOptions.length === 0 ? (
-                            <option value="">No symbols in watchlists</option>
-                        ) : (
-                            tickerOptions.map((symbol) => (
-                                <option key={symbol.documentId || symbol.id || symbol.Name} value={symbol.Name}>
-                                    {symbol.Name}
-                                </option>
-                            ))
-                        )}
-                    </select>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-400">Sig = 1</p>
-                    <p className="text-blue-400 font-semibold mt-1">{summary?.totalSigOne ?? signals.length}</p>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-400">Created</p>
-                    <p className="text-green-400 font-semibold mt-1">{summary?.created ?? 0}</p>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-400">Skipped</p>
-                    <p className="text-gray-200 font-semibold mt-1">{summary?.skipped ?? 0}</p>
-                </div>
-            </div>
 
             <div id="best-strategy-table" className="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
                 <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
@@ -675,7 +651,7 @@ const TCBSStrategySignals = () => {
                 </div>
             </div>
 
-            
+
 
             <div className="mb-6 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
                 <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm h-full">
@@ -687,36 +663,36 @@ const TCBSStrategySignals = () => {
 
                     <div className="max-h-[540px] overflow-auto">
                         <table className="w-full text-left text-xs">
-                        <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Strategy Name</th>
-                                <th className="px-6 py-3">Closed Price</th>
-                                <th className="px-6 py-3">Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {(loading || syncingAll) && recentSignals.length === 0 ? (
+                            <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
                                 <tr>
-                                    <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                        Loading recent signals...
-                                    </td>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Strategy Name</th>
+                                    <th className="px-6 py-3">Closed Price</th>
+                                    <th className="px-6 py-3">Volume</th>
                                 </tr>
-                            ) : recentSignals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                        No recent signals found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                recentSignals.map((signal) => (
-                                    <tr key={`recent-${signal.id || signal.documentId || signal.TDate}`} className="hover:bg-gray-700/30 transition">
-                                        <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
-                                        <td className="px-6 py-4 text-gray-300">{getStrategyName(signal)}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {(loading || syncingAll) && recentSignals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                            Loading recent signals...
+                                        </td>
                                     </tr>
-                                ))
+                                ) : recentSignals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                            No recent signals found.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    recentSignals.map((signal) => (
+                                        <tr key={`recent-${signal.id || signal.documentId || signal.TDate}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
+                                            <td className="px-6 py-4 text-gray-300">{getStrategyName(signal)}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))
                                 )}
                             </tbody>
                         </table>
@@ -724,42 +700,77 @@ const TCBSStrategySignals = () => {
                 </div>
 
                 <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm h-full">
-                    <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
-                        <TrendingUp size={18} className="text-blue-400" />
-                        <span className="font-semibold text-white">Signals: {selectedStrategy.StrategyName}</span>
-                        <span className="text-sm text-gray-500">({signals.length})</span>
+                    <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                            <TrendingUp size={18} className="text-blue-400" />
+                            <span className="font-semibold text-white">Signals</span>
+                            <span className="text-sm text-gray-500">({signals.length})</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-4">
+                            {/* Strategy Key selector in Signals toolbar */}
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-400 font-semibold" htmlFor="tcbs-strategy-key">Strategy:</label>
+                                <select
+                                    id="tcbs-strategy-key"
+                                    value={strategyKey}
+                                    onChange={(event) => setStrategyKey(event.target.value)}
+                                    className="bg-gray-900 border border-gray-700 text-white text-xs rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[150px]"
+                                    disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
+                                >
+                                    {TCBS_STRATEGIES.map(strategy => (
+                                        <option key={strategy.StrategyKey} value={strategy.StrategyKey}>
+                                            {strategy.StrategyName}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Summary stats pill badges */}
+                            <div className="flex items-center gap-2 text-xs">
+                                <span className="bg-blue-950/50 text-blue-400 border border-blue-800/60 px-2.5 py-1 rounded-md font-medium">
+                                    Sig: <strong className="font-semibold ml-0.5">{summary?.totalSigOne ?? signals.length}</strong>
+                                </span>
+                                <span className="bg-green-950/50 text-green-400 border border-green-800/60 px-2.5 py-1 rounded-md font-medium">
+                                    Created: <strong className="font-semibold ml-0.5">{summary?.created ?? 0}</strong>
+                                </span>
+                                <span className="bg-gray-900/50 text-gray-300 border border-gray-700/60 px-2.5 py-1 rounded-md font-medium">
+                                    Skipped: <strong className="font-semibold ml-0.5">{summary?.skipped ?? 0}</strong>
+                                </span>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="max-h-[540px] overflow-auto">
                         <table className="w-full text-left">
-                        <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Close Price</th>
-                                <th className="px-6 py-3">Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {(loading || syncingAll) && signals.length === 0 ? (
+                            <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
                                 <tr>
-                                    <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
-                                        Loading TCBS signals...
-                                    </td>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Close Price</th>
+                                    <th className="px-6 py-3">Volume</th>
                                 </tr>
-                            ) : signals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
-                                        No TCBS signals found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                signals.map((signal) => (
-                                    <tr key={signal.id || `${signal.TDate}-${signal.syncStatus}`} className="hover:bg-gray-700/30 transition">
-                                        <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {(loading || syncingAll) && signals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
+                                            Loading TCBS signals...
+                                        </td>
                                     </tr>
-                                ))
+                                ) : signals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
+                                            No TCBS signals found.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    signals.map((signal) => (
+                                        <tr key={signal.id || `${signal.TDate}-${signal.syncStatus}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))
                                 )}
                             </tbody>
                         </table>

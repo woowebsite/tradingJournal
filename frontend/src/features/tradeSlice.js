@@ -50,7 +50,7 @@ export const fetchOpenTrades = createAsyncThunk(
     'trades/fetchOpenTrades',
     async ({ accountId }, { rejectWithValue }) => {
         try {
-            const url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Open&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details`;
+            const url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Open&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot`;
             const res = await api.get(url);
             return res.data.data;
         } catch (error) {
@@ -63,7 +63,7 @@ export const fetchClosedTrades = createAsyncThunk(
     'trades/fetchClosedTrades',
     async ({ accountId, strategyId }, { rejectWithValue }) => {
         try {
-            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details`;
+            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot`;
             // if (strategyId) {
             //     url += `&filters[strategy][documentId][$eq]=${strategyId}`;
             // }

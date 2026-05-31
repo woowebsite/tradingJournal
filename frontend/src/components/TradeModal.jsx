@@ -7,6 +7,7 @@ import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { fetchLatestHistory } from '../features/marketSlice';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const getLocalDateTimeInputValue = (date = new Date()) => {
   const offset = date.getTimezoneOffset();
@@ -151,6 +152,8 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
       // Ideally we'd clear state, but for now we follow the pattern of requesting what IS valid.
     }
   }, [isOpen, initialData, selectedAccount, dispatch]);
+
+  useEscapeKey(onClose, isOpen);
 
   if (!isOpen) return null;
 

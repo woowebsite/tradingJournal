@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols = [] }) => {
     const { selectedAccount } = useAccount();
@@ -97,6 +98,8 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
         };
         onSubmit(payload);
     };
+
+    useEscapeKey(onClose, isOpen);
 
     if (!isOpen) return null;
 

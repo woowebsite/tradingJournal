@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import api from '../services/api';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
     const [formData, setFormData] = useState({
@@ -75,6 +76,8 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
             initial_balance: parseFloat(formData.initial_balance)
         });
     };
+
+    useEscapeKey(onClose, isOpen);
 
     if (!isOpen) return null;
 
