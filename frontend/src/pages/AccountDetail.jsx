@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { ArrowLeft, Wallet } from 'lucide-react';
 import api from '../services/api';
-import { fetchTrades, fetchOpenTrades, saveTrade } from '../features/tradeSlice';
+import { fetchTrades, fetchOpenTrades, saveTrade, deleteTrade } from '../features/tradeSlice';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { useAccount } from '../context/AccountContext';
@@ -119,6 +119,32 @@ const AccountDetail = () => {
         setSelectedTrade(null);
         setTradeToEdit(trade);
         setIsTradeModalOpen(true);
+    };
+
+    const handleDeleteTrade = async () => {
+        if (!tradeToEdit) return;
+        const tradeId = tradeToEdit.documentId || tradeToEdit.id;
+        if (!window.confirm('Delete this trade and all of its trade details?')) return;
+
+        try {
+            await dispatch(deleteTrade({
+                tradeId,
+                tradeDetails: tradeToEdit.trade_details || []
+            })).unwrap();
+
+            const params = { accountId: id, pageSize: 20 };
+            if (selectedSymbol) {
+                params.symbolId = selectedSymbol.documentId || selectedSymbol.id;
+            }
+            dispatch(fetchTrades(params));
+            dispatch(fetchOpenTrades({ accountId: id }));
+
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Failed to delete trade:', error);
+            alert(`Failed to delete trade: ${error.message || error}`);
+        }
     };
 
     const handleSaveTrade = async (tradeData) => {
@@ -266,6 +292,7 @@ const AccountDetail = () => {
                 isOpen={isTradeModalOpen}
                 onClose={() => setIsTradeModalOpen(false)}
                 onSubmit={handleSaveTrade}
+                onDelete={handleDeleteTrade}
                 initialData={tradeToEdit}
             />
         </div>

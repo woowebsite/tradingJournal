@@ -1,6 +1,15 @@
 
 // Binance External API Service
 
+/**
+ * Normalizes symbols for Binance API compatibility.
+ * Example: 'BINANCE:BTCUSDT.P' -> 'BTCUSDT'
+ */
+export const normalizeBinanceSymbol = (symbol) => {
+    if (!symbol) return '';
+    return symbol.toUpperCase().replace(/^.*:/, '').replace('.P', '').replace('PERP', '').trim();
+};
+
 export const getCryptoHistory = async (ticker, interval = '1d', limit = 500) => {
     // Binance Futures API: https://fapi.binance.com/fapi/v1/klines (for .P perpetual tickers)
     // Binance Spot API:   https://api.binance.com/api/v3/klines  (for regular tickers)

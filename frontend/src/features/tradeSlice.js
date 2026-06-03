@@ -180,6 +180,31 @@ export const saveTrade = createAsyncThunk(
     }
 );
 
+export const deleteTrade = createAsyncThunk(
+    'trades/deleteTrade',
+    async ({ tradeId, tradeDetails = [] }, { rejectWithValue }) => {
+        try {
+            const detailIds = tradeDetails
+                .map(detail => detail.documentId || detail.id)
+                .filter(Boolean);
+
+            await Promise.all(
+                detailIds.map(id =>
+                    api.delete(`/trade-details/${id}`).catch(err => {
+                        console.warn(`Failed to delete trade detail ${id}`, err);
+                    })
+                )
+            );
+
+            await api.delete(`/trades/${tradeId}`);
+
+            return { tradeId, deletedDetailCount: detailIds.length };
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
 export const executeSignalTrade = createAsyncThunk(
     'trades/executeSignalTrade',
     async ({ signal, price, volume, accountId, symbolId, screenshotFile, account }, { rejectWithValue }) => {
@@ -345,6 +370,12 @@ const tradeSlice = createSlice({
             .addCase(fetchClosedTrades.rejected, (state, action) => {
                 state.closedTradesLoading = false;
                 console.error("Failed to fetch closed trades:", action.payload);
+            })
+            .addCase(deleteTrade.pending, (state) => {
+                state.error = null;
+            })
+            .addCase(deleteTrade.rejected, (state, action) => {
+                state.error = action.payload;
             })
             // Execute Signal Trade
             .addCase(executeSignalTrade.pending, (state) => {

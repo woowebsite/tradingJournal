@@ -16,7 +16,7 @@ const getLocalDateTimeInputValue = (date = new Date()) => {
   return local.toISOString().slice(0, 16);
 };
 
-const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
+const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
   const { selectedAccount } = useAccount();
   const dispatch = useDispatch();
   const { items: symbols, loading: loadingSymbols } = useSelector(state => state.symbols);
@@ -265,6 +265,12 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
     onSubmit(payload);
     onClose();
+  };
+
+  const handleDelete = () => {
+    if (onDelete) {
+      onDelete();
+    }
   };
 
   const handleCloseTrade = async () => {
@@ -560,32 +566,44 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
 
 
-          <div className="pt-2 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition"
-              disabled={executingOrder}
-            >
-              Cancel
-            </button>
-            {formData.trade_status !== 'Closed' && (
+          <div className="pt-2 flex items-center gap-3">
+            {initialData && (
               <button
                 type="button"
-                onClick={handleCloseTrade}
-                disabled={!currentPrice || executingOrder}
-                className="px-6 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50"
+                onClick={handleDelete}
+                disabled={executingOrder}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50 mr-auto"
               >
-                {executingOrder ? 'Executing Close...' : 'Close Trade'}
+                Delete Trade
               </button>
             )}
-            <button
-              type="submit"
-              disabled={executingOrder}
-              className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 disabled:opacity-50"
-            >
-              Save Trade
-            </button>
+            <div className="ml-auto flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition"
+                disabled={executingOrder}
+              >
+                Cancel
+              </button>
+              {formData.trade_status !== 'Closed' && (
+                <button
+                  type="button"
+                  onClick={handleCloseTrade}
+                  disabled={!currentPrice || executingOrder}
+                  className="px-6 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50"
+                >
+                  {executingOrder ? 'Executing Close...' : 'Close Trade'}
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={executingOrder}
+                className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 disabled:opacity-50"
+              >
+                Save Trade
+              </button>
+            </div>
           </div>
         </form>
       </div >

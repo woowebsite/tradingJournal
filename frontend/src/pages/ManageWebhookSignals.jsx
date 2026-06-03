@@ -3,6 +3,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchWebhookSignals, updateWebhookSignalStatus, fetchWebhookSignalById } from '../features/webhookSignalSlice';
 import { executeSignalTrade } from '../features/tradeSlice';
 import api from '../services/api';
+import { getCryptoHistory, normalizeBinanceSymbol } from '../services/binance';
+import { getIntradaySnapshots } from '../services/tcbs';
 import { Activity, Check, X, Image, ExternalLink } from 'lucide-react';
 import getDecimalPlaces from '../utils/getDecimalPlaces';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -66,16 +68,62 @@ const ManageWebhookSignals = () => {
         setFetchingSignalId(id);
         try {
             const result = await dispatch(fetchWebhookSignalById(id)).unwrap();
+            const latestPrice = await getLatestSymbolPrice(result);
             setExecutingSignal(result);
-            setExecuteForm({ price: result.price || '', volume: '', slPnL: '', tpPnL: '' });
+            setExecuteForm({ price: latestPrice || result.price || signal.price || '', volume: '', slPnL: '', tpPnL: '' });
             setModalError('');
         } catch (error) {
             console.error("Failed to fetch signal details:", error);
             // Fallback to existing signal if fetch fails
+            const latestPrice = await getLatestSymbolPrice(signal);
             setExecutingSignal(signal);
+            setExecuteForm({ price: latestPrice || signal.price || '', volume: '', slPnL: '', tpPnL: '' });
             setModalError('');
         } finally {
             setFetchingSignalId(null);
+        }
+    };
+
+    const getLatestSymbolPrice = async (signalData) => {
+        const symbol = signalData?.linked_symbol;
+        const symbolName = (symbol?.Name || symbol?.name || signalData?.symbol || '').trim();
+        if (!symbolName) return '';
+
+        try {
+            const marketName = (
+                symbol?.market?.Name ||
+                symbol?.market?.name ||
+                signalData?.market?.Name ||
+                signalData?.market?.name ||
+                ''
+            ).toUpperCase();
+
+            const isCrypto = /BINANCE|CRYPTO|USDT|BUSD|FDUSD|BTC|ETH|SOL|XRP|DOGE/i.test(symbolName) || marketName.includes('BINANCE');
+
+            if (isCrypto) {
+                const cryptoSymbol = normalizeBinanceSymbol(symbolName);
+                const candles = await getCryptoHistory(cryptoSymbol, '1m', 2);
+                const lastCandle = Array.isArray(candles) ? candles[candles.length - 1] : null;
+                const price = lastCandle?.close;
+                return Number.isFinite(Number(price)) ? String(price) : '';
+            }
+
+            const snapshots = await getIntradaySnapshots(symbolName);
+            const snapshot = Array.isArray(snapshots) ? snapshots[0] : null;
+            const price =
+                snapshot?.lastPrice ??
+                snapshot?.last_price ??
+                snapshot?.price ??
+                snapshot?.close ??
+                snapshot?.currentPrice ??
+                snapshot?.current_price ??
+                snapshot?.refPrice ??
+                snapshot?.ref_price ??
+                '';
+            return Number.isFinite(Number(price)) ? String(price) : '';
+        } catch (error) {
+            console.warn('Failed to load latest symbol price:', error);
+            return '';
         }
     };
 

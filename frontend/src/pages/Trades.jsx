@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { fetchTrades, saveTrade } from '../features/tradeSlice';
+import { fetchTrades, saveTrade, deleteTrade } from '../features/tradeSlice';
 import { Plus, Filter, Edit2, XCircle } from 'lucide-react';
 import TradeModal from '../components/TradeModal';
 import TradeDetailModal from '../components/TradeDetailModal';
@@ -88,6 +88,29 @@ const Trades = () => {
         setIsModalOpen(true);
     };
 
+    const handleDeleteTrade = async () => {
+        if (!tradeToEdit) return;
+        const tradeId = tradeToEdit.documentId || tradeToEdit.id;
+        if (!window.confirm('Delete this trade and all of its trade details?')) return;
+
+        try {
+            await dispatch(deleteTrade({
+                tradeId,
+                tradeDetails: tradeToEdit.trade_details || []
+            })).unwrap();
+
+            if (selectedAccount) {
+                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+            }
+
+            setIsModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Failed to delete trade:', error);
+            alert(`Failed to delete trade: ${error.message || error}`);
+        }
+    };
+
     const handleOpenCreateModal = () => {
         setTradeToEdit(null);
         setIsModalOpen(true);
@@ -99,6 +122,7 @@ const Trades = () => {
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 onSubmit={handleSaveTrade}
+                onDelete={handleDeleteTrade}
                 initialData={tradeToEdit}
             />
 

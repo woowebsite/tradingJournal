@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { fetchOpenTrades, saveTrade } from '../features/tradeSlice';
+import { fetchOpenTrades, saveTrade, deleteTrade } from '../features/tradeSlice';
 import { fetchBatchLatestMinutePrices } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
@@ -99,6 +99,29 @@ const TodayTrades = () => {
         setSelectedTrade(null);
         setTradeToEdit(trade);
         setIsTradeModalOpen(true);
+    };
+
+    const handleDeleteTrade = async () => {
+        if (!tradeToEdit) return;
+        const tradeId = tradeToEdit.documentId || tradeToEdit.id;
+        if (!window.confirm('Delete this trade and all of its trade details?')) return;
+
+        try {
+            await dispatch(deleteTrade({
+                tradeId,
+                tradeDetails: tradeToEdit.trade_details || []
+            })).unwrap();
+
+            if (selectedAccount) {
+                dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+            }
+
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Failed to delete trade:', error);
+            alert(`Failed to delete trade: ${error.message || error}`);
+        }
     };
 
     const handleSaveTrade = async (tradeData) => {
@@ -209,6 +232,7 @@ const TodayTrades = () => {
             isOpen={isTradeModalOpen}
             onClose={() => setIsTradeModalOpen(false)}
             onSubmit={handleSaveTrade}
+            onDelete={handleDeleteTrade}
             initialData={tradeToEdit}
         />
         </>
