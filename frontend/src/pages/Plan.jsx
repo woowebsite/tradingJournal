@@ -21,7 +21,7 @@ import { useAccount } from '../context/AccountContext';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
 import { fetchBatchLatestMinutePrices } from '../features/marketSlice';
-import { deleteTrade, fetchOpenTrades, saveTrade } from '../features/tradeSlice';
+import { deleteTrade, fetchTrades, saveTrade } from '../features/tradeSlice';
 import { createPlan, deletePlan, listPlans, updatePlan } from '../services/planService';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { formatNumber } from '../utils/formatNumber';
@@ -52,6 +52,16 @@ const getVietnameseWeekdayLabel = (dateValue) => {
     const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const date = new Date(`${dateValue}T12:00:00`);
     return labels[date.getDay()] || '';
+};
+
+const getDateValueFromDateLike = (dateLike) => {
+    if (!dateLike) return '';
+    if (typeof dateLike === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateLike)) {
+        return dateLike;
+    }
+    const date = new Date(dateLike);
+    if (Number.isNaN(date.getTime())) return '';
+    return getLocalDateValue(date);
 };
 
 const getAccountInfo = (accounts, accountId) => {
@@ -92,7 +102,7 @@ const buildEmptyForm = (selectedAccount, accounts) => {
 const Plan = () => {
     const { accounts, selectedAccount, loading } = useAccount();
     const dispatch = useDispatch();
-    const { openTrades, openTradesLoading } = useSelector(state => state.trades);
+    const { items: trades, loading: tradesLoading } = useSelector(state => state.trades);
     const [plans, setPlans] = useState([]);
     const [form, setForm] = useState(() => buildEmptyForm(selectedAccount, accounts));
     const [isEditing, setIsEditing] = useState(false);
@@ -122,16 +132,16 @@ const Plan = () => {
 
     useEffect(() => {
         if (!selectedAccount) return;
-        dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+        dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id, pageSize: 1000 }));
     }, [dispatch, selectedAccount]);
 
     useEffect(() => {
-        if (!openTrades || openTrades.length === 0) {
+        if (!trades || trades.length === 0) {
             setMarketPricesMap({});
             return;
         }
 
-        const symbolsById = openTrades.reduce((acc, trade) => {
+        const symbolsById = trades.reduce((acc, trade) => {
             const symbol = trade.symbol;
             const symbolId = symbol?.documentId || symbol?.id;
             if (symbol && symbolId) {
@@ -153,7 +163,7 @@ const Plan = () => {
         const intervalId = window.setInterval(refreshMarketPrices, 60 * 1000);
 
         return () => window.clearInterval(intervalId);
-    }, [dispatch, openTrades]);
+    }, [dispatch, trades]);
 
     const refreshPlans = async () => {
         try {
@@ -212,19 +222,44 @@ const Plan = () => {
             .filter(plan => plan.scope === 'Daily')
             .sort((a, b) => new Date(b.planDate || b.createdAt || 0) - new Date(a.planDate || a.createdAt || 0));
 
-        const usedDailyIds = new Set();
-        const weeklyGroups = weeklyPlans.map(weeklyPlan => {
-            const children = dailyPlans.filter(dailyPlan => {
-                const dailyId = String(dailyPlan.documentId || dailyPlan.id);
-                if (usedDailyIds.has(dailyId)) return false;
-                const inRange = isDateInRange(dailyPlan.planDate, weeklyPlan.weekStart, weeklyPlan.weekEnd);
-                if (inRange) usedDailyIds.add(dailyId);
-                return inRange;
-            });
-            return { weeklyPlan, children };
+        const weeklyGroups = weeklyPlans.map(weeklyPlan => ({
+            weeklyPlan,
+            weeklyStart: getDateValueFromDateLike(weeklyPlan.weekStart || weeklyPlan.planDate || weeklyPlan.createdAt),
+            weeklyEnd: getDateValueFromDateLike(weeklyPlan.weekEnd || weeklyPlan.weekStart || weeklyPlan.planDate || weeklyPlan.createdAt),
+            children: []
+        }));
+
+        const standaloneDailyPlans = [];
+
+        dailyPlans.forEach(dailyPlan => {
+            const dailyDate = getDateValueFromDateLike(dailyPlan.planDate || dailyPlan.createdAt);
+
+            let targetIndex = weeklyGroups.findIndex(group => isDateInRange(dailyDate, group.weeklyStart, group.weeklyEnd));
+
+            if (targetIndex === -1 && weeklyGroups.length > 0) {
+                let bestDistance = Number.POSITIVE_INFINITY;
+                weeklyGroups.forEach((group, index) => {
+                    const startDistance = Math.abs(new Date(`${dailyDate}T12:00:00`).getTime() - new Date(`${group.weeklyStart}T12:00:00`).getTime());
+                    const endDistance = Math.abs(new Date(`${dailyDate}T12:00:00`).getTime() - new Date(`${group.weeklyEnd}T12:00:00`).getTime());
+                    const distance = Math.min(startDistance, endDistance);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        targetIndex = index;
+                    }
+                });
+            }
+
+            if (targetIndex >= 0) {
+                weeklyGroups[targetIndex].children.push(dailyPlan);
+            } else {
+                standaloneDailyPlans.push(dailyPlan);
+            }
         });
 
-        const standaloneDailyPlans = dailyPlans.filter(plan => !usedDailyIds.has(String(plan.documentId || plan.id)));
+        weeklyGroups.forEach(group => {
+            group.children.sort((a, b) => new Date(b.planDate || b.createdAt || 0) - new Date(a.planDate || a.createdAt || 0));
+        });
+
         return { weeklyGroups, standaloneDailyPlans };
     }, [filteredPlans]);
 
@@ -236,19 +271,27 @@ const Plan = () => {
         return { total, daily, weekly, active };
     }, [filteredPlans]);
 
-    const today = useMemo(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        return d;
+    const currentWeekRange = useMemo(() => {
+        const now = new Date();
+        const day = now.getDay();
+        const mondayOffset = (day + 6) % 7;
+        const weekStart = new Date(now);
+        weekStart.setHours(0, 0, 0, 0);
+        weekStart.setDate(weekStart.getDate() - mondayOffset);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        return {
+            weekStart: getLocalDateValue(weekStart),
+            weekEnd: getLocalDateValue(weekEnd)
+        };
     }, []);
 
-    const openTradeRows = useMemo(() => {
-        if (!openTrades) return [];
+    const weeklyTradeRows = useMemo(() => {
+        if (!trades) return [];
 
-        return openTrades.filter(trade => {
-            const tradeDate = new Date(trade.date || trade.createdAt);
-            tradeDate.setHours(0, 0, 0, 0);
-            return tradeDate.getTime() === today.getTime();
+        return trades.filter(trade => {
+            const tradeDateValue = getDateValueFromDateLike(trade.date || trade.createdAt);
+            return isDateInRange(tradeDateValue, currentWeekRange.weekStart, currentWeekRange.weekEnd);
         }).map(trade => {
             const details = trade.trade_details || [];
             const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -265,11 +308,11 @@ const Plan = () => {
                 derivedPnl: pnl
             };
         }).sort((a, b) => new Date(b.derivedDate || 0) - new Date(a.derivedDate || 0));
-    }, [openTrades, marketPricesMap, today]);
+    }, [trades, marketPricesMap, currentWeekRange.weekStart, currentWeekRange.weekEnd]);
 
-    const totalOpenPnl = useMemo(() => {
-        return openTradeRows.reduce((sum, trade) => sum + (trade.derivedPnl || 0), 0);
-    }, [openTradeRows]);
+    const totalWeeklyPnl = useMemo(() => {
+        return weeklyTradeRows.reduce((sum, trade) => sum + (trade.derivedPnl || 0), 0);
+    }, [weeklyTradeRows]);
 
     const toggleBox = (boxName) => {
         setCollapsedBoxes(prev => ({
@@ -320,9 +363,9 @@ const Plan = () => {
         }
     };
 
-    const refreshOpenTrades = () => {
+    const refreshWeeklyTrades = () => {
         if (!selectedAccount) return;
-        dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+        dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id, pageSize: 1000 }));
     };
 
     const handleOpenTradeDetail = (trade) => {
@@ -343,7 +386,7 @@ const Plan = () => {
     const handleSaveTrade = async (tradeData) => {
         try {
             await dispatch(saveTrade({ tradeData, tradeToEdit })).unwrap();
-            refreshOpenTrades();
+            refreshWeeklyTrades();
             handleCloseTradeModal();
         } catch (err) {
             console.error('Error saving trade:', err);
@@ -361,7 +404,7 @@ const Plan = () => {
                 tradeId,
                 tradeDetails: tradeToEdit.trade_details || []
             })).unwrap();
-            refreshOpenTrades();
+            refreshWeeklyTrades();
             handleCloseTradeModal();
         } catch (err) {
             console.error('Failed to delete trade:', err);
@@ -430,13 +473,13 @@ const Plan = () => {
         const isWeekly = variant === 'weekly';
 
         return (
-            <div key={plan.documentId || plan.id} className={isWeekly ? 'space-y-3' : 'ml-6 pl-5 border-l border-gray-700/80'}>
-                <div
+            <div key={plan.documentId || plan.id} className={isWeekly ? 'space-y-3' : 'ml-6 pl-5 border-l border-b border-gray-700/80'}>
+                        <div
                     className={clsx(
                         'relative',
                         isWeekly
                             ? 'rounded-2xl border border-gray-700 bg-gray-800 overflow-hidden shadow-lg shadow-black/10'
-                            : 'rounded-2xl bg-gray-900/70 overflow-visible shadow-md shadow-black/10'
+                            : 'rounded-2xl bg-gray-900/70 overflow-visible shadow-md shadow-black/10 -mx-4'
                     )}
                 >
                     {isWeekly ? (
@@ -497,7 +540,7 @@ const Plan = () => {
                         </div>
                     ) : (
                         <>
-                            <div className="absolute left-[-54px] top-5 w-16 flex flex-col items-center">
+                            <div className="absolute left-[-25px] top-6 w-10 flex flex-col items-center bg-[#101828]">
                                 <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-blue-300/80 whitespace-nowrap leading-none">
                                     {getVietnameseWeekdayLabel(plan.planDate)}
                                 </div>
@@ -594,22 +637,9 @@ const Plan = () => {
                                         {plan.marketContext || 'No market context yet.'}
                                     </p>
                                 </div>
-                                <div className="rounded-xl bg-gray-900/70 border border-gray-700 p-4">
-                                    <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Entry plan</div>
-                                    <p className="text-xs text-gray-300 whitespace-pre-wrap">
-                                        {plan.entryPlan || 'No entry plan yet.'}
-                                    </p>
-                                </div>
                             </div>
 
                             <div className="space-y-3">
-                                <div className="rounded-xl bg-gray-900/70 border border-gray-700 p-4">
-                                    <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Risk & checklist</div>
-                                    <div className="space-y-3 text-xs text-gray-300">
-                                        <p className="whitespace-pre-wrap">{plan.riskPlan || 'No risk plan yet.'}</p>
-                                        <p className="whitespace-pre-wrap">{plan.checklist || 'No checklist yet.'}</p>
-                                    </div>
-                                </div>
                                 <div className="rounded-xl bg-gray-900/70 border border-gray-700 p-4">
                                     <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Review notes</div>
                                     <p className="text-xs text-gray-300 whitespace-pre-wrap">
@@ -686,23 +716,23 @@ const Plan = () => {
                     <div className="rounded-2xl border border-gray-700 bg-gray-800 p-4">
                         <div className={clsx('flex items-start justify-between gap-3', !collapsedBoxes.openTrades && 'mb-3')}>
                             <div>
-                                <h2 className="text-base font-bold text-white">Open Trades</h2>
+                                <h2 className="text-base font-bold text-white">Trades This Week</h2>
                                 <p className="text-xs text-gray-400 mt-1">
-                                    Vị thế đang mở hôm nay của tài khoản hiện tại.
+                                    Trades from this week for the current account.
                                 </p>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
                                 <div className={clsx(
                                     'text-right font-mono text-sm font-bold',
-                                    totalOpenPnl >= 0 ? 'text-green-400' : 'text-red-400'
+                                    totalWeeklyPnl >= 0 ? 'text-green-400' : 'text-red-400'
                                 )}>
-                                    {formatNumber(totalOpenPnl)} USD
+                                    {formatNumber(totalWeeklyPnl)} USD
                                 </div>
                                 <button
                                     type="button"
                                     onClick={() => toggleBox('openTrades')}
                                     className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
-                                    aria-label={collapsedBoxes.openTrades ? 'Expand open trades' : 'Collapse open trades'}
+                                    aria-label={collapsedBoxes.openTrades ? 'Expand weekly trades' : 'Collapse weekly trades'}
                                 >
                                     <ChevronDown
                                         size={16}
@@ -713,13 +743,13 @@ const Plan = () => {
                         </div>
 
                         {!collapsedBoxes.openTrades && (
-                            openTradesLoading ? (
+                            tradesLoading ? (
                                 <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-5 text-center text-sm text-gray-400">
-                                    Loading open trades...
+                                    Loading weekly trades...
                                 </div>
-                            ) : openTradeRows.length === 0 ? (
+                            ) : weeklyTradeRows.length === 0 ? (
                                 <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/50 p-5 text-center text-sm text-gray-500">
-                                    Không có trade đang mở hôm nay.
+                                    No trades in the current week.
                                 </div>
                             ) : (
                                 <div className="max-h-56 overflow-y-auto rounded-xl border border-gray-700">
@@ -733,7 +763,7 @@ const Plan = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-700/80 bg-gray-900/35">
-                                            {openTradeRows.map(trade => (
+                                            {weeklyTradeRows.map(trade => (
                                                 <tr
                                                     key={trade.documentId || trade.id}
                                                     onClick={() => handleOpenTradeDetail(trade)}
@@ -1082,10 +1112,12 @@ const Plan = () => {
                             {planTree.weeklyGroups.map(({ weeklyPlan, children }) => (
                                 <div key={weeklyPlan.documentId || weeklyPlan.id} className="space-y-3">
                                     {renderPlanCard(weeklyPlan, 'weekly')}
-                                    {children.map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
                                 </div>
                             ))}
-                            {planTree.standaloneDailyPlans.map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
+                            <div id="daily-plans">
+                                {planTree.weeklyGroups.flatMap(({ children }) => children).map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
+                                {planTree.standaloneDailyPlans.map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
+                            </div>
                         </div>
                     )}
                 </div>
