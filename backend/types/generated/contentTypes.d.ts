@@ -597,6 +597,53 @@ export interface ApiMarketMarket extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiPlanPlan extends Struct.CollectionTypeSchema {
+  collectionName: 'plans';
+  info: {
+    description: 'Daily and weekly trading plans per account';
+    displayName: 'Plan';
+    pluralName: 'plans';
+    singularName: 'plan';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    accountId: Schema.Attribute.String & Schema.Attribute.Required;
+    accountName: Schema.Attribute.String & Schema.Attribute.Required;
+    checklist: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    entryPlan: Schema.Attribute.Text;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::plan.plan'> &
+      Schema.Attribute.Private;
+    marketContext: Schema.Attribute.Text;
+    maxTrades: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<3>;
+    planDate: Schema.Attribute.Date;
+    publishedAt: Schema.Attribute.DateTime;
+    reviewNotes: Schema.Attribute.Text;
+    riskPlan: Schema.Attribute.Text;
+    scope: Schema.Attribute.Enumeration<['Daily', 'Weekly']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'Daily'>;
+    session: Schema.Attribute.String;
+    status: Schema.Attribute.Enumeration<
+      ['Draft', 'Active', 'Done', 'Skipped']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'Draft'>;
+    symbols: Schema.Attribute.Text;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    weekEnd: Schema.Attribute.Date;
+    weekStart: Schema.Attribute.Date;
+  };
+}
+
 export interface ApiRuleRule extends Struct.CollectionTypeSchema {
   collectionName: 'rules';
   info: {
@@ -1629,6 +1676,7 @@ declare module '@strapi/strapi' {
       'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;
+      'api::plan.plan': ApiPlanPlan;
       'api::rule.rule': ApiRuleRule;
       'api::setting.setting': ApiSettingSetting;
       'api::signal.signal': ApiSignalSignal;

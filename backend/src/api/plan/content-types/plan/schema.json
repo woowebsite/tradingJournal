@@ -1,0 +1,82 @@
+{
+  "kind": "collectionType",
+  "collectionName": "plans",
+  "info": {
+    "singularName": "plan",
+    "pluralName": "plans",
+    "displayName": "Plan",
+    "description": "Daily and weekly trading plans per account"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "accountId": {
+      "type": "string",
+      "required": true
+    },
+    "accountName": {
+      "type": "string",
+      "required": true
+    },
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "scope": {
+      "type": "enumeration",
+      "enum": [
+        "Daily",
+        "Weekly"
+      ],
+      "default": "Daily",
+      "required": true
+    },
+    "planDate": {
+      "type": "date"
+    },
+    "weekStart": {
+      "type": "date"
+    },
+    "weekEnd": {
+      "type": "date"
+    },
+    "session": {
+      "type": "string"
+    },
+    "marketContext": {
+      "type": "text"
+    },
+    "symbols": {
+      "type": "text"
+    },
+    "entryPlan": {
+      "type": "text"
+    },
+    "riskPlan": {
+      "type": "text"
+    },
+    "checklist": {
+      "type": "text"
+    },
+    "reviewNotes": {
+      "type": "text"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": [
+        "Draft",
+        "Active",
+        "Done",
+        "Skipped"
+      ],
+      "default": "Draft",
+      "required": true
+    },
+    "maxTrades": {
+      "type": "integer",
+      "default": 3
+    }
+  }
+}

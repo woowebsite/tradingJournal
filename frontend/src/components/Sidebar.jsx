@@ -25,6 +25,7 @@ const Sidebar = () => {
                     label: 'Journal',
                     path: '/journal',
                     subItems: [
+                        { label: 'Plan', path: '/journal-plan' },
                         { label: 'Trades', path: '/trades' },
                         { label: 'Journal', path: '/journal-trade' }
                     ]
@@ -129,6 +130,8 @@ const Sidebar = () => {
                             {group.items.map((item) => {
                                 const isExpanded = expandedItems.includes(item.path);
                                 const hasSubItems = item.subItems && item.subItems.length > 0;
+                                const isActive = location.pathname === item.path
+                                    || (hasSubItems && item.subItems.some(subItem => location.pathname === subItem.path));
 
                                 return (
                                     <div key={item.path}>
@@ -137,7 +140,7 @@ const Sidebar = () => {
                                                 to={item.path}
                                                 className={clsx(
                                                     'flex-1 flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200',
-                                                    location.pathname === item.path
+                                                    isActive
                                                         ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
                                                         : 'text-gray-400 hover:bg-gray-700 hover:text-white'
                                                 )}
