@@ -114,6 +114,8 @@ const Plan = () => {
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
     const [tradeToEdit, setTradeToEdit] = useState(null);
+    const [selectedWeekId, setSelectedWeekId] = useState('');
+    const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
     const [collapsedBoxes, setCollapsedBoxes] = useState({
         openTrades: false,
         createPlan: false,
@@ -270,6 +272,43 @@ const Plan = () => {
         const active = filteredPlans.filter(plan => plan.status === 'Active').length;
         return { total, daily, weekly, active };
     }, [filteredPlans]);
+
+    const weeklyPlanOptions = useMemo(() => {
+        return planTree.weeklyGroups.map(({ weeklyPlan }) => ({
+            id: weeklyPlan.documentId || weeklyPlan.id,
+            title: weeklyPlan.title || 'Untitled plan',
+            weekStart: weeklyPlan.weekStart || weeklyPlan.planDate || '',
+            weekEnd: weeklyPlan.weekEnd || weeklyPlan.weekStart || weeklyPlan.planDate || ''
+        }));
+    }, [planTree.weeklyGroups]);
+
+    const selectedWeeklyGroup = useMemo(() => {
+        if (!planTree.weeklyGroups.length) return null;
+        return planTree.weeklyGroups.find(({ weeklyPlan }) => String(weeklyPlan.documentId || weeklyPlan.id) === String(selectedWeekId))
+            || planTree.weeklyGroups[0];
+    }, [planTree.weeklyGroups, selectedWeekId]);
+
+    useEffect(() => {
+        if (!planTree.weeklyGroups.length) {
+            setSelectedWeekId('');
+            return;
+        }
+
+        const today = getLocalDateValue();
+        const currentWeek = planTree.weeklyGroups.find(({ weeklyStart, weeklyEnd }) =>
+            isDateInRange(today, weeklyStart, weeklyEnd)
+        );
+        const selectedExists = planTree.weeklyGroups.some(({ weeklyPlan }) =>
+            String(weeklyPlan.documentId || weeklyPlan.id) === String(selectedWeekId)
+        );
+        const nextSelectedWeekId = selectedExists
+            ? selectedWeekId
+            : (currentWeek?.weeklyPlan.documentId || currentWeek?.weeklyPlan.id || planTree.weeklyGroups[0].weeklyPlan.documentId || planTree.weeklyGroups[0].weeklyPlan.id || '');
+
+        if (nextSelectedWeekId !== selectedWeekId) {
+            setSelectedWeekId(nextSelectedWeekId);
+        }
+    }, [planTree.weeklyGroups, selectedWeekId]);
 
     const currentWeekRange = useMemo(() => {
         const now = new Date();
@@ -473,8 +512,11 @@ const Plan = () => {
         const isWeekly = variant === 'weekly';
 
         return (
-            <div key={plan.documentId || plan.id} className={isWeekly ? 'space-y-3' : 'ml-6 pl-5 border-l border-b border-gray-700/80'}>
-                        <div
+            <div
+                key={plan.documentId || plan.id}
+                className={isWeekly ? 'space-y-3' : 'ml-6 pl-5 border-l border-b border-gray-700/80 last:border-b-0'}
+            >
+                <div
                     className={clsx(
                         'relative',
                         isWeekly
@@ -665,13 +707,65 @@ const Plan = () => {
                     <p className="text-gray-400 text-sm mt-1">Manage and execute incoming signals</p>
                 </div>
 
-                <button
-                    onClick={resetForm}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
-                >
-                    <Plus size={16} />
-                    New Plan
-                </button>
+                <div className="flex items-center gap-2">
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setIsWeekDropdownOpen(prev => !prev)}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
+                        >
+                            <CalendarDays size={16} />
+                            {selectedWeeklyGroup
+                                ? `${selectedWeeklyGroup.weeklyPlan.title || 'Untitled plan'}`
+                                : 'Weeks'}
+                            <ChevronDown size={16} className={clsx('transition-transform', isWeekDropdownOpen && 'rotate-180')} />
+                        </button>
+
+                        {isWeekDropdownOpen && (
+                            <div className="absolute right-0 top-full z-20 mt-2 w-80 overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/30">
+                                <div className="border-b border-gray-700 px-4 py-3">
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                        Weeks with plans
+                                    </p>
+                                </div>
+                                <div className="max-h-72 overflow-y-auto py-2">
+                                    {weeklyPlanOptions.length === 0 ? (
+                                        <div className="px-4 py-3 text-sm text-gray-500">
+                                            No weekly plan yet.
+                                        </div>
+                                    ) : (
+                                        weeklyPlanOptions.map(option => (
+                                            <button
+                                                key={option.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedWeekId(option.id);
+                                                    setIsWeekDropdownOpen(false);
+                                                }}
+                                                className="flex w-full flex-col items-start gap-1 px-4 py-3 text-left hover:bg-gray-800 transition"
+                                            >
+                                                <span className="text-sm font-medium text-gray-100">
+                                                    {option.title}
+                                                </span>
+                                                <span className="text-xs text-gray-400">
+                                                    {option.weekStart || '-'} → {option.weekEnd || '-'}
+                                                </span>
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <button
+                        onClick={resetForm}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
+                    >
+                        <Plus size={16} />
+                        New Plan
+                    </button>
+                </div>
             </div>
 
             {error && (
@@ -1107,16 +1201,20 @@ const Plan = () => {
                         <div className="rounded-2xl border border-dashed border-gray-700 bg-gray-800/40 p-10 text-center text-gray-400">
                             Chưa có plan cho tài khoản này. Hãy tạo plan đầu tiên ở form bên trái.
                         </div>
+                    ) : !selectedWeeklyGroup ? (
+                        <div className="rounded-2xl border border-dashed border-gray-700 bg-gray-800/40 p-10 text-center text-gray-400">
+                            No weekly plan available for the selected account.
+                        </div>
                     ) : (
                         <div className="space-y-4">
-                            {planTree.weeklyGroups.map(({ weeklyPlan, children }) => (
-                                <div key={weeklyPlan.documentId || weeklyPlan.id} className="space-y-3">
-                                    {renderPlanCard(weeklyPlan, 'weekly')}
-                                </div>
-                            ))}
+                            <div
+                                id={`weekly-plan-${selectedWeeklyGroup.weeklyPlan.documentId || selectedWeeklyGroup.weeklyPlan.id}`}
+                                className="space-y-3"
+                            >
+                                {renderPlanCard(selectedWeeklyGroup.weeklyPlan, 'weekly')}
+                            </div>
                             <div id="daily-plans">
-                                {planTree.weeklyGroups.flatMap(({ children }) => children).map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
-                                {planTree.standaloneDailyPlans.map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
+                                {selectedWeeklyGroup.children.map(dailyPlan => renderPlanCard(dailyPlan, 'daily'))}
                             </div>
                         </div>
                     )}
