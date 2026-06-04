@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
+import { useDispatch, useSelector } from 'react-redux';
 import {
     Calendar,
     CalendarDays,
     CheckSquare,
+    ChevronDown,
     Edit2,
     Plus,
     Save,
@@ -11,10 +13,18 @@ import {
     Trash2,
     ListChecks,
     TrendingUp,
-    Activity
+    Activity,
+    CheckCircle2,
+    X
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import TradeDetailModal from '../components/TradeDetailModal';
+import TradeModal from '../components/TradeModal';
+import { fetchBatchLatestMinutePrices } from '../features/marketSlice';
+import { deleteTrade, fetchOpenTrades, saveTrade } from '../features/tradeSlice';
 import { createPlan, deletePlan, listPlans, updatePlan } from '../services/planService';
+import { calculateTradePnL } from '../utils/tradeCalculations';
+import { formatNumber } from '../utils/formatNumber';
 
 const getLocalDateValue = (date = new Date()) => {
     const d = new Date(date);
@@ -81,6 +91,8 @@ const buildEmptyForm = (selectedAccount, accounts) => {
 
 const Plan = () => {
     const { accounts, selectedAccount, loading } = useAccount();
+    const dispatch = useDispatch();
+    const { openTrades, openTradesLoading } = useSelector(state => state.trades);
     const [plans, setPlans] = useState([]);
     const [form, setForm] = useState(() => buildEmptyForm(selectedAccount, accounts));
     const [isEditing, setIsEditing] = useState(false);
@@ -88,8 +100,60 @@ const Plan = () => {
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    const [marketPricesMap, setMarketPricesMap] = useState({});
+    const [selectedTrade, setSelectedTrade] = useState(null);
+    const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
+    const [tradeToEdit, setTradeToEdit] = useState(null);
+    const [collapsedBoxes, setCollapsedBoxes] = useState({
+        openTrades: false,
+        createPlan: false,
+        formGuide: false
+    });
+
+    // Auto-hide toast after 3 seconds
+    useEffect(() => {
+        if (message) {
+            const timer = setTimeout(() => setMessage(''), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [message]);
 
     const selectedAccountId = selectedAccount ? String(selectedAccount.id || selectedAccount.documentId) : '';
+
+    useEffect(() => {
+        if (!selectedAccount) return;
+        dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+    }, [dispatch, selectedAccount]);
+
+    useEffect(() => {
+        if (!openTrades || openTrades.length === 0) {
+            setMarketPricesMap({});
+            return;
+        }
+
+        const symbolsById = openTrades.reduce((acc, trade) => {
+            const symbol = trade.symbol;
+            const symbolId = symbol?.documentId || symbol?.id;
+            if (symbol && symbolId) {
+                acc[symbolId] = symbol;
+            }
+            return acc;
+        }, {});
+
+        const symbols = Object.values(symbolsById);
+
+        const refreshMarketPrices = async () => {
+            const result = await dispatch(fetchBatchLatestMinutePrices(symbols));
+            if (fetchBatchLatestMinutePrices.fulfilled.match(result)) {
+                setMarketPricesMap(result.payload || {});
+            }
+        };
+
+        refreshMarketPrices();
+        const intervalId = window.setInterval(refreshMarketPrices, 60 * 1000);
+
+        return () => window.clearInterval(intervalId);
+    }, [dispatch, openTrades]);
 
     const refreshPlans = async () => {
         try {
@@ -172,6 +236,48 @@ const Plan = () => {
         return { total, daily, weekly, active };
     }, [filteredPlans]);
 
+    const today = useMemo(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }, []);
+
+    const openTradeRows = useMemo(() => {
+        if (!openTrades) return [];
+
+        return openTrades.filter(trade => {
+            const tradeDate = new Date(trade.date || trade.createdAt);
+            tradeDate.setHours(0, 0, 0, 0);
+            return tradeDate.getTime() === today.getTime();
+        }).map(trade => {
+            const details = trade.trade_details || [];
+            const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const firstEntry = sortedDetails.find(detail => detail.signal === 'Entry') || sortedDetails[0];
+            const symbolId = trade.symbol?.documentId || trade.symbol?.id;
+            const currentPrice = symbolId ? marketPricesMap[symbolId] : null;
+            const pnl = calculateTradePnL(trade, currentPrice);
+
+            return {
+                ...trade,
+                derivedDate: trade.date || firstEntry?.date || trade.createdAt,
+                derivedEntryPrice: firstEntry?.price || 0,
+                derivedCurrentPrice: currentPrice,
+                derivedPnl: pnl
+            };
+        }).sort((a, b) => new Date(b.derivedDate || 0) - new Date(a.derivedDate || 0));
+    }, [openTrades, marketPricesMap, today]);
+
+    const totalOpenPnl = useMemo(() => {
+        return openTradeRows.reduce((sum, trade) => sum + (trade.derivedPnl || 0), 0);
+    }, [openTradeRows]);
+
+    const toggleBox = (boxName) => {
+        setCollapsedBoxes(prev => ({
+            ...prev,
+            [boxName]: !prev[boxName]
+        }));
+    };
+
     const resetForm = () => {
         setForm(buildEmptyForm(selectedAccount, accounts));
         setIsEditing(false);
@@ -181,6 +287,7 @@ const Plan = () => {
 
     const handleEdit = (plan) => {
         setIsEditing(true);
+        setCollapsedBoxes(prev => ({ ...prev, createPlan: false }));
         setMessage('');
         setError('');
         setForm({
@@ -210,6 +317,55 @@ const Plan = () => {
             setError(err?.response?.data?.error?.message || err?.message || 'Failed to delete plan.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const refreshOpenTrades = () => {
+        if (!selectedAccount) return;
+        dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+    };
+
+    const handleOpenTradeDetail = (trade) => {
+        setSelectedTrade(trade);
+    };
+
+    const handleEditTrade = (trade) => {
+        setSelectedTrade(null);
+        setTradeToEdit(trade);
+        setIsTradeModalOpen(true);
+    };
+
+    const handleCloseTradeModal = () => {
+        setIsTradeModalOpen(false);
+        setTradeToEdit(null);
+    };
+
+    const handleSaveTrade = async (tradeData) => {
+        try {
+            await dispatch(saveTrade({ tradeData, tradeToEdit })).unwrap();
+            refreshOpenTrades();
+            handleCloseTradeModal();
+        } catch (err) {
+            console.error('Error saving trade:', err);
+            alert(`Failed to save trade: ${err.message || err}`);
+        }
+    };
+
+    const handleDeleteTrade = async () => {
+        if (!tradeToEdit) return;
+        const tradeId = tradeToEdit.documentId || tradeToEdit.id;
+        if (!window.confirm('Delete this trade and all of its trade details?')) return;
+
+        try {
+            await dispatch(deleteTrade({
+                tradeId,
+                tradeDetails: tradeToEdit.trade_details || []
+            })).unwrap();
+            refreshOpenTrades();
+            handleCloseTradeModal();
+        } catch (err) {
+            console.error('Failed to delete trade:', err);
+            alert(`Failed to delete trade: ${err.message || err}`);
         }
     };
 
@@ -348,12 +504,12 @@ const Plan = () => {
                                 <div className="relative mt-3 w-3 h-4">
                                     <div className="absolute left-1/2 top-0 -translate-x-1/2 h-3 w-3 rounded-full bg-blue-400 ring-4 ring-blue-400/15" />
                                 </div>
-                                
+
                             </div>
 
                             <div className="p-4 pl-4 flex items-start justify-between gap-4">
                                 <div className="min-w-0 space-y-1 pt-0.5">
-                                    
+
                                     <h3 className="text-sm font-semibold text-white truncate">
                                         {plan.title || 'Untitled plan'}
                                     </h3>
@@ -469,9 +625,9 @@ const Plan = () => {
     };
 
     return (
-        <div id="plan" className="p-6 space-y-6 text-[13px] [&_*]:!text-[13px]">
+        <div id="plan" className="p-6 space-y-6">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                 <div>
+                <div>
                     <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
                         <Activity className="w-6 h-6 text-blue-400" />
                         Journal Plans
@@ -488,12 +644,9 @@ const Plan = () => {
                 </button>
             </div>
 
-            {(message || error) && (
-                <div className={clsx(
-                    'rounded-xl px-4 py-3 text-sm border',
-                    error ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-blue-500/30 bg-blue-500/10 text-blue-200'
-                )}>
-                    {error || message}
+            {error && (
+                <div className="rounded-xl px-4 py-3 text-sm border border-red-500/30 bg-red-500/10 text-red-200">
+                    {error}
                 </div>
             )}
 
@@ -529,264 +682,389 @@ const Plan = () => {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
-                <div className="xl:col-span-2 space-y-6">
-                    <div className="rounded-2xl border border-gray-700 bg-gray-800 p-5">
-                        <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="xl:col-span-2 space-y-4">
+                    <div className="rounded-2xl border border-gray-700 bg-gray-800 p-4">
+                        <div className={clsx('flex items-start justify-between gap-3', !collapsedBoxes.openTrades && 'mb-3')}>
+                            <div>
+                                <h2 className="text-base font-bold text-white">Open Trades</h2>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Vị thế đang mở hôm nay của tài khoản hiện tại.
+                                </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                                <div className={clsx(
+                                    'text-right font-mono text-sm font-bold',
+                                    totalOpenPnl >= 0 ? 'text-green-400' : 'text-red-400'
+                                )}>
+                                    {formatNumber(totalOpenPnl)} USD
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => toggleBox('openTrades')}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+                                    aria-label={collapsedBoxes.openTrades ? 'Expand open trades' : 'Collapse open trades'}
+                                >
+                                    <ChevronDown
+                                        size={16}
+                                        className={clsx('transition-transform', collapsedBoxes.openTrades && '-rotate-90')}
+                                    />
+                                </button>
+                            </div>
+                        </div>
+
+                        {!collapsedBoxes.openTrades && (
+                            openTradesLoading ? (
+                                <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-5 text-center text-sm text-gray-400">
+                                    Loading open trades...
+                                </div>
+                            ) : openTradeRows.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/50 p-5 text-center text-sm text-gray-500">
+                                    Không có trade đang mở hôm nay.
+                                </div>
+                            ) : (
+                                <div className="max-h-56 overflow-y-auto rounded-xl border border-gray-700">
+                                    <table className="w-full table-fixed text-xs">
+                                        <thead className="sticky top-0 z-10 bg-gray-900 text-[10px] uppercase tracking-wider text-gray-500">
+                                            <tr>
+                                                <th className="w-[30%] px-3 py-2 text-left font-semibold">Symbol</th>
+                                                <th className="w-[15%] px-2 py-2 text-left font-semibold">Side</th>
+                                                <th className="w-[22%] px-2 py-2 text-right font-semibold">Current</th>
+                                                <th className="w-[33%] px-3 py-2 text-right font-semibold">PnL</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-700/80 bg-gray-900/35">
+                                            {openTradeRows.map(trade => (
+                                                <tr
+                                                    key={trade.documentId || trade.id}
+                                                    onClick={() => handleOpenTradeDetail(trade)}
+                                                    className="cursor-pointer hover:bg-gray-900/70 transition"
+                                                >
+                                                    <td className="px-3 py-2">
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className={clsx(
+                                                                'h-2 w-2 shrink-0 rounded-full',
+                                                                trade.type === 'Long' ? 'bg-green-400' : 'bg-red-400'
+                                                            )} />
+                                                            <div className="min-w-0">
+                                                                <div className="truncate font-semibold text-gray-100">
+                                                                    {trade.symbol?.Name || trade.symbol?.name || 'Unknown'}
+                                                                </div>
+                                                                <div className="text-[10px] text-gray-500">
+                                                                    {trade.derivedDate
+                                                                        ? new Date(trade.derivedDate).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                                                                        : '-'}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-2 py-2 text-gray-300">
+                                                        {trade.type || '-'}
+                                                    </td>
+                                                    <td className="px-2 py-2 text-right font-mono text-gray-200">
+                                                        {formatNumber(trade.derivedCurrentPrice)}
+                                                    </td>
+                                                    <td className={clsx(
+                                                        'px-3 py-2 text-right font-mono font-bold',
+                                                        trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'
+                                                    )}>
+                                                        {formatNumber(trade.derivedPnl)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )
+                        )}
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-700 bg-gray-800 p-4">
+                        <div className={clsx('flex items-center justify-between gap-3', !collapsedBoxes.createPlan && 'mb-4')}>
                             <div>
                                 <h2 className="text-lg font-bold text-white">{isEditing ? 'Edit Plan' : 'Create Plan'}</h2>
                                 <p className="text-xs text-gray-400 mt-1">
                                     Gợi ý form: bối cảnh, setup, rủi ro, checklist, và review sau phiên.
                                 </p>
                             </div>
-                            <div className="px-3 py-1 rounded-full bg-gray-900 border border-gray-700 text-[11px] text-gray-400">
-                                {loading ? 'Loading accounts...' : (selectedAccount?.name || form.accountName || 'No account')}
-                            </div>
-                        </div>
-
-                        <form className="space-y-4" onSubmit={handleSubmit}>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label className="space-y-2">
-                                    <span className="text-xs font-medium text-gray-300">Account</span>
-                                    <select
-                                        value={form.accountId}
-                                        onChange={(e) => {
-                                            const accountId = e.target.value;
-                                            const accountInfo = getAccountInfo(accounts, accountId);
-                                            setForm(prev => ({ ...prev, accountId, accountName: accountInfo.accountName }));
-                                        }}
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                    >
-                                        <option value="">Select account</option>
-                                        {accounts.map(account => (
-                                            <option key={account.id || account.documentId} value={String(account.id || account.documentId)}>
-                                                {account.name || account.currency || `Account ${account.id || account.documentId}`}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-
-                                <label className="space-y-2">
-                                    <span className="text-xs font-medium text-gray-300">Scope</span>
-                                    <select
-                                        value={form.scope}
-                                        onChange={(e) => {
-                                            const scope = e.target.value;
-                                            setForm(prev => ({
-                                                ...prev,
-                                                scope,
-                                                weekEnd: scope === 'Weekly' ? addDaysToDateValue(prev.weekStart, 6) : prev.weekEnd
-                                            }));
-                                        }}
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                    >
-                                        <option value="Daily">Daily</option>
-                                        <option value="Weekly">Weekly</option>
-                                    </select>
-                                </label>
-                            </div>
-
-                            <label className="space-y-2 block">
-                                <span className="text-xs font-medium text-gray-300">Plan title</span>
-                                <input
-                                    value={form.title}
-                                    onChange={(e) => setForm(prev => ({ ...prev, title: e.target.value }))}
-                                    placeholder="Example: Breakout setup for VN30 futures"
-                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                />
-                            </label>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {form.scope === 'Daily' ? (
-                                    <label className="space-y-2">
-                                        <span className="text-xs font-medium text-gray-300">Plan date</span>
-                                        <input
-                                            type="date"
-                                            value={form.planDate}
-                                            onChange={(e) => setForm(prev => ({ ...prev, planDate: e.target.value }))}
-                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                        />
-                                    </label>
-                                ) : (
-                                    <>
-                                        <label className="space-y-2">
-                                            <span className="text-xs font-medium text-gray-300">Week start</span>
-                                            <input
-                                                type="date"
-                                                value={form.weekStart}
-                                                onChange={(e) => setForm(prev => ({
-                                                    ...prev,
-                                                    weekStart: e.target.value,
-                                                    weekEnd: addDaysToDateValue(e.target.value, 6)
-                                                }))}
-                                                className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                            />
-                                        </label>
-                                        <label className="space-y-2">
-                                            <span className="text-xs font-medium text-gray-300">Week end</span>
-                                            <input
-                                                type="date"
-                                                value={form.weekEnd}
-                                                onChange={(e) => setForm(prev => ({ ...prev, weekEnd: e.target.value }))}
-                                                className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                            />
-                                        </label>
-                                    </>
-                                )}
-
-                                <label className="space-y-2">
-                                    <span className="text-xs font-medium text-gray-300">Session / frame</span>
-                                    <input
-                                        value={form.session}
-                                        onChange={(e) => setForm(prev => ({ ...prev, session: e.target.value }))}
-                                        placeholder="Morning, Afternoon, London, NY..."
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                    />
-                                </label>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label className="space-y-2">
-                                    <span className="text-xs font-medium text-gray-300">Max trades</span>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        value={form.maxTrades}
-                                        onChange={(e) => setForm(prev => ({ ...prev, maxTrades: e.target.value }))}
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                    />
-                                </label>
-
-                                <label className="space-y-2">
-                                    <span className="text-xs font-medium text-gray-300">Status</span>
-                                    <select
-                                        value={form.status}
-                                        onChange={(e) => setForm(prev => ({ ...prev, status: e.target.value }))}
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                    >
-                                        <option value="Draft">Draft</option>
-                                        <option value="Active">Active</option>
-                                        <option value="Done">Done</option>
-                                        <option value="Skipped">Skipped</option>
-                                    </select>
-                                </label>
-                            </div>
-
-                            <label className="space-y-2 block">
-                                <span className="text-xs font-medium text-gray-300">Symbols / watchlist</span>
-                                <input
-                                    value={form.symbols}
-                                    onChange={(e) => setForm(prev => ({ ...prev, symbols: e.target.value }))}
-                                    placeholder="FPT, SSI, VN30, BTC..."
-                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                />
-                            </label>
-
-                            <label className="space-y-2 block">
-                                <span className="text-xs font-medium text-gray-300">Market context</span>
-                                <textarea
-                                    rows="3"
-                                    value={form.marketContext}
-                                    onChange={(e) => setForm(prev => ({ ...prev, marketContext: e.target.value }))}
-                                    placeholder="Xu hướng thị trường, catalyst, vùng giá quan trọng, lưu ý tin tức..."
-                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
-                                />
-                            </label>
-
-                            <label className="space-y-2 block">
-                                <span className="text-xs font-medium text-gray-300">Entry plan</span>
-                                <textarea
-                                    rows="3"
-                                    value={form.entryPlan}
-                                    onChange={(e) => setForm(prev => ({ ...prev, entryPlan: e.target.value }))}
-                                    placeholder="Điều kiện vào lệnh, tín hiệu xác nhận, khi nào bỏ qua setup..."
-                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
-                                />
-                            </label>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label className="space-y-2 block">
-                                    <span className="text-xs font-medium text-gray-300">Risk plan</span>
-                                    <textarea
-                                        rows="4"
-                                        value={form.riskPlan}
-                                        onChange={(e) => setForm(prev => ({ ...prev, riskPlan: e.target.value }))}
-                                        placeholder="Risk/trade, max loss, stop loss, sizing, số lệnh tối đa..."
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
-                                    />
-                                </label>
-
-                                <label className="space-y-2 block">
-                                    <span className="text-xs font-medium text-gray-300">Checklist</span>
-                                    <textarea
-                                        rows="4"
-                                        value={form.checklist}
-                                        onChange={(e) => setForm(prev => ({ ...prev, checklist: e.target.value }))}
-                                        placeholder="News cleared, trend confirmed, liquidity ok, not overtrading..."
-                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
-                                    />
-                                </label>
-                            </div>
-
-                            <label className="space-y-2 block">
-                                <span className="text-xs font-medium text-gray-300">Review notes</span>
-                                <textarea
-                                    rows="4"
-                                    value={form.reviewNotes}
-                                    onChange={(e) => setForm(prev => ({ ...prev, reviewNotes: e.target.value }))}
-                                    placeholder="Sau khi kết thúc ngày/tuần: what worked, what failed, lesson learned..."
-                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
-                                />
-                            </label>
-
-                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                                <div className="flex flex-wrap gap-3">
-                                    <button
-                                        type="submit"
-                                        disabled={saving}
-                                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-500 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                                    >
-                                        <Save size={16} />
-                                        {saving ? 'Saving...' : (isEditing ? 'Update Plan' : 'Save Plan')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={resetForm}
-                                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 hover:bg-gray-800 transition"
-                                    >
-                                        Reset
-                                    </button>
+                            <div className="flex shrink-0 items-center gap-2">
+                                <div className="px-3 py-1 rounded-full bg-gray-900 border border-gray-700 text-[11px] text-gray-400">
+                                    {loading ? 'Loading accounts...' : (selectedAccount?.name || form.accountName || 'No account')}
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={resetForm}
-                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
+                                    onClick={() => toggleBox('createPlan')}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+                                    aria-label={collapsedBoxes.createPlan ? 'Expand create plan' : 'Collapse create plan'}
                                 >
-                                    <Plus size={16} />
-                                    New Plan
+                                    <ChevronDown
+                                        size={16}
+                                        className={clsx('transition-transform', collapsedBoxes.createPlan && '-rotate-90')}
+                                    />
                                 </button>
                             </div>
-                        </form>
+                        </div>
+
+                        {!collapsedBoxes.createPlan && (
+                            <form className="max-h-[68vh] space-y-4 overflow-y-auto pr-1" onSubmit={handleSubmit}>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label className="space-y-2">
+                                        <span className="text-xs font-medium text-gray-300">Account</span>
+                                        <select
+                                            value={form.accountId}
+                                            onChange={(e) => {
+                                                const accountId = e.target.value;
+                                                const accountInfo = getAccountInfo(accounts, accountId);
+                                                setForm(prev => ({ ...prev, accountId, accountName: accountInfo.accountName }));
+                                            }}
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                        >
+                                            <option value="">Select account</option>
+                                            {accounts.map(account => (
+                                                <option key={account.id || account.documentId} value={String(account.id || account.documentId)}>
+                                                    {account.name || account.currency || `Account ${account.id || account.documentId}`}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+
+                                    <label className="space-y-2">
+                                        <span className="text-xs font-medium text-gray-300">Scope</span>
+                                        <select
+                                            value={form.scope}
+                                            onChange={(e) => {
+                                                const scope = e.target.value;
+                                                setForm(prev => ({
+                                                    ...prev,
+                                                    scope,
+                                                    weekEnd: scope === 'Weekly' ? addDaysToDateValue(prev.weekStart, 6) : prev.weekEnd
+                                                }));
+                                            }}
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                        >
+                                            <option value="Daily">Daily</option>
+                                            <option value="Weekly">Weekly</option>
+                                        </select>
+                                    </label>
+                                </div>
+
+                                <label className="space-y-2 block">
+                                    <span className="text-xs font-medium text-gray-300">Plan title</span>
+                                    <input
+                                        value={form.title}
+                                        onChange={(e) => setForm(prev => ({ ...prev, title: e.target.value }))}
+                                        placeholder="Example: Breakout setup for VN30 futures"
+                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                    />
+                                </label>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {form.scope === 'Daily' ? (
+                                        <label className="space-y-2">
+                                            <span className="text-xs font-medium text-gray-300">Plan date</span>
+                                            <input
+                                                type="date"
+                                                value={form.planDate}
+                                                onChange={(e) => setForm(prev => ({ ...prev, planDate: e.target.value }))}
+                                                className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                            />
+                                        </label>
+                                    ) : (
+                                        <>
+                                            <label className="space-y-2">
+                                                <span className="text-xs font-medium text-gray-300">Week start</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.weekStart}
+                                                    onChange={(e) => setForm(prev => ({
+                                                        ...prev,
+                                                        weekStart: e.target.value,
+                                                        weekEnd: addDaysToDateValue(e.target.value, 6)
+                                                    }))}
+                                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                                />
+                                            </label>
+                                            <label className="space-y-2">
+                                                <span className="text-xs font-medium text-gray-300">Week end</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.weekEnd}
+                                                    onChange={(e) => setForm(prev => ({ ...prev, weekEnd: e.target.value }))}
+                                                    className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                                />
+                                            </label>
+                                        </>
+                                    )}
+
+                                    <label className="space-y-2">
+                                        <span className="text-xs font-medium text-gray-300">Session / frame</span>
+                                        <input
+                                            value={form.session}
+                                            onChange={(e) => setForm(prev => ({ ...prev, session: e.target.value }))}
+                                            placeholder="Morning, Afternoon, London, NY..."
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                        />
+                                    </label>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label className="space-y-2">
+                                        <span className="text-xs font-medium text-gray-300">Max trades</span>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={form.maxTrades}
+                                            onChange={(e) => setForm(prev => ({ ...prev, maxTrades: e.target.value }))}
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                        />
+                                    </label>
+
+                                    <label className="space-y-2">
+                                        <span className="text-xs font-medium text-gray-300">Status</span>
+                                        <select
+                                            value={form.status}
+                                            onChange={(e) => setForm(prev => ({ ...prev, status: e.target.value }))}
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                        >
+                                            <option value="Draft">Draft</option>
+                                            <option value="Active">Active</option>
+                                            <option value="Done">Done</option>
+                                            <option value="Skipped">Skipped</option>
+                                        </select>
+                                    </label>
+                                </div>
+
+                                <label className="space-y-2 block">
+                                    <span className="text-xs font-medium text-gray-300">Symbols / watchlist</span>
+                                    <input
+                                        value={form.symbols}
+                                        onChange={(e) => setForm(prev => ({ ...prev, symbols: e.target.value }))}
+                                        placeholder="FPT, SSI, VN30, BTC..."
+                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                    />
+                                </label>
+
+                                <label className="space-y-2 block">
+                                    <span className="text-xs font-medium text-gray-300">Market context</span>
+                                    <textarea
+                                        rows="3"
+                                        value={form.marketContext}
+                                        onChange={(e) => setForm(prev => ({ ...prev, marketContext: e.target.value }))}
+                                        placeholder="Xu hướng thị trường, catalyst, vùng giá quan trọng, lưu ý tin tức..."
+                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
+                                    />
+                                </label>
+
+                                <label className="space-y-2 block">
+                                    <span className="text-xs font-medium text-gray-300">Entry plan</span>
+                                    <textarea
+                                        rows="3"
+                                        value={form.entryPlan}
+                                        onChange={(e) => setForm(prev => ({ ...prev, entryPlan: e.target.value }))}
+                                        placeholder="Điều kiện vào lệnh, tín hiệu xác nhận, khi nào bỏ qua setup..."
+                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
+                                    />
+                                </label>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label className="space-y-2 block">
+                                        <span className="text-xs font-medium text-gray-300">Risk plan</span>
+                                        <textarea
+                                            rows="4"
+                                            value={form.riskPlan}
+                                            onChange={(e) => setForm(prev => ({ ...prev, riskPlan: e.target.value }))}
+                                            placeholder="Risk/trade, max loss, stop loss, sizing, số lệnh tối đa..."
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
+                                        />
+                                    </label>
+
+                                    <label className="space-y-2 block">
+                                        <span className="text-xs font-medium text-gray-300">Checklist</span>
+                                        <textarea
+                                            rows="4"
+                                            value={form.checklist}
+                                            onChange={(e) => setForm(prev => ({ ...prev, checklist: e.target.value }))}
+                                            placeholder="News cleared, trend confirmed, liquidity ok, not overtrading..."
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
+                                        />
+                                    </label>
+                                </div>
+
+                                <label className="space-y-2 block">
+                                    <span className="text-xs font-medium text-gray-300">Review notes</span>
+                                    <textarea
+                                        rows="4"
+                                        value={form.reviewNotes}
+                                        onChange={(e) => setForm(prev => ({ ...prev, reviewNotes: e.target.value }))}
+                                        placeholder="Sau khi kết thúc ngày/tuần: what worked, what failed, lesson learned..."
+                                        className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500 resize-y"
+                                    />
+                                </label>
+
+                                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                                    <div className="flex flex-wrap gap-3">
+                                        <button
+                                            type="submit"
+                                            disabled={saving}
+                                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-500 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            <Save size={16} />
+                                            {saving ? 'Saving...' : (isEditing ? 'Update Plan' : 'Save Plan')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={resetForm}
+                                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 hover:bg-gray-800 transition"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={resetForm}
+                                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
+                                    >
+                                        <Plus size={16} />
+                                        New Plan
+                                    </button>
+                                </div>
+                            </form>
+                        )}
                     </div>
 
-                    <div className="rounded-2xl border border-gray-700 bg-gray-800 p-5">
-                        <div className="flex items-center gap-2 mb-3 text-gray-200 font-semibold text-sm">
-                            <CheckSquare size={18} />
-                            Form gợi ý
+                    <div className="rounded-2xl border border-gray-700 bg-gray-800 p-4">
+                        <div className={clsx('flex items-center justify-between gap-3', !collapsedBoxes.formGuide && 'mb-3')}>
+                            <div className="flex items-center gap-2 text-gray-200 font-semibold text-sm">
+                                <CheckSquare size={18} />
+                                Form gợi ý
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => toggleBox('formGuide')}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+                                aria-label={collapsedBoxes.formGuide ? 'Expand form guide' : 'Collapse form guide'}
+                            >
+                                <ChevronDown
+                                    size={16}
+                                    className={clsx('transition-transform', collapsedBoxes.formGuide && '-rotate-90')}
+                                />
+                            </button>
                         </div>
-                        <div className="space-y-3 text-xs text-gray-400">
-                            <p>
-                                <span className="text-gray-200 font-medium">1. Bối cảnh:</span> xu hướng, tin tức, vùng giá, và lý do chọn setup.
-                            </p>
-                            <p>
-                                <span className="text-gray-200 font-medium">2. Entry / Exit:</span> điều kiện vào lệnh, điểm invalidation, và khi nào không trade.
-                            </p>
-                            <p>
-                                <span className="text-gray-200 font-medium">3. Risk:</span> % rủi ro, số lệnh tối đa, giới hạn lỗ/ngày, và position sizing.
-                            </p>
-                            <p>
-                                <span className="text-gray-200 font-medium">4. Review:</span> sau phiên ghi lại sai sót, bài học, và điều chỉnh cho ngày/tuần tiếp theo.
-                            </p>
-                        </div>
+                        {!collapsedBoxes.formGuide && (
+                            <div className="space-y-3 text-xs text-gray-400">
+                                <p>
+                                    <span className="text-gray-200 font-medium">1. Bối cảnh:</span> xu hướng, tin tức, vùng giá, và lý do chọn setup.
+                                </p>
+                                <p>
+                                    <span className="text-gray-200 font-medium">2. Entry / Exit:</span> điều kiện vào lệnh, điểm invalidation, và khi nào không trade.
+                                </p>
+                                <p>
+                                    <span className="text-gray-200 font-medium">3. Risk:</span> % rủi ro, số lệnh tối đa, giới hạn lỗ/ngày, và position sizing.
+                                </p>
+                                <p>
+                                    <span className="text-gray-200 font-medium">4. Review:</span> sau phiên ghi lại sai sót, bài học, và điều chỉnh cho ngày/tuần tiếp theo.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -812,6 +1090,40 @@ const Plan = () => {
                     )}
                 </div>
             </div>
+
+            <TradeDetailModal
+                isOpen={!!selectedTrade}
+                onClose={() => setSelectedTrade(null)}
+                trade={selectedTrade}
+                onEdit={handleEditTrade}
+            />
+
+            <TradeModal
+                isOpen={isTradeModalOpen}
+                onClose={handleCloseTradeModal}
+                onSubmit={handleSaveTrade}
+                onDelete={handleDeleteTrade}
+                initialData={tradeToEdit}
+            />
+
+            {message && (
+                <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-right-10 fade-in duration-300">
+                    <div className="flex items-center gap-3 px-5 py-4 bg-gray-900 border border-green-500/50 rounded-2xl shadow-2xl shadow-green-500/10 backdrop-blur-xl">
+                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <CheckCircle2 size={20} className="text-green-500" />
+                        </div>
+                        <div className="min-w-[200px]">
+                            <p className="text-sm font-bold text-gray-100">{message}</p>
+                        </div>
+                        <button
+                            onClick={() => setMessage('')}
+                            className="p-1 hover:bg-gray-800 rounded-lg transition-colors text-gray-500"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
