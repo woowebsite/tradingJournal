@@ -114,10 +114,12 @@ export const saveTrade = createAsyncThunk(
 
             // A. Identify Deletions
             if (tradeToEdit && tradeToEdit.trade_details) {
-                const currentIds = formDetails.filter(d => d.id).map(d => d.id);
+                const getDetailId = (detail) => detail?.documentId || detail?.id;
+                const currentIds = formDetails.map(getDetailId).filter(Boolean);
                 const idsToDelete = tradeToEdit.trade_details
-                    .filter(d => !currentIds.includes(d.id))
-                    .map(d => d.id || d.documentId);
+                    .map(getDetailId)
+                    .filter(Boolean)
+                    .filter(id => !currentIds.includes(id));
 
                 await Promise.all(idsToDelete.map(id => api.delete(`/trade-details/${id}`).catch(e => console.warn(`Failed to delete detail ${id}`, e))));
             }
@@ -162,8 +164,9 @@ export const saveTrade = createAsyncThunk(
                 };
 
                 try {
-                    if (detail.documentId) {
-                        await api.put(`/trade-details/${detail.documentId}`, { data: detailPayload });
+                    const detailId = detail.documentId || detail.id;
+                    if (detailId) {
+                        await api.put(`/trade-details/${detailId}`, { data: detailPayload });
                     } else {
                         await api.post('/trade-details', { data: detailPayload });
                     }

@@ -1,8 +1,17 @@
 import React from 'react';
-import { Search, Bell, Settings } from 'lucide-react';
+import clsx from 'clsx';
+import { Link, useLocation } from 'react-router-dom';
+import { Search, Bell, Settings, Clock3, NotebookPen } from 'lucide-react';
 import GlobalWatchlist from './GlobalWatchlist';
 
 const Topbar = () => {
+    const location = useLocation();
+
+    const topNavItems = [
+        { label: 'Today', path: '/today-trades', icon: Clock3 },
+        { label: 'Plans', path: '/journal-plan', icon: NotebookPen }
+    ];
+
     return (
         <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 fixed top-0 right-0 left-64 z-20">
             <div className="flex bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 items-center w-64">
@@ -13,6 +22,29 @@ const Topbar = () => {
                     className="bg-transparent border-none outline-none text-sm text-gray-200 w-full"
                 />
             </div>
+
+            <nav className="hidden lg:flex items-center gap-2">
+                {topNavItems.map(item => {
+                    const active = location.pathname === item.path;
+                    const Icon = item.icon;
+
+                    return (
+                        <Link
+                            key={item.path}
+                            to={item.path}
+                            className={clsx(
+                                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition',
+                                active
+                                    ? 'border-blue-500/30 bg-blue-500/15 text-blue-200 shadow-sm shadow-blue-500/10'
+                                    : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800 hover:text-white'
+                            )}
+                        >
+                            <Icon size={14} />
+                            {item.label}
+                        </Link>
+                    );
+                })}
+            </nav>
 
             <div className="flex items-center gap-4">
                 <GlobalWatchlist />

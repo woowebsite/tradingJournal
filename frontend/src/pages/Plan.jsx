@@ -20,7 +20,7 @@ import {
 import { useAccount } from '../context/AccountContext';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
-import { fetchBatchLatestMinutePrices } from '../features/marketSlice';
+import { fetchBatchLatestMinutePrices, fetchLatestHistory } from '../features/marketSlice';
 import { deleteTrade, fetchTrades, saveTrade } from '../features/tradeSlice';
 import { createPlan, deletePlan, listPlans, updatePlan } from '../services/planService';
 import { calculateTradePnL } from '../utils/tradeCalculations';
@@ -62,6 +62,15 @@ const getDateValueFromDateLike = (dateLike) => {
     const date = new Date(dateLike);
     if (Number.isNaN(date.getTime())) return '';
     return getLocalDateValue(date);
+};
+
+const isCryptoSymbol = (symbol) => {
+    const symbolName = symbol?.Name || symbol?.name || '';
+    const marketName = symbol?.market?.Name || symbol?.market?.name || '';
+
+    return /crypto|binance/i.test(marketName)
+        || /^BINANCE:/i.test(symbolName)
+        || /(?:USDT|USDC|BUSD)(?:\.P)?$/i.test(symbolName);
 };
 
 const getAccountInfo = (accounts, accountId) => {
@@ -153,12 +162,48 @@ const Plan = () => {
         }, {});
 
         const symbols = Object.values(symbolsById);
+        if (symbols.length === 0) {
+            setMarketPricesMap({});
+            return;
+        }
 
         const refreshMarketPrices = async () => {
-            const result = await dispatch(fetchBatchLatestMinutePrices(symbols));
-            if (fetchBatchLatestMinutePrices.fulfilled.match(result)) {
-                setMarketPricesMap(result.payload || {});
+            const cryptoSymbols = symbols.filter(isCryptoSymbol);
+            const nonCryptoSymbols = symbols.filter(symbol => !isCryptoSymbol(symbol));
+            const nextPricesMap = {};
+
+            if (cryptoSymbols.length > 0) {
+                const cryptoResult = await dispatch(fetchBatchLatestMinutePrices(cryptoSymbols));
+                if (fetchBatchLatestMinutePrices.fulfilled.match(cryptoResult)) {
+                    Object.assign(nextPricesMap, cryptoResult.payload || {});
+                }
             }
+
+            const nonCryptoEntries = await Promise.all(
+                nonCryptoSymbols.map(async (symbol) => {
+                    const symbolId = symbol?.documentId || symbol?.id;
+                    if (!symbolId) return null;
+
+                    try {
+                        const result = await dispatch(fetchLatestHistory(symbolId));
+                        if (fetchLatestHistory.fulfilled.match(result) && result.payload?.symbolId) {
+                            return [String(result.payload.symbolId), result.payload.close];
+                        }
+                    } catch (error) {
+                        console.warn(`Failed to fetch latest history for symbol ${symbolId}:`, error);
+                    }
+
+                    return null;
+                })
+            );
+
+            nonCryptoEntries.forEach(entry => {
+                if (!entry) return;
+                const [symbolId, price] = entry;
+                nextPricesMap[symbolId] = price;
+            });
+
+            setMarketPricesMap(nextPricesMap);
         };
 
         refreshMarketPrices();
@@ -757,14 +802,6 @@ const Plan = () => {
                             </div>
                         )}
                     </div>
-
-                    <button
-                        onClick={resetForm}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
-                    >
-                        <Plus size={16} />
-                        New Plan
-                    </button>
                 </div>
             </div>
 
@@ -910,18 +947,39 @@ const Plan = () => {
                                     Gợi ý form: bối cảnh, setup, rủi ro, checklist, và review sau phiên.
                                 </p>
                             </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                                <div className="px-3 py-1 rounded-full bg-gray-900 border border-gray-700 text-[11px] text-gray-400">
-                                    {loading ? 'Loading accounts...' : (selectedAccount?.name || form.accountName || 'No account')}
-                                </div>
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={resetForm}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-gray-700 hover:text-white"
+                                >
+                                    <Plus size={14} />
+                                    New Plan
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={resetForm}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-medium text-gray-300 transition hover:bg-gray-800 hover:text-white"
+                                >
+                                    Reset
+                                </button>
+                                <button
+                                    type="submit"
+                                    form="plan-form"
+                                    disabled={saving}
+                                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <Save size={14} />
+                                    {saving ? 'Saving...' : (isEditing ? 'Update Plan' : 'Save Plan')}
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => toggleBox('createPlan')}
-                                    className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+                                    className="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-700 hover:text-white"
                                     aria-label={collapsedBoxes.createPlan ? 'Expand create plan' : 'Collapse create plan'}
                                 >
                                     <ChevronDown
-                                        size={16}
+                                        size={15}
                                         className={clsx('transition-transform', collapsedBoxes.createPlan && '-rotate-90')}
                                     />
                                 </button>
@@ -929,7 +987,7 @@ const Plan = () => {
                         </div>
 
                         {!collapsedBoxes.createPlan && (
-                            <form className="max-h-[68vh] space-y-4 overflow-y-auto pr-1" onSubmit={handleSubmit}>
+                            <form id="plan-form" className="max-h-[68vh] space-y-4 overflow-y-auto pr-1" onSubmit={handleSubmit}>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label className="space-y-2">
                                         <span className="text-xs font-medium text-gray-300">Account</span>
@@ -1124,33 +1182,6 @@ const Plan = () => {
                                     />
                                 </label>
 
-                                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                                    <div className="flex flex-wrap gap-3">
-                                        <button
-                                            type="submit"
-                                            disabled={saving}
-                                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-500 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                                        >
-                                            <Save size={16} />
-                                            {saving ? 'Saving...' : (isEditing ? 'Update Plan' : 'Save Plan')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={resetForm}
-                                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 hover:bg-gray-800 transition"
-                                        >
-                                            Reset
-                                        </button>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={resetForm}
-                                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition"
-                                    >
-                                        <Plus size={16} />
-                                        New Plan
-                                    </button>
-                                </div>
                             </form>
                         )}
                     </div>
