@@ -652,8 +652,13 @@ const MarketFlow = () => {
                                     </thead>
                                     <tbody className="divide-y divide-gray-700/50">
                                         {analytics.map((item) => (
-                                            <tr key={item.id} className="hover:bg-gray-700/30 transition-colors group">
-                                                <td className="p-4 text-gray-300 font-medium text-xs">
+                                            <tr
+                                                key={item.id}
+                                                onClick={() => setSelectedIndustry(item.industry)}
+                                                className={`transition-colors group cursor-pointer ${item.industry === selectedIndustry ? 'bg-blue-600/10' : 'hover:bg-gray-700/30'}`}
+                                                title="Click to select this industry"
+                                            >
+                                                <td className={`p-4 font-medium text-xs ${item.industry === selectedIndustry ? 'text-blue-300' : 'text-gray-300'}`}>
                                                     {industries.find(i => i.code === item.industry)?.name || item.industry}
                                                 </td>
                                                 <td className="p-4 text-center">

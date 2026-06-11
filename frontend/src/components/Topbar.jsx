@@ -1,10 +1,10 @@
 import React from 'react';
 import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Bell, Settings, Clock3, NotebookPen } from 'lucide-react';
+import { Search, Bell, Settings, Clock3, NotebookPen, Plus } from 'lucide-react';
 import GlobalWatchlist from './GlobalWatchlist';
 
-const Topbar = () => {
+const Topbar = ({ onNewTrade }) => {
     const location = useLocation();
 
     const topNavItems = [
@@ -33,10 +33,7 @@ const Topbar = () => {
                             key={item.path}
                             to={item.path}
                             className={clsx(
-                                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition',
-                                active
-                                    ? 'border-blue-500/30 bg-blue-500/15 text-blue-200 shadow-sm shadow-blue-500/10'
-                                    : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800 hover:text-white'
+                                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800 hover:text-white'
                             )}
                         >
                             <Icon size={14} />
@@ -44,9 +41,19 @@ const Topbar = () => {
                         </Link>
                     );
                 })}
+                <button
+                    type="button"
+                    onClick={onNewTrade}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:border-gray-600 hover:bg-gray-800 hover:text-white cursor-pointer"
+                >
+                    <Plus size={14} className="text-blue-400" />
+                    New Trade
+                </button>
             </nav>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+                
+
                 <GlobalWatchlist />
 
                 <div className="h-6 w-[1px] bg-gray-700 mx-1"></div>
