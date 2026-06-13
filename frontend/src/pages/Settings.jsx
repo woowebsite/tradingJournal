@@ -15,8 +15,9 @@ const Settings = () => {
             const res = await api.get('/settings');
             const data = res.data.data || [];
             setSettings(data.map(item => ({
-                id: item.id || item.documentId,
-                ...item
+                ...item,
+                id: item.documentId || item.id,
+                documentId: item.documentId || null
             })));
         } catch (error) {
             console.error('Error fetching settings:', error);
@@ -33,7 +34,7 @@ const Settings = () => {
         try {
             if (selectedSetting) {
                 // Update
-                const id = selectedSetting.id || selectedSetting.documentId;
+                const id = selectedSetting.documentId || selectedSetting.id;
                 await api.put(`/settings/${id}`, { data });
             } else {
                 // Create
@@ -43,8 +44,12 @@ const Settings = () => {
             setIsModalOpen(false);
             setSelectedSetting(null);
         } catch (error) {
-            console.error('Error saving setting:', error);
-            alert('Failed to save setting');
+            console.error('Error saving setting:', error.response?.data || error);
+            const message = error.response?.data?.error?.message
+                || error.response?.data?.message
+                || error.message
+                || 'Failed to save setting';
+            alert(message);
         }
     };
 
@@ -106,7 +111,7 @@ const Settings = () => {
                         ) : settings.length === 0 ? (
                             <tr><td colSpan="5" className="p-8 text-center text-gray-500">No settings found.</td></tr>
                         ) : settings.map((item) => (
-                            <tr key={item.id} className="hover:bg-gray-700/30 transition group">
+                            <tr key={item.documentId || item.id} className="hover:bg-gray-700/30 transition group">
                                 <td className="p-4 font-mono font-medium text-blue-400">{item.Name}</td>
                                 <td className="p-4 font-mono text-gray-200">{item.riskPerTrade}%</td>
                                 <td className="p-4 font-mono text-gray-200">{item.maxDrawDown}%</td>
@@ -119,7 +124,7 @@ const Settings = () => {
                                         <Edit2 size={16} />
                                     </button>
                                     <button
-                                        onClick={() => handleDelete(item.id)}
+                                        onClick={() => handleDelete(item.documentId || item.id)}
                                         className="p-2 text-gray-400 hover:text-red-400 transition cursor-pointer"
                                     >
                                         <Trash2 size={16} />

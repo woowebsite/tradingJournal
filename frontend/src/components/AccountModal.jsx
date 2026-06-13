@@ -10,18 +10,21 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
         currency: 'USD',
         market: '',
         strategy: '',
+        setting: '',
         moneyFormat: '#,###.##',
         volumeFormat: '###'
     });
     const [markets, setMarkets] = useState([]);
     const [strategies, setStrategies] = useState([]);
+    const [settings, setSettings] = useState([]);
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [marketsRes, strategiesRes] = await Promise.all([
+                const [marketsRes, strategiesRes, settingsRes] = await Promise.all([
                     api.get('/markets'),
-                    api.get('/strategies?sort=name:asc')
+                    api.get('/strategies?sort=name:asc'),
+                    api.get('/settings?sort=Name:asc')
                 ]);
 
                 const marketsData = marketsRes.data.data || [];
@@ -36,6 +39,13 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
                     id: item.id || item.documentId,
                     documentId: item.documentId,
                     name: item.name
+                })));
+
+                const settingsData = settingsRes.data.data || [];
+                setSettings(settingsData.map(item => ({
+                    id: item.id || item.documentId,
+                    documentId: item.documentId,
+                    Name: item.Name || item.name
                 })));
 
             } catch (error) {
@@ -53,6 +63,7 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
                 currency: account.currency || 'USD',
                 market: account.market?.documentId || account.market?.id || account.market || '',
                 strategy: account.strategy?.documentId || account.strategy?.id || account.strategy || '',
+                setting: account.setting?.documentId || account.setting?.id || account.setting || '',
                 moneyFormat: account.moneyFormat || '#,###.##',
                 volumeFormat: account.volumeFormat || '###'
             });
@@ -63,6 +74,7 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
                 currency: 'USD',
                 market: '',
                 strategy: '',
+                setting: '',
                 moneyFormat: '#,###.##',
                 volumeFormat: '###'
             });
@@ -71,8 +83,13 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        const normalizeRelation = (value) => (value === '' || value === undefined ? null : value);
+
         onSubmit({
             ...formData,
+            market: normalizeRelation(formData.market),
+            strategy: normalizeRelation(formData.strategy),
+            setting: normalizeRelation(formData.setting),
             initial_balance: parseFloat(formData.initial_balance)
         });
     };
@@ -165,6 +182,23 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
                                 </option>
                             ))}
                         </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Setting Risk</label>
+                        <select
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                            value={formData.setting}
+                            onChange={(e) => setFormData({ ...formData, setting: e.target.value })}
+                        >
+                            <option value="">No Setting</option>
+                            {settings.map(s => (
+                                <option key={s.id} value={s.documentId || s.id}>
+                                    {s.Name}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500">Linked setting drives Roadmap targets and risk assumptions.</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">

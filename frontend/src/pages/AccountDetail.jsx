@@ -21,6 +21,7 @@ const AccountDetail = () => {
 
     const [account, setAccount] = useState(null);
     const [accountLoading, setAccountLoading] = useState(true);
+    const [settings, setSettings] = useState([]);
 
     const [selectedSymbol, setSelectedSymbol] = useState(null);
     const [selectedTrade, setSelectedTrade] = useState(null);
@@ -46,6 +47,14 @@ const AccountDetail = () => {
                 const fetchedAccount = accRes.data.data;
                 setAccount(fetchedAccount);
                 setSelectedAccount(fetchedAccount);
+
+                const settingsRes = await api.get('/settings?sort=Name:asc');
+                const settingsData = settingsRes.data.data || [];
+                setSettings(settingsData.map(item => ({
+                    id: item.id || item.documentId,
+                    documentId: item.documentId,
+                    Name: item.Name || item.name
+                })));
             } catch (error) {
                 console.error('Failed to fetch account:', error);
             } finally {
@@ -111,6 +120,30 @@ const AccountDetail = () => {
         } catch (error) {
             console.error('Failed to update strategy:', error);
             alert('Failed to update strategy');
+        }
+    };
+
+    const handleSettingChange = async (e) => {
+        const settingId = e.target.value;
+        try {
+            await api.put(`/accounts/${id}`, {
+                data: {
+                    setting: settingId || null
+                }
+            });
+            const nextSetting = settings.find(s => String(s.documentId || s.id) === String(settingId)) || null;
+            setAccount(prev => ({
+                ...(prev || {}),
+                setting: nextSetting
+            }));
+            setSelectedAccount(prev => ({
+                ...(prev || {}),
+                setting: nextSetting
+            }));
+            alert('Setting updated successfully');
+        } catch (error) {
+            console.error('Failed to update setting:', error);
+            alert('Failed to update setting');
         }
     };
 
@@ -190,12 +223,12 @@ const AccountDetail = () => {
                     <div>
                         <h1 className="text-3xl font-bold text-white mb-1">{account.name}</h1>
                         <p className="text-gray-400 text-lg">
-                            {account.market?.Name || account.market?.name || 'Unknown Market'} • {account.currency}
+                            {account.market?.Name || account.market?.name || 'Unknown Market'} - {account.currency}
                         </p>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t border-gray-700 pt-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 border-t border-gray-700 pt-8">
                     <div>
                         <h3 className="text-gray-500 uppercase tracking-wider text-sm font-semibold mb-2">Initial Balance</h3>
                         <p className="text-3xl font-bold text-green-400">
@@ -213,6 +246,21 @@ const AccountDetail = () => {
                             {strategies.map(s => (
                                 <option key={s.documentId || s.id} value={s.documentId || s.id}>
                                     {s.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <h3 className="text-gray-500 uppercase tracking-wider text-sm font-semibold mb-2">Setting Risk</h3>
+                        <select
+                            value={account.setting?.documentId || account.setting?.id || ''}
+                            onChange={handleSettingChange}
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 hover:bg-gray-600 transition"
+                        >
+                            <option value="">No Setting</option>
+                            {settings.map(s => (
+                                <option key={s.documentId || s.id} value={s.documentId || s.id}>
+                                    {s.Name}
                                 </option>
                             ))}
                         </select>

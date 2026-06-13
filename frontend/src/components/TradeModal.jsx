@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols } from '../features/symbolSlice';
 import { X, Check } from 'lucide-react';
-import api from '../services/api'; // Ensure this path is correct
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
@@ -19,7 +18,7 @@ const getLocalDateTimeInputValue = (date = new Date()) => {
 const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
   const { selectedAccount } = useAccount();
   const dispatch = useDispatch();
-  const { items: symbols, loading: loadingSymbols } = useSelector(state => state.symbols);
+  const { items: symbols } = useSelector(state => state.symbols);
 
   const [formData, setFormData] = useState({
     symbol: '',
@@ -30,7 +29,6 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
     trade_details: [] // List of details
   });
 
-  const [riskSetting, setRiskSetting] = useState(null);
   const [currentPrice, setCurrentPrice] = useState('');
   const [executingOrder, setExecutingOrder] = useState(false);
 
@@ -107,21 +105,6 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
       : 0;
     return openVol * (parseFloat(currentPrice) - avgBuyPrice);
   };
-
-  useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const res = await api.get('/settings');
-        const data = res.data.data;
-        if (Array.isArray(data) && data.length > 0) {
-          setRiskSetting(data[0]);
-        }
-      } catch (error) {
-        console.error("Failed to fetch settings for risk calc:", error);
-      }
-    };
-    fetchSettings();
-  }, []);
 
   // Fetch current price when symbol changes
   useEffect(() => {

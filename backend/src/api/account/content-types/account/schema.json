@@ -57,6 +57,12 @@
       "target": "api::strategy.strategy",
       "inversedBy": "account"
     },
+    "roadmaps": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::roadmap.roadmap",
+      "mappedBy": "account"
+    },
     "signals": {
       "type": "relation",
       "relation": "oneToMany",

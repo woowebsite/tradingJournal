@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAccount } from '../context/AccountContext';
 import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
+import { resolveSetting } from '../utils/roadmapCalculations';
 
 const Dashboard = () => {
     const { selectedAccount } = useAccount();
@@ -13,23 +14,7 @@ const Dashboard = () => {
     });
     const [recentTrades, setRecentTrades] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [settings, setSettings] = useState(null);
-
-    // Fetch Settings
-    useEffect(() => {
-        const fetchSettings = async () => {
-            try {
-                const res = await api.get('/settings');
-                const data = res.data.data;
-                if (Array.isArray(data) && data.length > 0) {
-                    setSettings(data[0]);
-                }
-            } catch (error) {
-                console.error("Failed to fetch settings:", error);
-            }
-        };
-        fetchSettings();
-    }, []);
+    const activeSetting = resolveSetting(selectedAccount);
 
     useEffect(() => {
         const fetchDashboardData = async () => {
@@ -127,24 +112,24 @@ const Dashboard = () => {
 
                     <div className="flex-1 min-w-[200px]">
                         <p className="text-gray-400 text-sm uppercase tracking-wider mb-1">Risk Setting</p>
-                        <h3 className="text-3xl font-bold text-white truncate" title={settings?.Name}>
-                            {settings ? settings.Name : 'No Active Setting'}
+                        <h3 className="text-3xl font-bold text-white truncate" title={activeSetting?.Name || activeSetting?.name}>
+                            {activeSetting ? (activeSetting.Name || activeSetting.name) : 'No Active Setting'}
                         </h3>
                     </div>
 
-                    {settings && (
+                    {activeSetting && (
                         <div className="flex gap-8 text-sm md:text-base">
                             <div className="text-center md:text-left">
                                 <p className="text-gray-400 mb-1">Risk / Trade</p>
-                                <p className="font-bold text-blue-400 text-lg">{settings.riskPerTrade}%</p>
+                                <p className="font-bold text-blue-400 text-lg">{activeSetting.riskPerTrade}%</p>
                             </div>
                             <div className="text-center md:text-left">
                                 <p className="text-gray-400 mb-1">Capital Risk</p>
-                                <p className="font-bold text-yellow-400 text-lg">{settings.capitalRisk}%</p>
+                                <p className="font-bold text-yellow-400 text-lg">{activeSetting.capitalRisk}%</p>
                             </div>
                             <div className="text-center md:text-left">
                                 <p className="text-gray-400 mb-1">Max Drawdown</p>
-                                <p className="font-bold text-red-400 text-lg">{settings.maxDrawDown}%</p>
+                                <p className="font-bold text-red-400 text-lg">{activeSetting.maxDrawDown}%</p>
                             </div>
                         </div>
                     )}

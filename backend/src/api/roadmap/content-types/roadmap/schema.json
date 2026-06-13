@@ -1,0 +1,60 @@
+{
+  "kind": "collectionType",
+  "collectionName": "roadmaps",
+  "info": {
+    "singularName": "roadmap",
+    "pluralName": "roadmaps",
+    "displayName": "Roadmap",
+    "description": "Account growth roadmap targets and snapshots"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account",
+      "inversedBy": "roadmaps"
+    },
+    "setting": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::setting.setting"
+    },
+    "startingBalance": {
+      "type": "decimal",
+      "required": true
+    },
+    "targetGrowthPercent": {
+      "type": "decimal",
+      "required": true
+    },
+    "plannedTrades": {
+      "type": "integer",
+      "default": 25
+    },
+    "riskPercent": {
+      "type": "decimal"
+    },
+    "rewardMultiple": {
+      "type": "decimal"
+    },
+    "maxDrawDownPercent": {
+      "type": "decimal"
+    },
+    "targetBalance": {
+      "type": "decimal"
+    },
+    "profitTarget": {
+      "type": "decimal"
+    },
+    "winRateEstimate": {
+      "type": "decimal"
+    },
+    "snapshot": {
+      "type": "json"
+    }
+  }
+}

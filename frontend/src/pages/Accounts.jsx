@@ -18,12 +18,15 @@ const Accounts = () => {
             setLoading(true);
             const res = await api.get('/accounts?populate=*');
             const data = res.data.data || [];
-            setAccounts(data.map(item => ({
+            const formattedAccounts = data.map(item => ({
                 id: item.id || item.documentId,
                 ...item
-            })));
+            }));
+            setAccounts(formattedAccounts);
+            return formattedAccounts;
         } catch (error) {
             console.error('Error fetching accounts:', error);
+            return [];
         } finally {
             setLoading(false);
         }
@@ -41,7 +44,15 @@ const Accounts = () => {
             } else {
                 await api.post('/accounts', { data });
             }
-            fetchAccounts();
+            const refreshedAccounts = await fetchAccounts();
+            if (selectedAccountToEdit) {
+                const updatedAccount = refreshedAccounts.find(account =>
+                    String(account.documentId || account.id) === String(selectedAccountToEdit.documentId || selectedAccountToEdit.id)
+                );
+                if (updatedAccount) {
+                    setSelectedAccount(updatedAccount);
+                }
+            }
             setIsModalOpen(false);
             setSelectedAccountToEdit(null);
         } catch (error) {
@@ -126,7 +137,14 @@ const Accounts = () => {
                         </div>
 
                         <h3 className="text-xl font-bold text-white mb-1">{account.name}</h3>
-                        <p className="text-sm text-gray-400 mb-4">{account.market?.Name || account.market?.name || 'Unknown Market'} • {account.currency}</p>
+                        <p className="text-sm text-gray-400 mb-3">{account.market?.Name || account.market?.name || 'Unknown Market'} - {account.currency}</p>
+
+                        <div className="mb-4">
+                            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Setting Risk</p>
+                            <p className="text-sm font-medium text-emerald-400">
+                                {account.setting?.Name || account.setting?.name || 'No linked setting'}
+                            </p>
+                        </div>
 
                         <div className="pt-4 border-t border-gray-700">
                             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Initial Balance</p>

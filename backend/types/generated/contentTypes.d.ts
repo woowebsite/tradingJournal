@@ -458,6 +458,7 @@ export interface ApiAccountAccount extends Struct.CollectionTypeSchema {
     moneyFormat: Schema.Attribute.String;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    roadmaps: Schema.Attribute.Relation<'oneToMany', 'api::roadmap.roadmap'>;
     setting: Schema.Attribute.Relation<'oneToOne', 'api::setting.setting'>;
     signals: Schema.Attribute.Relation<'oneToMany', 'api::signal.signal'>;
     strategy: Schema.Attribute.Relation<'oneToOne', 'api::strategy.strategy'>;
@@ -641,6 +642,46 @@ export interface ApiPlanPlan extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     weekEnd: Schema.Attribute.Date;
     weekStart: Schema.Attribute.Date;
+  };
+}
+
+export interface ApiRoadmapRoadmap extends Struct.CollectionTypeSchema {
+  collectionName: 'roadmaps';
+  info: {
+    description: 'Account growth roadmap targets and snapshots';
+    displayName: 'Roadmap';
+    pluralName: 'roadmaps';
+    singularName: 'roadmap';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    account: Schema.Attribute.Relation<'oneToOne', 'api::account.account'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::roadmap.roadmap'
+    > &
+      Schema.Attribute.Private;
+    maxDrawDownPercent: Schema.Attribute.Decimal;
+    plannedTrades: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<25>;
+    profitTarget: Schema.Attribute.Decimal;
+    publishedAt: Schema.Attribute.DateTime;
+    rewardMultiple: Schema.Attribute.Decimal;
+    riskPercent: Schema.Attribute.Decimal;
+    setting: Schema.Attribute.Relation<'manyToOne', 'api::setting.setting'>;
+    snapshot: Schema.Attribute.JSON;
+    startingBalance: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    targetBalance: Schema.Attribute.Decimal;
+    targetGrowthPercent: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    winRateEstimate: Schema.Attribute.Decimal;
   };
 }
 
@@ -1677,6 +1718,7 @@ declare module '@strapi/strapi' {
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;
       'api::plan.plan': ApiPlanPlan;
+      'api::roadmap.roadmap': ApiRoadmapRoadmap;
       'api::rule.rule': ApiRuleRule;
       'api::setting.setting': ApiSettingSetting;
       'api::signal.signal': ApiSignalSignal;

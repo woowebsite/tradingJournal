@@ -12,10 +12,10 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
     useEffect(() => {
         if (setting) {
             setFormData({
-                Name: setting.Name || '',
-                riskPerTrade: setting.riskPerTrade || '',
-                maxDrawDown: setting.maxDrawDown || '',
-                capitalRisk: setting.capitalRisk || ''
+                Name: setting.Name ?? setting.name ?? '',
+                riskPerTrade: setting.riskPerTrade ?? '',
+                maxDrawDown: setting.maxDrawDown ?? '',
+                capitalRisk: setting.capitalRisk ?? ''
             });
         } else {
             setFormData({
@@ -36,7 +36,12 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit(formData);
+        onSubmit({
+            Name: formData.Name.trim(),
+            riskPerTrade: formData.riskPerTrade === '' ? null : Number.parseFloat(formData.riskPerTrade),
+            maxDrawDown: formData.maxDrawDown === '' ? null : Number.parseFloat(formData.maxDrawDown),
+            capitalRisk: formData.capitalRisk === '' ? null : Number.parseFloat(formData.capitalRisk)
+        });
     };
 
     return (
@@ -69,11 +74,11 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Risk % / Trade</label>
                             <input
-                                type="number"
-                                step="any"
-                                name="riskPerTrade"
-                                required
-                                value={formData.riskPerTrade || ''}
+                            type="number"
+                            step="any"
+                            name="riskPerTrade"
+                            required
+                            value={formData.riskPerTrade ?? ''}
                                 onChange={handleChange}
                                 className="w-full bg-gray-700 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-white"
                                 placeholder="2"
@@ -83,11 +88,11 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Max Drawdown %</label>
                             <input
-                                type="number"
-                                step="any"
-                                name="maxDrawDown"
-                                required
-                                value={formData.maxDrawDown || ''}
+                            type="number"
+                            step="any"
+                            name="maxDrawDown"
+                            required
+                            value={formData.maxDrawDown ?? ''}
                                 onChange={handleChange}
                                 className="w-full bg-gray-700 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-white"
                                 placeholder="20"
@@ -102,7 +107,7 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
                             step="any"
                             name="capitalRisk"
                             required
-                            value={formData.capitalRisk || ''}
+                            value={formData.capitalRisk ?? ''}
                             onChange={handleChange}
                             className="w-full bg-gray-700 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-white"
                             placeholder="6"
