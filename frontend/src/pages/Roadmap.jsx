@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { ArrowUpRight, TrendingUp, Shield, Target, Wallet, BadgeInfo, Flame, Save, Edit2, Trash2 } from 'lucide-react';
+import { ArrowUpRight, TrendingUp, Shield, Target, Wallet, BadgeInfo, Flame, Save, Edit2, Trash2, CheckCircle2, X } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import api from '../services/api';
 import { fetchTrades } from '../features/tradeSlice';
@@ -17,6 +17,21 @@ const formatMoney = (value, currency = 'USD', pattern = '#,###.##') => {
     const formatted = formatNumber(value, pattern);
     if (formatted === '-') return '-';
     return currency ? `${formatted} ${currency}` : formatted;
+};
+
+const ROADMAP_STATUS_META = {
+    unprocess: {
+        label: 'Unprocess',
+        className: 'bg-gray-500/15 text-gray-300 border border-gray-500/30'
+    },
+    process: {
+        label: 'Process',
+        className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+    },
+    completed: {
+        label: 'Completed',
+        className: 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+    }
 };
 
 const Roadmap = () => {
@@ -37,7 +52,15 @@ const Roadmap = () => {
     const recommendedGrowth = useMemo(() => recommendGrowthTarget(setting), [setting]);
     const maxDrawDownPercent = useMemo(() => toNumber(setting?.maxDrawDown, 0), [setting]);
 
-    const applyRoadmapToForm = (record) => {
+    // Auto-hide toast after 3 seconds
+    useEffect(() => {
+        if (roadmapMessage) {
+            const timer = setTimeout(() => setRoadmapMessage(''), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [roadmapMessage]);
+
+    const applyRoadmapToForm = useCallback((record) => {
         if (!selectedAccount) return;
 
         if (record) {
@@ -51,9 +74,9 @@ const Roadmap = () => {
         setStartingBalance(String(nextBalance || ''));
         setTargetGrowth(String(recommendedGrowth));
         setPlannedTrades('25');
-    };
+    }, [recommendedGrowth, selectedAccount]);
 
-    const syncRoadmaps = async ({ keepEditing = false } = {}) => {
+    const syncRoadmaps = useCallback(async ({ keepEditing = false } = {}) => {
         if (!selectedAccount) return [];
 
         try {
@@ -65,7 +88,8 @@ const Roadmap = () => {
 
             if (!keepEditing) {
                 setEditingRoadmap(null);
-                applyRoadmapToForm(data[0] || null);
+                const processedRoadmap = data.find(item => (item.status || 'unprocess') === 'process') || data[0] || null;
+                applyRoadmapToForm(processedRoadmap);
             }
 
             return data;
@@ -79,7 +103,7 @@ const Roadmap = () => {
         } finally {
             setLoadingRoadmaps(false);
         }
-    };
+    }, [applyRoadmapToForm, selectedAccount]);
 
     useEffect(() => {
         if (!selectedAccount) return;
@@ -92,7 +116,7 @@ const Roadmap = () => {
         if (!selectedAccount) return;
 
         syncRoadmaps();
-    }, [selectedAccount, recommendedGrowth]);
+    }, [selectedAccount, syncRoadmaps]);
 
     const activeBalance = toNumber(startingBalance, 0);
     const riskPercent = toNumber(setting?.riskPerTrade, 0);
@@ -127,6 +151,17 @@ const Roadmap = () => {
             ...projection
         };
     }), [activeBalance, riskPercent, rewardMultiple, plannedTradesValue, winRateEstimate, recommendedGrowth]);
+
+    const processedRoadmap = useMemo(
+        () => roadmapHistory.find(item => (item.status || 'unprocess') === 'process') || null,
+        [roadmapHistory]
+    );
+    const processedRoadmapGrowth = processedRoadmap
+        ? Number(processedRoadmap.targetGrowthPercent || processedRoadmap.snapshot?.targetGrowthPercent || 0)
+        : recommendedGrowth;
+    const processedRoadmapTitle = processedRoadmap?.snapshot?.accountName
+        || processedRoadmap?.snapshot?.settingName
+        || 'No processed roadmap';
 
     const activeSettingName = setting?.Name || setting?.name || 'No linked setting';
     const accountLabel = selectedAccount?.name || selectedAccount?.currency || 'Selected account';
@@ -176,6 +211,7 @@ const Roadmap = () => {
             const payload = {
                 account: accountId,
                 setting: settingId,
+                status: editingRoadmap?.status || 'unprocess',
                 startingBalance: activeBalance,
                 targetGrowthPercent: targetGrowthValue,
                 plannedTrades: plannedTradesValue,
@@ -224,6 +260,57 @@ const Roadmap = () => {
         }
     };
 
+    const handleProcessRoadmap = async (record) => {
+        const roadmapId = record.documentId || record.id;
+        if (!roadmapId || !selectedAccount) return;
+
+        try {
+            setSavingRoadmap(true);
+            setRoadmapMessage('');
+
+            const latestRoadmaps = roadmapHistory.length > 0 ? roadmapHistory : await syncRoadmaps({ keepEditing: true });
+            const currentRoadmaps = Array.isArray(latestRoadmaps) ? latestRoadmaps : [];
+
+            await api.put(`/roadmaps/${roadmapId}`, {
+                data: {
+                    status: 'process'
+                }
+            });
+
+            await Promise.all(
+                currentRoadmaps
+                    .filter(item => String(item.documentId || item.id) !== String(roadmapId))
+                    .map(item => {
+                        const nextStatus = (item.status || 'unprocess') === 'completed' ? 'completed' : 'unprocess';
+                        if ((item.status || 'unprocess') === nextStatus) return null;
+
+                        const itemId = item.documentId || item.id;
+                        if (!itemId) return null;
+
+                        return api.put(`/roadmaps/${itemId}`, {
+                            data: {
+                                status: nextStatus
+                            }
+                        });
+                    })
+                    .filter(Boolean)
+            );
+
+            setEditingRoadmap(null);
+            setRoadmapMessage('Roadmap processed.');
+            await syncRoadmaps();
+        } catch (error) {
+            console.error('Failed to process roadmap:', error.response?.data || error);
+            const message = error.response?.data?.error?.message
+                || error.response?.data?.message
+                || error.message
+                || 'Failed to process roadmap';
+            alert(message);
+        } finally {
+            setSavingRoadmap(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="rounded-3xl border border-gray-700 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6 shadow-2xl shadow-black/20">
@@ -257,11 +344,26 @@ const Roadmap = () => {
 
                         <div className="rounded-2xl border border-gray-700 bg-gray-800/80 p-4">
                             <div className="flex items-center justify-between">
-                                <p className="text-xs uppercase tracking-wider text-gray-500">Recommended</p>
-                                <Target size={16} className="text-emerald-400" />
+                                <p className="text-xs uppercase tracking-wider text-gray-500">Processed</p>
+                                <Target size={16} className={processedRoadmap ? 'text-emerald-400' : 'text-blue-400'} />
                             </div>
-                            <h3 className="mt-2 text-2xl font-black text-emerald-400">+{recommendedGrowth}%</h3>
-                            <p className="mt-1 text-sm text-gray-400">Best first milestone for this risk profile</p>
+                            <h3 className="mt-2 text-2xl font-black text-emerald-400">
+                                +{processedRoadmapGrowth.toFixed(2)}%
+                            </h3>
+                            <p className="mt-1 text-sm text-gray-400 truncate" title={processedRoadmapTitle}>
+                                {processedRoadmap
+                                    ? `Process roadmap: ${processedRoadmapTitle}`
+                                    : 'No roadmap is processed yet'}
+                            </p>
+                            {processedRoadmap ? (
+                                <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${ROADMAP_STATUS_META.process.className}`}>
+                                    Process
+                                </span>
+                            ) : (
+                                <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${ROADMAP_STATUS_META.unprocess.className}`}>
+                                    Waiting
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -461,8 +563,23 @@ const Roadmap = () => {
             </div>
 
             {roadmapMessage && (
-                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-                    {roadmapMessage}
+                <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-right-10 fade-in duration-300">
+                    <div className="flex items-center gap-3 px-5 py-4 bg-gray-900 border border-green-500/50 rounded-2xl shadow-2xl shadow-green-500/10 backdrop-blur-xl">
+                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <CheckCircle2 size={20} className="text-green-500" />
+                        </div>
+                        <div className="min-w-[200px]">
+                            <p className="text-sm font-bold text-gray-100">{roadmapMessage}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setRoadmapMessage('')}
+                            className="p-1 hover:bg-gray-800 rounded-lg transition-colors text-gray-500"
+                            aria-label="Dismiss roadmap notification"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -542,6 +659,8 @@ const Roadmap = () => {
                                 const itemId = item.documentId || item.id;
                                 const savedAt = item.snapshot?.savedAt || item.updatedAt || item.createdAt;
                                 const isEditing = editingRoadmap && String(editingRoadmap.documentId || editingRoadmap.id) === String(itemId);
+                                const roadmapStatus = item.status || 'unprocess';
+                                const statusMeta = ROADMAP_STATUS_META[roadmapStatus] || ROADMAP_STATUS_META.unprocess;
 
                                 return (
                                     <tr key={itemId} className={`transition ${isEditing ? 'bg-amber-500/10' : 'hover:bg-gray-700/30'}`}>
@@ -561,21 +680,36 @@ const Roadmap = () => {
                                             {(Number(item.riskPercent || 0)).toFixed(2)}%
                                         </td>
                                         <td className="px-4 py-3">
-                                            {isEditing ? (
-                                                <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300">
-                                                    Editing
+                                            <div className="flex flex-col gap-1">
+                                                <span className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>
+                                                    {statusMeta.label}
                                                 </span>
-                                            ) : (
-                                                <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
-                                                    Saved
-                                                </span>
-                                            )}
+                                                {isEditing && (
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                                                        Editing
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-3">
                                             <div className="flex justify-end gap-2">
                                                 <button
                                                     type="button"
+                                                    onClick={() => handleProcessRoadmap(item)}
+                                                    disabled={savingRoadmap}
+                                                    className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                        roadmapStatus === 'process'
+                                                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                                                            : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-emerald-500 hover:text-emerald-300'
+                                                    }`}
+                                                >
+                                                    <Target size={14} />
+                                                    Process
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     onClick={() => handleEditRoadmap(item)}
+                                                    disabled={savingRoadmap}
                                                     className="inline-flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:border-blue-500 hover:text-blue-300"
                                                 >
                                                     <Edit2 size={14} />
@@ -584,6 +718,7 @@ const Roadmap = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleDeleteRoadmap(item)}
+                                                    disabled={savingRoadmap}
                                                     className="inline-flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:border-red-500 hover:text-red-300"
                                                 >
                                                     <Trash2 size={14} />

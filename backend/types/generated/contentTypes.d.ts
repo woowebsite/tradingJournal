@@ -657,7 +657,7 @@ export interface ApiRoadmapRoadmap extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    account: Schema.Attribute.Relation<'oneToOne', 'api::account.account'>;
+    account: Schema.Attribute.Relation<'manyToOne', 'api::account.account'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -676,6 +676,10 @@ export interface ApiRoadmapRoadmap extends Struct.CollectionTypeSchema {
     setting: Schema.Attribute.Relation<'manyToOne', 'api::setting.setting'>;
     snapshot: Schema.Attribute.JSON;
     startingBalance: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    status: Schema.Attribute.Enumeration<
+      ['unprocess', 'process', 'completed']
+    > &
+      Schema.Attribute.DefaultTo<'unprocess'>;
     targetBalance: Schema.Attribute.Decimal;
     targetGrowthPercent: Schema.Attribute.Decimal & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;

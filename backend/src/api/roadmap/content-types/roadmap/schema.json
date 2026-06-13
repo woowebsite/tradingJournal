@@ -44,6 +44,15 @@
     "maxDrawDownPercent": {
       "type": "decimal"
     },
+    "status": {
+      "type": "enumeration",
+      "enum": [
+        "unprocess",
+        "process",
+        "completed"
+      ],
+      "default": "unprocess"
+    },
     "targetBalance": {
       "type": "decimal"
     },
