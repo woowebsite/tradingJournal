@@ -20,11 +20,13 @@ import {
 import { useAccount } from '../context/AccountContext';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
+import api from '../services/api';
 import { fetchBatchLatestMinutePrices, fetchLatestHistory } from '../features/marketSlice';
 import { deleteTrade, fetchTrades, saveTrade } from '../features/tradeSlice';
 import { createPlan, deletePlan, listPlans, updatePlan } from '../services/planService';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { formatNumber } from '../utils/formatNumber';
+import { buildRoadmapProjection, resolveSetting, summarizeClosedTrades, toNumber } from '../utils/roadmapCalculations';
 
 const getLocalDateValue = (date = new Date()) => {
     const d = new Date(date);
@@ -62,6 +64,12 @@ const getDateValueFromDateLike = (dateLike) => {
     const date = new Date(dateLike);
     if (Number.isNaN(date.getTime())) return '';
     return getLocalDateValue(date);
+};
+
+const formatMoney = (value, currency = 'USD', pattern = '#,###.##') => {
+    const formatted = formatNumber(value, pattern);
+    if (formatted === '-') return '-';
+    return currency ? `${formatted} ${currency}` : formatted;
 };
 
 const isCryptoSymbol = (symbol) => {
@@ -109,7 +117,7 @@ const buildEmptyForm = (selectedAccount, accounts) => {
 };
 
 const Plan = () => {
-    const { accounts, selectedAccount, loading } = useAccount();
+    const { accounts, selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const { items: trades, loading: tradesLoading } = useSelector(state => state.trades);
     const [plans, setPlans] = useState([]);
@@ -125,6 +133,7 @@ const Plan = () => {
     const [tradeToEdit, setTradeToEdit] = useState(null);
     const [selectedWeekId, setSelectedWeekId] = useState('');
     const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
+    const [processedRoadmap, setProcessedRoadmap] = useState(null);
     const [collapsedBoxes, setCollapsedBoxes] = useState({
         openTrades: false,
         createPlan: false,
@@ -231,6 +240,27 @@ const Plan = () => {
     }, []);
 
     useEffect(() => {
+        if (!selectedAccount) {
+            setProcessedRoadmap(null);
+            return;
+        }
+
+        const loadProcessedRoadmap = async () => {
+            try {
+                const accountId = selectedAccount.documentId || selectedAccount.id;
+                const res = await api.get(`/roadmaps?filters[account][documentId][$eq]=${accountId}&filters[status][$eq]=process&sort=updatedAt:desc&pagination[pageSize]=1&populate=*`);
+                const data = res.data.data || [];
+                setProcessedRoadmap(data[0] || null);
+            } catch (error) {
+                console.error('Failed to load processed roadmap:', error);
+                setProcessedRoadmap(null);
+            }
+        };
+
+        loadProcessedRoadmap();
+    }, [selectedAccount]);
+
+    useEffect(() => {
         if (!selectedAccount) return;
 
         if (isEditing) {
@@ -317,6 +347,50 @@ const Plan = () => {
         const active = filteredPlans.filter(plan => plan.status === 'Active').length;
         return { total, daily, weekly, active };
     }, [filteredPlans]);
+
+    const setting = useMemo(() => resolveSetting(selectedAccount), [selectedAccount]);
+    const closedSummary = useMemo(() => summarizeClosedTrades(trades), [trades]);
+
+    const roadmapSummary = useMemo(() => {
+        if (!processedRoadmap) return null;
+
+        const startingBalance = toNumber(processedRoadmap.startingBalance ?? processedRoadmap.snapshot?.startingBalance, 0);
+        const targetGrowthPercent = toNumber(processedRoadmap.targetGrowthPercent ?? processedRoadmap.snapshot?.targetGrowthPercent, 0);
+        const plannedTrades = Math.max(Math.floor(toNumber(processedRoadmap.plannedTrades ?? processedRoadmap.snapshot?.plannedTrades, 0)), 0);
+        const riskPercent = toNumber(setting?.riskPerTrade, toNumber(processedRoadmap.riskPercent ?? processedRoadmap.snapshot?.riskPercent, 0));
+        const rewardMultiple = closedSummary.rewardMultiple > 0
+            ? closedSummary.rewardMultiple
+            : toNumber(processedRoadmap.rewardMultiple ?? processedRoadmap.snapshot?.rewardMultiple, 0);
+        const winRateEstimate = closedSummary.winRate > 0
+            ? closedSummary.winRate
+            : toNumber(processedRoadmap.winRateEstimate ?? processedRoadmap.snapshot?.winRateEstimate, 0);
+        const maxDrawDownPercent = toNumber(setting?.maxDrawDown, toNumber(processedRoadmap.maxDrawDownPercent ?? processedRoadmap.snapshot?.maxDrawDownPercent, 0));
+
+        const summary = buildRoadmapProjection({
+            startBalance: startingBalance,
+            riskPercent,
+            targetGrowthPercent,
+            rewardMultiple,
+            plannedTrades,
+            winRateEstimate,
+            maxDrawDownPercent
+        });
+
+        const processBarPercent = summary.estimatedTradesToGoal > 0 && plannedTrades > 0
+            ? Math.min(100, (plannedTrades / summary.estimatedTradesToGoal) * 100)
+            : Math.min(100, targetGrowthPercent);
+
+        return {
+            ...summary,
+            startingBalance,
+            targetGrowthPercent,
+            plannedTrades,
+            maxDrawDownPercent,
+            processBarPercent,
+            accountName: processedRoadmap.snapshot?.accountName || processedRoadmap.account?.name || 'Processed roadmap',
+            settingName: processedRoadmap.snapshot?.settingName || processedRoadmap.setting?.Name || processedRoadmap.setting?.name || 'No linked setting'
+        };
+    }, [closedSummary.rewardMultiple, closedSummary.winRate, processedRoadmap, setting]);
 
     const weeklyPlanOptions = useMemo(() => {
         return planTree.weeklyGroups.map(({ weeklyPlan }) => ({
@@ -811,6 +885,102 @@ const Plan = () => {
                 </div>
             )}
 
+            <div className="rounded-3xl border border-emerald-500/20 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4 shadow-xl shadow-black/20">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-3 lg:flex-[0.8] lg:max-w-2xl">
+                        <div className="flex items-center gap-2">
+                            <Target size={18} className="text-emerald-400" />
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Processed Roadmap</p>
+                            {roadmapSummary ? (
+                                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+                                    Process
+                                </span>
+                            ) : (
+                                <span className="rounded-full border border-gray-600 bg-gray-700/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                    Waiting
+                                </span>
+                            )}
+                        </div>
+
+                        <div>
+                            <h2 className="text-xl font-black text-white xl:text-2xl">
+                                {roadmapSummary
+                                    ? roadmapSummary.accountName + ' ? +' + roadmapSummary.targetGrowthPercent.toFixed(2) + '%'
+                                    : 'No processed roadmap for this account'}
+                            </h2>
+                            <p className="mt-1.5 max-w-2xl text-xs text-gray-400 xl:text-sm">
+                                {roadmapSummary
+                                    ? 'This is the main roadmap selected in Roadmap. It surfaces the same summary values you see there.'
+                                    : 'Process a roadmap first to surface its summary here.'}
+                            </p>
+                        </div>
+
+                        {roadmapSummary ? (
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+                                <MiniMetric label="Target NAV" value={formatMoney(roadmapSummary.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
+                                <MiniMetric label="Profit needed" value={formatMoney(roadmapSummary.profitTarget, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
+                                <MiniMetric label="Risk / trade" value={roadmapSummary.riskPct.toFixed(2) + '%'} />
+                                <MiniMetric label="Reward / trade" value={roadmapSummary.rewardPct.toFixed(2) + '%'} />
+                            </div>
+                        ) : null}
+                    </div>
+
+                    <div className="w-full rounded-2xl border border-gray-700 bg-gray-900/70 p-3 lg:flex-[1.2] lg:max-w-none">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-xs uppercase tracking-wider text-gray-500">Process Bar</p>
+                                <h3 className="text-lg font-bold text-white">Roadmap coverage</h3>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs uppercase tracking-wider text-gray-500">Coverage</p>
+                                <p className="text-xl font-black text-emerald-400">
+                                    {roadmapSummary ? roadmapSummary.processBarPercent.toFixed(1) + '%' : '0.0%'}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-gray-700">
+                            <div
+                                className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-blue-400 to-cyan-400 transition-all duration-500"
+                                style={{ width: (roadmapSummary ? roadmapSummary.processBarPercent : 0) + '%' }}
+                            />
+                        </div>
+
+                        {roadmapSummary ? (
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Estimated Trades</p>
+                                    <p className="mt-1 font-semibold text-white">{roadmapSummary.estimatedTradesToGoal || 'N/A'}</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Wins in Plan</p>
+                                    <p className="mt-1 font-semibold text-white">{roadmapSummary.winsNeededInPlannedTrades ?? 'N/A'}</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Equity if all wins</p>
+                                    <p className="mt-1 font-semibold text-white">{formatMoney(roadmapSummary.equityAfterPlannedTradesIfAllWins, selectedAccount?.currency, selectedAccount?.moneyFormat)}</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Loss Budget</p>
+                                    <p className="mt-1 font-semibold text-white">{formatMoney(roadmapSummary.lossBudget, selectedAccount?.currency, selectedAccount?.moneyFormat)}</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Max Drawdown</p>
+                                    <p className="mt-1 font-semibold text-white">{roadmapSummary.maxDrawDownPercent.toFixed(2)}%</p>
+                                </div>
+                                <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
+                                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Current Win Rate</p>
+                                    <p className="mt-1 font-semibold text-white">{roadmapSummary.winRateEstimate.toFixed(1)}%</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="mt-4 rounded-xl border border-dashed border-gray-700 bg-gray-800/40 p-4 text-sm text-gray-500">
+                                No processed roadmap yet. Choose one in Roadmap to surface it here.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div className="rounded-2xl border border-gray-700 bg-gray-800/80 p-4">
                     <div className="flex items-center gap-3 text-gray-400">
@@ -1288,5 +1458,12 @@ const Plan = () => {
         </div>
     );
 };
+
+const MiniMetric = ({ label, value }) => (
+    <div className="rounded-xl border border-gray-700 bg-gray-900/70 p-3">
+        <p className="text-[10px] uppercase tracking-wider text-gray-500">{label}</p>
+        <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    </div>
+);
 
 export default Plan;

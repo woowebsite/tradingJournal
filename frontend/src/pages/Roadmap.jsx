@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { ArrowUpRight, TrendingUp, Shield, Target, Wallet, BadgeInfo, Flame, Save, Edit2, Trash2, CheckCircle2, X } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import AccountModal from '../components/AccountModal';
 import api from '../services/api';
 import { fetchTrades } from '../features/tradeSlice';
 import { formatNumber } from '../utils/formatNumber';
@@ -36,7 +37,7 @@ const ROADMAP_STATUS_META = {
 
 const Roadmap = () => {
     const dispatch = useDispatch();
-    const { selectedAccount } = useAccount();
+    const { selectedAccount, setSelectedAccount } = useAccount();
     const { items: trades, loading } = useSelector(state => state.trades);
     const [startingBalance, setStartingBalance] = useState('');
     const [targetGrowth, setTargetGrowth] = useState('10');
@@ -46,6 +47,7 @@ const Roadmap = () => {
     const [editingRoadmap, setEditingRoadmap] = useState(null);
     const [savingRoadmap, setSavingRoadmap] = useState(false);
     const [roadmapMessage, setRoadmapMessage] = useState('');
+    const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
     const setting = useMemo(() => resolveSetting(selectedAccount), [selectedAccount]);
     const closedSummary = useMemo(() => summarizeClosedTrades(trades), [trades]);
@@ -162,9 +164,56 @@ const Roadmap = () => {
     const processedRoadmapTitle = processedRoadmap?.snapshot?.accountName
         || processedRoadmap?.snapshot?.settingName
         || 'No processed roadmap';
+    const sortedRoadmapHistory = useMemo(() => {
+        return [...roadmapHistory].sort((a, b) => {
+            const aStatus = a.status || 'unprocess';
+            const bStatus = b.status || 'unprocess';
+
+            if (aStatus === 'process' && bStatus !== 'process') return -1;
+            if (aStatus !== 'process' && bStatus === 'process') return 1;
+
+            const aTarget = toNumber(a.targetGrowthPercent ?? a.snapshot?.targetGrowthPercent, 0);
+            const bTarget = toNumber(b.targetGrowthPercent ?? b.snapshot?.targetGrowthPercent, 0);
+            if (aTarget !== bTarget) return aTarget - bTarget;
+
+            const aSavedAt = new Date(a.snapshot?.savedAt || a.updatedAt || a.createdAt || 0).getTime();
+            const bSavedAt = new Date(b.snapshot?.savedAt || b.updatedAt || b.createdAt || 0).getTime();
+            return bSavedAt - aSavedAt;
+        });
+    }, [roadmapHistory]);
 
     const activeSettingName = setting?.Name || setting?.name || 'No linked setting';
     const accountLabel = selectedAccount?.name || selectedAccount?.currency || 'Selected account';
+
+    const handleOpenAccountModal = () => {
+        if (!selectedAccount) return;
+        setIsAccountModalOpen(true);
+    };
+
+    const handleSaveAccount = async (data) => {
+        if (!selectedAccount) return;
+
+        try {
+            const accountId = selectedAccount.documentId || selectedAccount.id;
+            await api.put(`/accounts/${accountId}`, { data });
+
+            const refreshed = await api.get(`/accounts/${accountId}?populate=*`);
+            const updatedAccount = refreshed.data.data;
+            if (updatedAccount) {
+                setSelectedAccount(updatedAccount);
+            }
+
+            setIsAccountModalOpen(false);
+            setRoadmapMessage('Account updated.');
+        } catch (error) {
+            console.error('Failed to update account:', error.response?.data || error);
+            const message = error.response?.data?.error?.message
+                || error.response?.data?.message
+                || error.message
+                || 'Failed to update account';
+            alert(message);
+        }
+    };
 
     const handleEditRoadmap = (record) => {
         setEditingRoadmap(record);
@@ -313,6 +362,13 @@ const Roadmap = () => {
 
     return (
         <div className="space-y-6">
+            <AccountModal
+                isOpen={isAccountModalOpen}
+                onClose={() => setIsAccountModalOpen(false)}
+                onSubmit={handleSaveAccount}
+                account={selectedAccount}
+            />
+
             <div className="rounded-3xl border border-gray-700 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6 shadow-2xl shadow-black/20">
                 <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
                     <div className="space-y-4">
@@ -340,6 +396,15 @@ const Roadmap = () => {
                             </div>
                             <h3 className="mt-2 text-lg font-bold text-white truncate" title={activeSettingName}>{activeSettingName}</h3>
                             <p className="mt-1 text-sm text-gray-400">Account: {accountLabel}</p>
+                            <button
+                                type="button"
+                                onClick={handleOpenAccountModal}
+                                disabled={!selectedAccount}
+                                className="mt-3 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <Edit2 size={14} />
+                                Change
+                            </button>
                         </div>
 
                         <div className="rounded-2xl border border-gray-700 bg-gray-800/80 p-4">
@@ -655,7 +720,7 @@ const Roadmap = () => {
                                         No saved roadmaps yet. Hit Save to create your first snapshot.
                                     </td>
                                 </tr>
-                            ) : roadmapHistory.map((item) => {
+                            ) : sortedRoadmapHistory.map((item) => {
                                 const itemId = item.documentId || item.id;
                                 const savedAt = item.snapshot?.savedAt || item.updatedAt || item.createdAt;
                                 const isEditing = editingRoadmap && String(editingRoadmap.documentId || editingRoadmap.id) === String(itemId);
