@@ -53,6 +53,7 @@ const Roadmap = () => {
     const closedSummary = useMemo(() => summarizeClosedTrades(trades), [trades]);
     const recommendedGrowth = useMemo(() => recommendGrowthTarget(setting), [setting]);
     const maxDrawDownPercent = useMemo(() => toNumber(setting?.maxDrawDown, 0), [setting]);
+    const currentBalance = useMemo(() => toNumber(selectedAccount?.initial_balance, 0), [selectedAccount]);
 
     // Auto-hide toast after 3 seconds
     useEffect(() => {
@@ -136,6 +137,16 @@ const Roadmap = () => {
         winRateEstimate,
         maxDrawDownPercent
     }), [activeBalance, riskPercent, targetGrowthValue, rewardMultiple, plannedTradesValue, winRateEstimate, maxDrawDownPercent]);
+
+    const projectedPathCurrentBalanceRowNumber = useMemo(() => {
+        if (!roadmap.rows.length || currentBalance == null) return null;
+
+        const matchedRow = roadmap.rows.find(row =>
+            row.startEquity <= currentBalance && row.winEquity >= currentBalance
+        );
+
+        return matchedRow?.tradeNumber || null;
+    }, [currentBalance, roadmap.rows]);
 
     const milestones = useMemo(() => [10, 25, 50, 100].map(growth => {
         const projection = buildRoadmapProjection({
@@ -436,24 +447,26 @@ const Roadmap = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 rounded-2xl border border-gray-700 bg-gray-800 p-6 shadow-lg">
-                    <div className="flex items-center justify-between gap-3 mb-5">
-                        <div>
+                    <div className="mb-5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
                             <p className="text-xs uppercase tracking-wider text-gray-500">Goal Builder</p>
                             <h2 className="text-2xl font-bold text-white">Choose your growth target</h2>
                         </div>
-                        <div className="balance inline-flex items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300">
-                            <Wallet size={16} className="text-blue-400" />
-                            {formatMoney(activeBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                        <div className="flex items-center gap-2 shrink-0">
+                            <div className="balance inline-flex items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300">
+                                <Wallet size={16} className="text-blue-400" />
+                                {formatMoney(activeBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleSaveRoadmap}
+                                disabled={!selectedAccount || savingRoadmap}
+                                className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <Save size={16} />
+                                {savingRoadmap ? 'Saving...' : editingRoadmap ? 'Update' : 'Save'}
+                            </button>
                         </div>
-                        <button
-                            type="button"
-                            onClick={handleSaveRoadmap}
-                            disabled={!selectedAccount || savingRoadmap}
-                            className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            <Save size={16} />
-                            {savingRoadmap ? 'Saving...' : editingRoadmap ? 'Update' : 'Save'}
-                        </button>
                     </div>
 
                     {editingRoadmap && (
@@ -480,7 +493,7 @@ const Roadmap = () => {
                         ))}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <label className="space-y-2 block">
                             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Starting capital</span>
                             <input
@@ -491,6 +504,16 @@ const Roadmap = () => {
                                 onChange={(e) => setStartingBalance(e.target.value)}
                                 className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-gray-100 outline-none focus:border-blue-500"
                                 placeholder="0"
+                            />
+                        </label>
+
+                        <label className="space-y-2 block">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Current Balance</span>
+                            <input
+                                type="text"
+                                value={formatMoney(currentBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                readOnly
+                                className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-gray-100 outline-none focus:border-blue-500"
                             />
                         </label>
 
@@ -558,27 +581,49 @@ const Roadmap = () => {
                                                 Set a starting capital and trade count to see the roadmap.
                                             </td>
                                         </tr>
-                                    ) : roadmap.rows.map(row => (
-                                        <tr key={row.tradeNumber} className="hover:bg-gray-800/70 transition">
-                                            <td className="px-4 py-3 font-semibold text-white">{row.tradeNumber}</td>
-                                            <td className="px-4 py-3 font-mono text-gray-300">{formatMoney(row.startEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                            <td className="px-4 py-3 font-mono text-emerald-300">{formatMoney(row.winEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                            <td className="px-4 py-3 font-mono text-emerald-400">+{formatMoney(row.winProfit, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                            <td className="px-4 py-3 font-mono text-red-300">{formatMoney(row.lossEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                            <td className="px-4 py-3 font-mono text-red-400">-{formatMoney(row.lossAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="h-2 w-28 rounded-full bg-gray-700 overflow-hidden">
-                                                        <div
-                                                            className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-blue-400"
-                                                            style={{ width: `${row.progress}%` }}
-                                                        />
+                                    ) : roadmap.rows.map(row => {
+                                        const isTargetRow = row.tradeNumber === projectedPathCurrentBalanceRowNumber;
+
+                                        return (
+                                            <tr
+                                                key={row.tradeNumber}
+                                                className={`transition ${
+                                                    isTargetRow
+                                                        ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/40 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.18)]'
+                                                        : 'hover:bg-gray-800/70'
+                                                }`}
+                                            >
+                                                <td className="px-4 py-3 font-semibold text-white">
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{row.tradeNumber}</span>
+                                                        {isTargetRow && (
+                                                            <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
+                                                                Current
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <span className="text-xs text-gray-400">{row.progress.toFixed(1)}%</span>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                                </td>
+                                                <td className="px-4 py-3 font-mono text-gray-300">{formatMoney(row.startEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="px-4 py-3 font-mono text-emerald-300">{formatMoney(row.winEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="px-4 py-3 font-mono text-emerald-400">+{formatMoney(row.winProfit, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="px-4 py-3 font-mono text-red-300">{formatMoney(row.lossEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="px-4 py-3 font-mono text-red-400">-{formatMoney(row.lossAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="h-2 w-28 rounded-full bg-gray-700 overflow-hidden">
+                                                            <div
+                                                                className={`h-full rounded-full ${isTargetRow ? 'bg-emerald-400' : 'bg-gradient-to-r from-emerald-400 to-blue-400'}`}
+                                                                style={{ width: `${row.progress}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className={`text-xs ${isTargetRow ? 'text-emerald-300 font-semibold' : 'text-gray-400'}`}>
+                                                            {row.progress.toFixed(1)}%
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>

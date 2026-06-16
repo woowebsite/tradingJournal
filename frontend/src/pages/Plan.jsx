@@ -350,6 +350,28 @@ const Plan = () => {
 
     const setting = useMemo(() => resolveSetting(selectedAccount), [selectedAccount]);
     const closedSummary = useMemo(() => summarizeClosedTrades(trades), [trades]);
+    const currentBalance = useMemo(() => {
+        if (!selectedAccount) return null;
+
+        const baseBalance = toNumber(selectedAccount.initial_balance, 0);
+        const totalTradePnl = (trades || []).reduce((sum, trade) => {
+            const symbolId = trade.symbol?.documentId || trade.symbol?.id;
+            const currentPrice = symbolId ? marketPricesMap[symbolId] : null;
+            const tradeStatus = trade.trade_status || 'Open';
+
+            if (tradeStatus === 'Closed') {
+                return sum + toNumber(trade.pnl, calculateTradePnL(trade));
+            }
+
+            if (currentPrice !== null && currentPrice !== undefined && currentPrice !== '') {
+                return sum + calculateTradePnL(trade, currentPrice);
+            }
+
+            return sum + toNumber(trade.pnl, 0);
+        }, 0);
+
+        return baseBalance + totalTradePnl;
+    }, [marketPricesMap, selectedAccount, trades]);
 
     const roadmapSummary = useMemo(() => {
         if (!processedRoadmap) return null;
@@ -376,9 +398,19 @@ const Plan = () => {
             maxDrawDownPercent
         });
 
-        const processBarPercent = summary.estimatedTradesToGoal > 0 && plannedTrades > 0
-            ? Math.min(100, (plannedTrades / summary.estimatedTradesToGoal) * 100)
-            : Math.min(100, targetGrowthPercent);
+        const processBarPercent = (() => {
+            const profitRange = summary.profitTarget;
+            if (currentBalance == null || profitRange <= 0) {
+                return currentBalance != null && summary.targetBalance > 0 && currentBalance >= summary.targetBalance ? 100 : 0;
+            }
+
+            const coverage = ((currentBalance - summary.baseBalance) / profitRange) * 100;
+            return Math.max(0, Math.min(100, coverage));
+        })();
+
+        const balanceForRisk = currentBalance != null ? currentBalance : summary.baseBalance;
+        const riskPerTradeAmount = balanceForRisk * (riskPercent / 100);
+        const rewardPerTradeAmount = balanceForRisk * (summary.rewardPct / 100);
 
         return {
             ...summary,
@@ -387,10 +419,12 @@ const Plan = () => {
             plannedTrades,
             maxDrawDownPercent,
             processBarPercent,
+            riskPerTradeAmount,
+            rewardPerTradeAmount,
             accountName: processedRoadmap.snapshot?.accountName || processedRoadmap.account?.name || 'Processed roadmap',
             settingName: processedRoadmap.snapshot?.settingName || processedRoadmap.setting?.Name || processedRoadmap.setting?.name || 'No linked setting'
         };
-    }, [closedSummary.rewardMultiple, closedSummary.winRate, processedRoadmap, setting]);
+    }, [closedSummary.rewardMultiple, closedSummary.winRate, currentBalance, processedRoadmap, setting]);
 
     const weeklyPlanOptions = useMemo(() => {
         return planTree.weeklyGroups.map(({ weeklyPlan }) => ({
@@ -629,6 +663,7 @@ const Plan = () => {
 
     const renderPlanCard = (plan, variant) => {
         const isWeekly = variant === 'weekly';
+        const handleCardClick = () => handleEdit(plan);
 
         return (
             <div
@@ -637,11 +672,20 @@ const Plan = () => {
             >
                 <div
                     className={clsx(
-                        'relative',
+                        'relative cursor-pointer transition hover:border-blue-500/40',
                         isWeekly
                             ? 'rounded-2xl border border-gray-700 bg-gray-800 overflow-hidden shadow-lg shadow-black/10'
                             : 'rounded-2xl bg-gray-900/70 overflow-visible shadow-md shadow-black/10 -mx-4'
                     )}
+                    role="button"
+                    tabIndex={0}
+                    onClick={handleCardClick}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleCardClick();
+                        }
+                    }}
                 >
                     {isWeekly ? (
                         <div className="p-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -682,7 +726,10 @@ const Plan = () => {
 
                             <div className="flex flex-wrap gap-2 lg:justify-end">
                                 <button
-                                    onClick={() => handleEdit(plan)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEdit(plan);
+                                    }}
                                     disabled={saving}
                                     className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 hover:bg-gray-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                                 >
@@ -690,7 +737,10 @@ const Plan = () => {
                                     Edit
                                 </button>
                                 <button
-                                    onClick={() => handleDelete(plan)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDelete(plan);
+                                    }}
                                     disabled={saving}
                                     className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition disabled:opacity-60 disabled:cursor-not-allowed"
                                 >
@@ -745,7 +795,10 @@ const Plan = () => {
                                         {plan.status}
                                     </span>
                                     <button
-                                        onClick={() => handleEdit(plan)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleEdit(plan);
+                                        }}
                                         disabled={saving}
                                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 hover:bg-gray-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
@@ -753,7 +806,10 @@ const Plan = () => {
                                         Edit
                                     </button>
                                     <button
-                                        onClick={() => handleDelete(plan)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDelete(plan);
+                                        }}
                                         disabled={saving}
                                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
@@ -903,15 +959,15 @@ const Plan = () => {
                         </div>
 
                         <div>
-                            <h2 className="text-xl font-black text-white xl:text-2xl">
-                                {roadmapSummary
-                                    ? roadmapSummary.accountName + ' ? +' + roadmapSummary.targetGrowthPercent.toFixed(2) + '%'
-                                    : 'No processed roadmap for this account'}
+                            <h2 className="balance text-xl font-black text-white xl:text-2xl">
+                                {currentBalance === null
+                                    ? '-'
+                                    : formatMoney(currentBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
                             </h2>
                             <p className="mt-1.5 max-w-2xl text-xs text-gray-400 xl:text-sm">
                                 {roadmapSummary
-                                    ? 'This is the main roadmap selected in Roadmap. It surfaces the same summary values you see there.'
-                                    : 'Process a roadmap first to surface its summary here.'}
+                                    ? roadmapSummary.accountName + ' ? +' + roadmapSummary.targetGrowthPercent.toFixed(2) + '%'
+                                    : 'No processed roadmap for this account'}
                             </p>
                         </div>
 
@@ -919,8 +975,8 @@ const Plan = () => {
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
                                 <MiniMetric label="Target NAV" value={formatMoney(roadmapSummary.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
                                 <MiniMetric label="Profit needed" value={formatMoney(roadmapSummary.profitTarget, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
-                                <MiniMetric label="Risk / trade" value={roadmapSummary.riskPct.toFixed(2) + '%'} />
-                                <MiniMetric label="Reward / trade" value={roadmapSummary.rewardPct.toFixed(2) + '%'} />
+                                <MiniMetric label="Risk / trade" value={formatMoney(roadmapSummary.riskPerTradeAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
+                                <MiniMetric label="Reward / trade" value={formatMoney(roadmapSummary.rewardPerTradeAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
                             </div>
                         ) : null}
                     </div>
@@ -1064,44 +1120,61 @@ const Plan = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-700/80 bg-gray-900/35">
-                                            {weeklyTradeRows.map(trade => (
-                                                <tr
-                                                    key={trade.documentId || trade.id}
-                                                    onClick={() => handleOpenTradeDetail(trade)}
-                                                    className="cursor-pointer hover:bg-gray-900/70 transition"
-                                                >
-                                                    <td className="px-3 py-2">
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <span className={clsx(
-                                                                'h-2 w-2 shrink-0 rounded-full',
-                                                                trade.type === 'Long' ? 'bg-green-400' : 'bg-red-400'
-                                                            )} />
-                                                            <div className="min-w-0">
-                                                                <div className="truncate font-semibold text-gray-100">
-                                                                    {trade.symbol?.Name || trade.symbol?.name || 'Unknown'}
-                                                                </div>
-                                                                <div className="text-[10px] text-gray-500">
-                                                                    {trade.derivedDate
-                                                                        ? new Date(trade.derivedDate).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-                                                                        : '-'}
+                                            {weeklyTradeRows.map(trade => {
+                                                const isClosedTrade = trade.trade_status === 'Closed';
+
+                                                return (
+                                                    <tr
+                                                        key={trade.documentId || trade.id}
+                                                        onClick={() => handleOpenTradeDetail(trade)}
+                                                        className={clsx(
+                                                            'cursor-pointer transition',
+                                                            isClosedTrade
+                                                                ? 'bg-gray-900/45 hover:bg-gray-800/60'
+                                                                : 'hover:bg-gray-900/70'
+                                                        )}
+                                                    >
+                                                        <td className="px-3 py-2">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <span className={clsx(
+                                                                    'h-2 w-2 shrink-0 rounded-full',
+                                                                    trade.type === 'Long' ? 'bg-green-400' : 'bg-red-400'
+                                                                )} />
+                                                                <div className="min-w-0">
+                                                                    <div className={clsx(
+                                                                        'truncate font-semibold',
+                                                                        isClosedTrade ? 'text-gray-400' : 'text-gray-100'
+                                                                    )}>
+                                                                        {trade.symbol?.Name || trade.symbol?.name || 'Unknown'}
+                                                                    </div>
+                                                                    <div className={clsx(
+                                                                        'text-[10px]',
+                                                                        isClosedTrade ? 'text-gray-600' : 'text-gray-500'
+                                                                    )}>
+                                                                        {trade.derivedDate
+                                                                            ? new Date(trade.derivedDate).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                                                                            : '-'}
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-2 py-2 text-gray-300">
-                                                        {trade.type || '-'}
-                                                    </td>
-                                                    <td className="px-2 py-2 text-right font-mono text-gray-200">
-                                                        {formatNumber(trade.derivedCurrentPrice)}
-                                                    </td>
-                                                    <td className={clsx(
-                                                        'px-3 py-2 text-right font-mono font-bold',
-                                                        trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'
-                                                    )}>
-                                                        {formatNumber(trade.derivedPnl)}
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                        </td>
+                                                        <td className={clsx('px-2 py-2', isClosedTrade ? 'text-gray-500' : 'text-gray-300')}>
+                                                            {trade.type || '-'}
+                                                        </td>
+                                                        <td className={clsx('px-2 py-2 text-right font-mono', isClosedTrade ? 'text-gray-500' : 'text-gray-200')}>
+                                                            {formatNumber(trade.derivedCurrentPrice)}
+                                                        </td>
+                                                        <td className={clsx(
+                                                            'px-3 py-2 text-right font-mono font-bold',
+                                                            isClosedTrade
+                                                                ? 'text-gray-400'
+                                                                : (trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400')
+                                                        )}>
+                                                            {formatNumber(trade.derivedPnl)}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
