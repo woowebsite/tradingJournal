@@ -25,6 +25,7 @@ const Sidebar = () => {
                     label: 'Journal',
                     path: '/journal',
                     subItems: [
+                        { label: 'Calendar', path: '/journal-calendar' },
                         { label: 'Roadmap', path: '/journal-roadmap' },
                         { label: 'Plan', path: '/journal-plan' },
                         { label: 'Trades', path: '/trades' },
