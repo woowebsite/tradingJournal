@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useDispatch, useSelector } from 'react-redux';
+import { useLocation } from 'react-router-dom';
 import {
     Calendar,
     CalendarDays,
@@ -118,6 +119,7 @@ const buildEmptyForm = (selectedAccount, accounts) => {
 
 const Plan = () => {
     const { accounts, selectedAccount } = useAccount();
+    const location = useLocation();
     const dispatch = useDispatch();
     const { items: trades, loading: tradesLoading } = useSelector(state => state.trades);
     const [plans, setPlans] = useState([]);
@@ -435,6 +437,11 @@ const Plan = () => {
         }));
     }, [planTree.weeklyGroups]);
 
+    const planDateQuery = useMemo(() => {
+        const params = new URLSearchParams(location.search);
+        return getDateValueFromDateLike(params.get('date'));
+    }, [location.search]);
+
     const selectedWeeklyGroup = useMemo(() => {
         if (!planTree.weeklyGroups.length) return null;
         return planTree.weeklyGroups.find(({ weeklyPlan }) => String(weeklyPlan.documentId || weeklyPlan.id) === String(selectedWeekId))
@@ -445,6 +452,20 @@ const Plan = () => {
         if (!planTree.weeklyGroups.length) {
             setSelectedWeekId('');
             return;
+        }
+
+        if (planDateQuery) {
+            const queryMatchedWeek = planTree.weeklyGroups.find(({ weeklyStart, weeklyEnd }) =>
+                isDateInRange(planDateQuery, weeklyStart, weeklyEnd)
+            );
+
+            if (queryMatchedWeek) {
+                const nextSelectedWeekId = queryMatchedWeek.weeklyPlan.documentId || queryMatchedWeek.weeklyPlan.id || '';
+                if (nextSelectedWeekId && String(nextSelectedWeekId) !== String(selectedWeekId)) {
+                    setSelectedWeekId(nextSelectedWeekId);
+                }
+                return;
+            }
         }
 
         const today = getLocalDateValue();

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import clsx from 'clsx';
 import { Calendar, ChevronLeft, ChevronRight, Wallet, TrendingUp } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import { fetchTrades } from '../features/tradeSlice';
-import { fetchBatchLatestPrices } from '../features/marketSlice';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { formatNumber } from '../utils/formatNumber';
 
@@ -49,11 +49,18 @@ const endOfWeekSunday = (date) => {
 const sameDay = (a, b) => a && b && a === b;
 const isZeroPnl = (value) => Number(value) === 0;
 
+const getTradeDerivedDate = (item) => {
+    const details = item.trade_details || [];
+    const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const firstEntry = sortedDetails.find(d => d.signal === 'Entry') || sortedDetails[0];
+    return item.date || firstEntry?.date || item.createdAt;
+};
+
 const JournalCalendar = () => {
     const dispatch = useDispatch();
+    const navigate = useNavigate();
     const { selectedAccount } = useAccount();
     const { items: rawTrades, loading } = useSelector(state => state.trades);
-    const { latestPricesMap } = useSelector(state => state.market);
     const [selectedMonthDate, setSelectedMonthDate] = useState(() => new Date());
     const [selectedDate, setSelectedDate] = useState(getLocalDateValue());
 
@@ -63,39 +70,39 @@ const JournalCalendar = () => {
         dispatch(fetchTrades({ accountId, pageSize: 1000 }));
     }, [dispatch, selectedAccount]);
 
-    useEffect(() => {
-        if (!rawTrades || rawTrades.length === 0) return;
-
-        const symbolIds = Array.from(new Set(
-            rawTrades
-                .map(t => t.symbol?.documentId || t.symbol?.id)
-                .filter(Boolean)
-        ));
-
-        if (symbolIds.length > 0) {
-            dispatch(fetchBatchLatestPrices(symbolIds));
-        }
-    }, [dispatch, rawTrades]);
-
     const trades = useMemo(() => {
         if (!rawTrades) return [];
 
-        return rawTrades.map(item => {
-            const details = item.trade_details || [];
-            const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
-            const firstEntry = sortedDetails.find(d => d.signal === 'Entry') || sortedDetails[0];
-            const symbolId = item.symbol?.documentId || item.symbol?.id;
-            const currentPrice = symbolId ? latestPricesMap[symbolId] : null;
-            const pnl = calculateTradePnL(item, currentPrice);
+        return rawTrades
+            .filter(item => item.trade_status === 'Closed')
+            .map(item => {
+            const pnl = calculateTradePnL(item);
 
             return {
                 id: item.id || item.documentId,
                 ...item,
-                derivedDate: item.date || firstEntry?.date || item.createdAt,
+                derivedDate: getTradeDerivedDate(item),
                 derivedPnl: pnl
             };
-        });
-    }, [latestPricesMap, rawTrades]);
+            });
+    }, [rawTrades]);
+
+    const openTradeCounts = useMemo(() => {
+        const map = new Map();
+
+        if (!rawTrades) return map;
+
+        rawTrades
+            .filter(item => item.trade_status === 'Open')
+            .forEach(item => {
+                const dateKey = getLocalDateValue(getTradeDerivedDate(item));
+                if (!dateKey) return;
+
+                map.set(dateKey, (map.get(dateKey) || 0) + 1);
+            });
+
+        return map;
+    }, [rawTrades]);
 
     const accountBaseBalance = useMemo(() => {
         return Number.parseFloat(selectedAccount?.initial_balance) || 0;
@@ -164,13 +171,15 @@ const JournalCalendar = () => {
     const selectedDayData = useMemo(() => {
         const nav = calendarDays.navMap.get(selectedDate);
         const stats = dailyStats.get(selectedDate) || { pnl: 0, count: 0 };
+        const openCount = openTradeCounts.get(selectedDate) || 0;
+        const tradeCount = stats.count > 0 ? stats.count : openCount;
         return {
             dateKey: selectedDate,
             nav: nav ?? accountBaseBalance,
             pnl: stats.pnl,
-            count: stats.count
+            count: tradeCount
         };
-    }, [accountBaseBalance, dailyStats, calendarDays.navMap, selectedDate]);
+    }, [accountBaseBalance, calendarDays.navMap, dailyStats, openTradeCounts, selectedDate]);
 
     useEffect(() => {
         const monthKey = `${selectedMonthDate.getFullYear()}-${String(selectedMonthDate.getMonth() + 1).padStart(2, '0')}`;
@@ -298,22 +307,27 @@ const JournalCalendar = () => {
                                 const isInMonth = day.date.getMonth() === selectedMonthDate.getMonth();
                                 const isToday = sameDay(day.dateKey, getLocalDateValue());
                                 const isSelected = sameDay(day.dateKey, selectedDate);
-                                const hasActivity = day.dayStats.count > 0;
+                                const openCount = openTradeCounts.get(day.dateKey) || 0;
+                                const displayCount = day.dayStats.count > 0 ? day.dayStats.count : openCount;
+                                const hasActivity = displayCount > 0;
                                 const pnlIsPositive = day.dayStats.pnl >= 0;
 
                                 return (
                                     <button
                                         key={day.dateKey}
                                         type="button"
-                                        onClick={() => setSelectedDate(day.dateKey)}
+                                        onClick={() => {
+                                            setSelectedDate(day.dateKey);
+                                            navigate(`/journal-plan?date=${day.dateKey}`);
+                                        }}
                                         className={clsx(
-                                            'min-h-[128px] rounded-2xl border p-3 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500/40',
+                                            'min-h-[128px] rounded-2xl border p-3 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500/40 cursor-pointer',
                                             isInMonth ? 'bg-gray-900/70 border-gray-700 hover:border-blue-500/40' : 'bg-gray-950/40 border-gray-800 opacity-60',
                                             isSelected && 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10',
                                             isToday && 'ring-1 ring-inset ring-emerald-400/40'
                                         )}
                                     >
-                                        <div className="flex items-start justify-between gap-2">
+                                        <div className="trade-per-day flex items-start justify-between gap-2">
                                             <div className={clsx('text-sm font-bold', isInMonth ? 'text-white' : 'text-gray-500')}>
                                                 {day.date.getDate()}
                                             </div>
@@ -322,7 +336,7 @@ const JournalCalendar = () => {
                                                     'rounded-full px-2 py-0.5 text-[10px] font-semibold',
                                                     pnlIsPositive ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'
                                                 )}>
-                                                    {day.dayStats.count}
+                                                    {displayCount}
                                                 </span>
                                             )}
                                         </div>
