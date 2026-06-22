@@ -48,10 +48,77 @@ const endOfWeekSunday = (date) => {
 
 const sameDay = (a, b) => a && b && a === b;
 const isZeroPnl = (value) => Number(value) === 0;
+const CLOSING_SIGNALS = new Set(['Exit', 'TakeProfit', 'Stoploss']);
+
+const getTradeSymbolLabel = (trade) => {
+    const symbol = trade.symbol || {};
+    return (
+        symbol.ticker ||
+        symbol.symbol ||
+        symbol.code ||
+        symbol.Name ||
+        symbol.name ||
+        symbol.label ||
+        'Unknown'
+    );
+};
+
+const formatTradeVolume = (volume) => {
+    const parsed = Number(volume);
+    if (Number.isNaN(parsed)) return String(volume ?? '');
+    return formatNumber(parsed, '#,###.##');
+};
+
+const getTradeActivityParts = (detail, trade) => {
+    const action = detail.type || detail.signal || 'Trade';
+    const symbolLabel = getTradeSymbolLabel(trade);
+    const volumeLabel = formatTradeVolume(detail.volume);
+    return { action, symbolLabel, volumeLabel };
+};
+
+const getTradeActivityTone = (detail) => {
+    const type = String(detail.type || '').toLowerCase();
+    const signal = String(detail.signal || '').toLowerCase();
+
+    if (type === 'buy' || signal === 'entry') {
+        return 'border-emerald-500/20 bg-emerald-500/15 text-emerald-300';
+    }
+
+    if (type === 'sell' || signal === 'exit') {
+        return 'border-rose-500/20 bg-rose-500/15 text-rose-300';
+    }
+
+    if (signal === 'takeprofit') {
+        return 'border-amber-500/20 bg-amber-500/15 text-amber-300';
+    }
+
+    if (signal === 'stoploss') {
+        return 'border-red-500/20 bg-red-500/15 text-red-300';
+    }
+
+    return 'border-sky-500/20 bg-sky-500/15 text-sky-300';
+};
+
+const getTradeEntryDate = (item) => {
+    const details = item.trade_details || [];
+    const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const firstEntry = sortedDetails.find(d => d.signal === 'Entry') || sortedDetails[0];
+
+    return firstEntry?.date || item.date || item.createdAt;
+};
 
 const getTradeDerivedDate = (item) => {
     const details = item.trade_details || [];
     const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    if (item.trade_status === 'Closed') {
+        const closingDetail = [...sortedDetails]
+            .reverse()
+            .find(d => CLOSING_SIGNALS.has(d.signal));
+
+        return closingDetail?.date || sortedDetails.at(-1)?.date || item.date || item.createdAt;
+    }
+
     const firstEntry = sortedDetails.find(d => d.signal === 'Entry') || sortedDetails[0];
     return item.date || firstEntry?.date || item.createdAt;
 };
@@ -87,19 +154,45 @@ const JournalCalendar = () => {
             });
     }, [rawTrades]);
 
-    const openTradeCounts = useMemo(() => {
+    const entryTradeCounts = useMemo(() => {
         const map = new Map();
 
         if (!rawTrades) return map;
 
-        rawTrades
-            .filter(item => item.trade_status === 'Open')
-            .forEach(item => {
-                const dateKey = getLocalDateValue(getTradeDerivedDate(item));
+        rawTrades.forEach(item => {
+            const dateKey = getLocalDateValue(getTradeEntryDate(item));
+            if (!dateKey) return;
+
+            map.set(dateKey, (map.get(dateKey) || 0) + 1);
+        });
+
+        return map;
+    }, [rawTrades]);
+
+    const tradeActivitiesByDay = useMemo(() => {
+        const map = new Map();
+
+        if (!rawTrades) return map;
+
+        rawTrades.forEach(trade => {
+            (trade.trade_details || []).forEach(detail => {
+                const dateKey = getLocalDateValue(detail.date);
                 if (!dateKey) return;
 
-                map.set(dateKey, (map.get(dateKey) || 0) + 1);
+                const current = map.get(dateKey) || [];
+                current.push({
+                    id: detail.documentId || detail.id || `${trade.id || trade.documentId}-${detail.date}-${detail.type}-${detail.volume}`,
+                    parts: getTradeActivityParts(detail, trade),
+                    tone: getTradeActivityTone(detail),
+                    sortValue: new Date(detail.date).getTime() || 0
+                });
+                map.set(dateKey, current);
             });
+        });
+
+        map.forEach((items, key) => {
+            map.set(key, items.sort((a, b) => a.sortValue - b.sortValue));
+        });
 
         return map;
     }, [rawTrades]);
@@ -171,15 +264,15 @@ const JournalCalendar = () => {
     const selectedDayData = useMemo(() => {
         const nav = calendarDays.navMap.get(selectedDate);
         const stats = dailyStats.get(selectedDate) || { pnl: 0, count: 0 };
-        const openCount = openTradeCounts.get(selectedDate) || 0;
-        const tradeCount = stats.count > 0 ? stats.count : openCount;
+        const entryCount = entryTradeCounts.get(selectedDate) || 0;
+        const tradeCount = stats.count > 0 ? stats.count : entryCount;
         return {
             dateKey: selectedDate,
             nav: nav ?? accountBaseBalance,
             pnl: stats.pnl,
             count: tradeCount
         };
-    }, [accountBaseBalance, calendarDays.navMap, dailyStats, openTradeCounts, selectedDate]);
+    }, [accountBaseBalance, calendarDays.navMap, dailyStats, entryTradeCounts, selectedDate]);
 
     useEffect(() => {
         const monthKey = `${selectedMonthDate.getFullYear()}-${String(selectedMonthDate.getMonth() + 1).padStart(2, '0')}`;
@@ -307,8 +400,9 @@ const JournalCalendar = () => {
                                 const isInMonth = day.date.getMonth() === selectedMonthDate.getMonth();
                                 const isToday = sameDay(day.dateKey, getLocalDateValue());
                                 const isSelected = sameDay(day.dateKey, selectedDate);
-                                const openCount = openTradeCounts.get(day.dateKey) || 0;
-                                const displayCount = day.dayStats.count > 0 ? day.dayStats.count : openCount;
+                                const entryCount = entryTradeCounts.get(day.dateKey) || 0;
+                                const activityItems = tradeActivitiesByDay.get(day.dateKey) || [];
+                                const displayCount = day.dayStats.count > 0 ? day.dayStats.count : entryCount;
                                 const hasActivity = displayCount > 0;
                                 const pnlIsPositive = day.dayStats.pnl >= 0;
 
@@ -321,7 +415,7 @@ const JournalCalendar = () => {
                                             navigate(`/journal-plan?date=${day.dateKey}`);
                                         }}
                                         className={clsx(
-                                            'min-h-[128px] rounded-2xl border p-3 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500/40 cursor-pointer',
+                                            'min-h-[168px] rounded-2xl border p-3 text-left transition focus:outline-none focus:ring-2 focus:ring-blue-500/40 cursor-pointer',
                                             isInMonth ? 'bg-gray-900/70 border-gray-700 hover:border-blue-500/40' : 'bg-gray-950/40 border-gray-800 opacity-60',
                                             isSelected && 'border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/10',
                                             isToday && 'ring-1 ring-inset ring-emerald-400/40'
@@ -342,6 +436,29 @@ const JournalCalendar = () => {
                                         </div>
 
                                         <div className="mt-3 space-y-2">
+                                            {activityItems.length > 0 && (
+                                                <div className="space-y-1">
+                                                    {activityItems.slice(0, 2).map(item => (
+                                                        <p
+                                                            key={item.id}
+                                                            className={clsx(
+                                                                'truncate rounded-lg border px-2 py-1 text-[10px] font-semibold shadow-sm',
+                                                                item.tone
+                                                            )}
+                                                            title={[item.parts.action, item.parts.symbolLabel, item.parts.volumeLabel].filter(Boolean).join(' ')}
+                                                        >
+                                                            <span>{item.parts.action} </span>
+                                                            <strong>{item.parts.symbolLabel}</strong>
+                                                            <span> {item.parts.volumeLabel}</span>
+                                                        </p>
+                                                    ))}
+                                                    {activityItems.length > 2 && (
+                                                        <p className="px-2 text-[10px] text-gray-500">
+                                                            +{activityItems.length - 2} more
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
                                             {!isZeroPnl(day.dayStats.pnl) && (
                                                 <div>
                                                     <p className={clsx(

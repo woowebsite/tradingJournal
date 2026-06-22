@@ -24,6 +24,7 @@ import TradeModal from '../components/TradeModal';
 import api from '../services/api';
 import { fetchBatchLatestMinutePrices, fetchLatestHistory } from '../features/marketSlice';
 import { deleteTrade, fetchTrades, saveTrade } from '../features/tradeSlice';
+import { extractTextFromBlocks } from '../utils/textUtils';
 import { createPlan, deletePlan, listPlans, updatePlan } from '../services/planService';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { formatNumber } from '../utils/formatNumber';
@@ -71,6 +72,17 @@ const formatMoney = (value, currency = 'USD', pattern = '#,###.##') => {
     const formatted = formatNumber(value, pattern);
     if (formatted === '-') return '-';
     return currency ? `${formatted} ${currency}` : formatted;
+};
+
+const formatDetailTime = (dateLike) => {
+    if (!dateLike) return '-';
+    const date = new Date(dateLike);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
 };
 
 const isCryptoSymbol = (symbol) => {
@@ -523,6 +535,37 @@ const Plan = () => {
         }).sort((a, b) => new Date(b.derivedDate || 0) - new Date(a.derivedDate || 0));
     }, [trades, marketPricesMap, currentWeekRange.weekStart, currentWeekRange.weekEnd]);
 
+    const tradeDetailsByDate = useMemo(() => {
+        const grouped = {};
+
+        (trades || []).forEach(trade => {
+            const details = trade.trade_details || [];
+            details.forEach((detail, detailIndex) => {
+                const detailDateKey = getDateValueFromDateLike(detail.date || trade.date || trade.createdAt);
+                if (!detailDateKey) return;
+
+                if (!grouped[detailDateKey]) {
+                    grouped[detailDateKey] = [];
+                }
+
+                grouped[detailDateKey].push({
+                    id: detail.documentId || detail.id || `${trade.documentId || trade.id || 'trade'}-${detailIndex}`,
+                    trade,
+                    detail,
+                    symbolLabel: trade.symbol?.Name || trade.symbol?.name || 'Unknown',
+                    noteText: extractTextFromBlocks(detail.note),
+                    timeValue: detail.date || trade.date || trade.createdAt
+                });
+            });
+        });
+
+        Object.values(grouped).forEach(rows => {
+            rows.sort((a, b) => new Date(a.timeValue || 0) - new Date(b.timeValue || 0));
+        });
+
+        return grouped;
+    }, [trades]);
+
     const totalWeeklyPnl = useMemo(() => {
         return weeklyTradeRows.reduce((sum, trade) => sum + (trade.derivedPnl || 0), 0);
     }, [weeklyTradeRows]);
@@ -685,6 +728,8 @@ const Plan = () => {
     const renderPlanCard = (plan, variant) => {
         const isWeekly = variant === 'weekly';
         const handleCardClick = () => handleEdit(plan);
+        const planDateKey = getDateValueFromDateLike(plan.planDate || plan.createdAt);
+        const executedDetailRows = isWeekly ? [] : (tradeDetailsByDate[planDateKey] || []);
 
         return (
             <div
@@ -844,24 +889,116 @@ const Plan = () => {
 
                     {!isWeekly && (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 pt-0">
-                            <div className="rounded-xl bg-gray-950/50 border border-gray-700 p-3.5">
+                            <div className="p-0">
                                 <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Entry</div>
                                 <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
                                     {plan.entryPlan || 'No entry plan yet.'}
                                 </p>
                             </div>
-                            <div className="rounded-xl bg-gray-950/50 border border-gray-700 p-3.5">
+                            <div className="p-0">
                                 <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Risk</div>
                                 <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
                                     {plan.riskPlan || 'No risk plan yet.'}
                                 </p>
                             </div>
-                            <div className="rounded-xl bg-gray-950/50 border border-gray-700 p-3.5">
+                            <div className="p-0">
                                 <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Checklist / Review</div>
                                 <div className="space-y-2 text-xs text-gray-300 leading-relaxed">
                                     <p className="whitespace-pre-wrap">{plan.checklist || 'No checklist yet.'}</p>
                                     <p className="whitespace-pre-wrap">{plan.reviewNotes || 'No review notes yet.'}</p>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {!isWeekly && (
+                        <div className="px-4 pb-4">
+                            <div className="overflow-hidden rounded-xl border border-gray-700 bg-gray-950/50">
+                                <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+                                    <div className="text-[10px] uppercase tracking-widest text-gray-500">
+                                        Executed trade details
+                                    </div>
+                                    <div className="text-[10px] text-gray-400">
+                                        {executedDetailRows.length} rows
+                                    </div>
+                                </div>
+
+                                {executedDetailRows.length > 0 ? (
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full text-left text-[11px]">
+                                            <thead className="bg-gray-900/80 text-gray-500 uppercase tracking-wider">
+                                                <tr>
+                                                    <th className="px-3 py-2 font-medium">Time</th>
+                                                    <th className="px-3 py-2 font-medium">Symbol</th>
+                                                    <th className="px-3 py-2 font-medium">Signal</th>
+                                                    <th className="px-3 py-2 font-medium">Type</th>
+                                                    <th className="px-3 py-2 font-medium">Price</th>
+                                                    <th className="px-3 py-2 font-medium">Volume</th>
+                                                    <th className="px-3 py-2 font-medium">Note</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-800">
+                                                {executedDetailRows.map(row => {
+                                                    const signalTone = row.detail.signal === 'Entry'
+                                                        ? 'bg-blue-500/15 text-blue-300 border-blue-500/20'
+                                                        : row.detail.signal === 'Stoploss'
+                                                            ? 'bg-red-500/15 text-red-300 border-red-500/20'
+                                                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20';
+
+                                                    return (
+                                                        <tr
+                                                            key={row.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleOpenTradeDetail(row.trade);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    handleOpenTradeDetail(row.trade);
+                                                                }
+                                                            }}
+                                                            className="cursor-pointer hover:bg-gray-900/60 transition"
+                                                        >
+                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                                {formatDetailTime(row.timeValue)}
+                                                            </td>
+                                                            <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-100">
+                                                                {row.symbolLabel}
+                                                            </td>
+                                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${signalTone}`}>
+                                                                    {row.detail.signal || '-'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                                {row.detail.type || '-'}
+                                                            </td>
+                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                                {formatMoney(row.detail.price, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                                            </td>
+                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                                {formatNumber(row.detail.volume, selectedAccount?.moneyFormat || '#,###.##')}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-gray-400">
+                                                                <div className="max-w-[280px] truncate" title={row.noteText || ''}>
+                                                                    {row.noteText || '-'}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div className="px-3 py-4 text-xs text-gray-500">
+                                        No trade details for this day.
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

@@ -184,8 +184,8 @@ const Trades = () => {
                                         {trade.trade_status}
                                     </span>
                                 </td>
-                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {trade.pnl != null ? formatNumber(trade.pnl, selectedAccount?.moneyFormat || '#,###.##') : '-'}
+                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {trade.derivedPnl != null ? formatNumber(trade.derivedPnl, selectedAccount?.moneyFormat || '#,###.##') : '-'}
                                 </td>
                                 <td className="p-4 text-right flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                     <button
