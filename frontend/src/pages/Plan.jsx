@@ -911,7 +911,7 @@ const Plan = () => {
                         </div>
                     )}
 
-                    {!isWeekly && (
+                    {!isWeekly && executedDetailRows.length > 0 && (
                         <div className="px-4 pb-4">
                             <div className="overflow-hidden rounded-xl border border-gray-700 bg-gray-950/50">
                                 <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
@@ -923,82 +923,76 @@ const Plan = () => {
                                     </div>
                                 </div>
 
-                                {executedDetailRows.length > 0 ? (
-                                    <div className="overflow-x-auto">
-                                        <table className="min-w-full text-left text-[11px]">
-                                            <thead className="bg-gray-900/80 text-gray-500 uppercase tracking-wider">
-                                                <tr>
-                                                    <th className="px-3 py-2 font-medium">Time</th>
-                                                    <th className="px-3 py-2 font-medium">Symbol</th>
-                                                    <th className="px-3 py-2 font-medium">Signal</th>
-                                                    <th className="px-3 py-2 font-medium">Type</th>
-                                                    <th className="px-3 py-2 font-medium">Price</th>
-                                                    <th className="px-3 py-2 font-medium">Volume</th>
-                                                    <th className="px-3 py-2 font-medium">Note</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-800">
-                                                {executedDetailRows.map(row => {
-                                                    const signalTone = row.detail.signal === 'Entry'
-                                                        ? 'bg-blue-500/15 text-blue-300 border-blue-500/20'
-                                                        : row.detail.signal === 'Stoploss'
-                                                            ? 'bg-red-500/15 text-red-300 border-red-500/20'
-                                                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20';
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full text-left text-[11px]">
+                                        <thead className="bg-gray-900/80 text-gray-500 uppercase tracking-wider">
+                                            <tr>
+                                                <th className="px-3 py-2 font-medium">Time</th>
+                                                <th className="px-3 py-2 font-medium">Symbol</th>
+                                                <th className="px-3 py-2 font-medium">Signal</th>
+                                                <th className="px-3 py-2 font-medium">Type</th>
+                                                <th className="px-3 py-2 font-medium">Price</th>
+                                                <th className="px-3 py-2 font-medium">Volume</th>
+                                                <th className="px-3 py-2 font-medium">Note</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-800">
+                                            {executedDetailRows.map(row => {
+                                                const signalTone = row.detail.signal === 'Entry'
+                                                    ? 'bg-blue-500/15 text-blue-300 border-blue-500/20'
+                                                    : row.detail.signal === 'Stoploss'
+                                                        ? 'bg-red-500/15 text-red-300 border-red-500/20'
+                                                        : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20';
 
-                                                    return (
-                                                        <tr
-                                                            key={row.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            onClick={(e) => {
+                                                return (
+                                                    <tr
+                                                        key={row.id}
+                                                        role="button"
+                                                        tabIndex={0}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleOpenTradeDetail(row.trade);
+                                                        }}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                                e.preventDefault();
                                                                 e.stopPropagation();
                                                                 handleOpenTradeDetail(row.trade);
-                                                            }}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                    handleOpenTradeDetail(row.trade);
-                                                                }
-                                                            }}
-                                                            className="cursor-pointer hover:bg-gray-900/60 transition"
-                                                        >
-                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
-                                                                {formatDetailTime(row.timeValue)}
-                                                            </td>
-                                                            <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-100">
-                                                                {row.symbolLabel}
-                                                            </td>
-                                                            <td className="px-3 py-2 whitespace-nowrap">
-                                                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${signalTone}`}>
-                                                                    {row.detail.signal || '-'}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
-                                                                {row.detail.type || '-'}
-                                                            </td>
-                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
-                                                                {formatMoney(row.detail.price, selectedAccount?.currency, selectedAccount?.moneyFormat)}
-                                                            </td>
-                                                            <td className="px-3 py-2 whitespace-nowrap text-gray-300">
-                                                                {formatNumber(row.detail.volume, selectedAccount?.moneyFormat || '#,###.##')}
-                                                            </td>
-                                                            <td className="px-3 py-2 text-gray-400">
-                                                                <div className="max-w-[280px] truncate" title={row.noteText || ''}>
-                                                                    {row.noteText || '-'}
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                ) : (
-                                    <div className="px-3 py-4 text-xs text-gray-500">
-                                        No trade details for this day.
-                                    </div>
-                                )}
+                                                            }
+                                                        }}
+                                                        className="cursor-pointer hover:bg-gray-900/60 transition"
+                                                    >
+                                                        <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                            {formatDetailTime(row.timeValue)}
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-100">
+                                                            {row.symbolLabel}
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap">
+                                                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${signalTone}`}>
+                                                                {row.detail.signal || '-'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                            {row.detail.type || '-'}
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                            {formatMoney(row.detail.price, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap text-gray-300">
+                                                            {formatNumber(row.detail.volume, selectedAccount?.moneyFormat || '#,###.##')}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-gray-400">
+                                                            <div className="max-w-[280px] truncate" title={row.noteText || ''}>
+                                                                {row.noteText || '-'}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     )}
