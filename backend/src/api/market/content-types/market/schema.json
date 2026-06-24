@@ -28,6 +28,12 @@
       "relation": "oneToMany",
       "target": "api::account.account",
       "mappedBy": "market"
+    },
+    "scoreds": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::scored.scored",
+      "mappedBy": "Market"
     }
   }
 }

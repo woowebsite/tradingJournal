@@ -60,6 +60,16 @@
       "target": "api::trade-detail.trade-detail",
       "mappedBy": "trade"
     },
+    "scoreds": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::scored.scored",
+      "inversedBy": "trades"
+    },
+    "scored": {
+      "type": "integer",
+      "default": 0
+    },
     "pnl": {
       "type": "decimal"
     }

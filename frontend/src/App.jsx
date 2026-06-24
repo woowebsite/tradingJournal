@@ -5,6 +5,7 @@ import Settings from './pages/Settings';
 import Trades from './pages/Trades';
 import Accounts from './pages/Accounts';
 import ManageMarket from './pages/ManageMarket';
+import ManageScored from './pages/ManageScored';
 import ManageRules from './pages/ManageRules';
 import ManageStrategies from './pages/ManageStrategies';
 import Signals from './pages/Signals';
@@ -48,6 +49,7 @@ function App() {
             <Route path="signals" element={<Signals />} />
             <Route path="tcbs-strategy-signals" element={<TCBSStrategySignals />} />
             <Route path="manage-market" element={<ManageMarket />} />
+            <Route path="manage-scored" element={<ManageScored />} />
             <Route path="manage-rules" element={<ManageRules />} />
             <Route path="manage-strategies" element={<ManageStrategies />} />
             <Route path="manage-watchlists" element={<ManageWatchlists />} />

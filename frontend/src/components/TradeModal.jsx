@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols } from '../features/symbolSlice';
 import { X, Check } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { fetchLatestHistory, fetchBatchLatestMinutePrices } from '../features/marketSlice';
@@ -14,6 +15,8 @@ const getLocalDateTimeInputValue = (date = new Date()) => {
   const local = new Date(date.getTime() - offset * 60000);
   return local.toISOString().slice(0, 16);
 };
+
+const getRelationId = (relation) => relation?.documentId || relation?.id || '';
 
 const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
   const { selectedAccount } = useAccount();
@@ -31,6 +34,9 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
 
   const [currentPrice, setCurrentPrice] = useState('');
   const [executingOrder, setExecutingOrder] = useState(false);
+  const [scoredItems, setScoredItems] = useState([]);
+  const [selectedScoredIds, setSelectedScoredIds] = useState([]);
+  const [loadingScoredItems, setLoadingScoredItems] = useState(false);
 
   // Helper to format currency
   const formatPrice = (price) => {
@@ -106,6 +112,27 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
     return openVol * (parseFloat(currentPrice) - avgBuyPrice);
   };
 
+  const fetchScoredForMarket = async (marketId) => {
+    if (!marketId) {
+      setScoredItems([]);
+      setSelectedScoredIds(prev => prev.filter(Boolean));
+      return;
+    }
+
+    try {
+      setLoadingScoredItems(true);
+      const res = await api.get(`/scoreds?filters[Market][documentId][$eq]=${marketId}&sort=Label:asc&pagination[pageSize]=1000&populate=Market`);
+      const items = res.data.data || [];
+      setScoredItems(items);
+      setSelectedScoredIds(prev => prev.filter(id => items.some(item => getRelationId(item) === id)));
+    } catch (error) {
+      console.error('Failed to load scored items:', error);
+      setScoredItems([]);
+    } finally {
+      setLoadingScoredItems(false);
+    }
+  };
+
   // Fetch current price when symbol changes
   useEffect(() => {
     if (isOpen && formData.symbol) {
@@ -138,6 +165,24 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
       }
     }
   }, [isOpen, formData.symbol, symbols, dispatch]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (initialData) {
+      setSelectedScoredIds((initialData.scoreds || []).map(item => item.documentId || item.id).filter(Boolean));
+    } else {
+      setSelectedScoredIds([]);
+    }
+  }, [initialData, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const selectedSymbol = symbols.find(s => (s.documentId || s.id) === formData.symbol);
+    const marketId = selectedSymbol?.market?.documentId || selectedSymbol?.market?.id || selectedAccount?.market?.documentId || selectedAccount?.market?.id || '';
+    fetchScoredForMarket(marketId);
+  }, [isOpen, formData.symbol, symbols, selectedAccount]);
 
   useEffect(() => {
     if (isOpen) {
@@ -202,6 +247,14 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
     setFormData(prev => ({ ...prev, trade_details: newDetails }));
   };
 
+  const toggleScored = (scoredId) => {
+    setSelectedScoredIds(prev => (
+      prev.includes(scoredId)
+        ? prev.filter(id => id !== scoredId)
+        : [...prev, scoredId]
+    ));
+  };
+
   const addDetail = () => {
     setFormData(prev => ({
       ...prev,
@@ -230,6 +283,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
 
     const payload = {
       ...formData,
+      scoreds: selectedScoredIds,
       // Pass details as is, formatted
       trade_details: formData.trade_details.map(d => ({
         ...d,
@@ -333,6 +387,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
         price: parseFloat(d.price) || 0,
         volume: parseFloat(d.volume) || 0
       })),
+      scoreds: selectedScoredIds,
       trade_status: 'Closed',
       account: selectedAccount.documentId || Number(selectedAccount.id),
       pnl: realizedPnl
@@ -531,6 +586,47 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
               <div className="text-gray-400">Total Vol: <span className="text-white font-mono">{formatNumber(totalVolume, '#,###.####')}</span></div>
               <div className="text-gray-400">Avg Price: <span className="text-white font-mono">{formatPrice(avgPrice)}</span></div>
             </div>
+          </div>
+
+          {/* Scored Checkboxes */}
+          <div className="pt-1">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider">Scored</h4>
+              <span className="text-xs text-gray-500">
+                {selectedScoredIds.length} selected
+              </span>
+            </div>
+
+            {loadingScoredItems ? (
+              <div className="text-sm text-gray-500">Loading scored items...</div>
+            ) : scoredItems.length === 0 ? (
+              <div className="text-sm text-gray-500">
+                No scored items found for this market.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {scoredItems.map(item => {
+                  const scoredId = getRelationId(item);
+                  const isSelected = selectedScoredIds.includes(scoredId);
+                  return (
+                    <label
+                      key={scoredId}
+                      className={`flex items-start gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition ${isSelected ? 'bg-blue-500/10' : 'bg-gray-800/20 hover:bg-gray-800/35'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleScored(scoredId)}
+                        className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500 focus:ring-blue-500"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-100">{item.Label || item.label || 'Untitled'}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
 

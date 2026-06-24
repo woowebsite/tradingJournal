@@ -35,13 +35,8 @@ export default {
       });
     });
 
-    // Grant public access to trade, account, strategy endpoints
-    const publicRole = await strapi.db.query('plugin::users-permissions.role').findOne({
-      where: { type: 'public' },
-    });
-
-    if (publicRole) {
-      const permissionsToEnable = [
+    // Grant access to trade, account, strategy endpoints
+    const permissionsToEnable = [
         'api::trade.trade.find',
         'api::trade.trade.findOne',
         'api::trade.trade.create',
@@ -77,6 +72,11 @@ export default {
         'api::market.market.create',
         'api::market.market.update',
         'api::market.market.delete',
+        'api::scored.scored.find',
+        'api::scored.scored.findOne',
+        'api::scored.scored.create',
+        'api::scored.scored.update',
+        'api::scored.scored.delete',
         'api::webhook-signal.webhook-signal.find',
         'api::webhook-signal.webhook-signal.findOne',
         'api::webhook-signal.webhook-signal.update',
@@ -86,13 +86,21 @@ export default {
         'api::market-flow.market-flow.create',
         'api::industry.industry.find',
         'api::industry.industry.findOne',
-      ];
+    ];
 
-      // Find permission IDs
+    const rolesToGrant = ['public', 'authenticated'];
+
+    for (const roleType of rolesToGrant) {
+      const role = await strapi.db.query('plugin::users-permissions.role').findOne({
+        where: { type: roleType },
+      });
+
+      if (!role) continue;
+
       const permissions = await strapi.db.query('plugin::users-permissions.permission').findMany({
         where: {
           action: { $in: permissionsToEnable },
-          role: publicRole.id,
+          role: role.id,
         },
       });
 
@@ -104,11 +112,11 @@ export default {
           return strapi.db.query('plugin::users-permissions.permission').create({
             data: {
               action,
-              role: publicRole.id,
+              role: role.id,
             },
           });
         }));
-        strapi.log.info('Updated public permissions for Trading Journal API');
+        strapi.log.info(`Updated ${roleType} permissions for Trading Journal API`);
       }
     }
   },

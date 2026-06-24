@@ -591,6 +591,7 @@ export interface ApiMarketMarket extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     Name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    scoreds: Schema.Attribute.Relation<'oneToMany', 'api::scored.scored'>;
     symbols: Schema.Attribute.Relation<'oneToMany', 'api::symbol.symbol'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -719,6 +720,38 @@ export interface ApiRuleRule extends Struct.CollectionTypeSchema {
     Type: Schema.Attribute.Enumeration<
       ['entry', 'takeprofit', 'stoploss', 'exit']
     >;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiScoredScored extends Struct.CollectionTypeSchema {
+  collectionName: 'scoreds';
+  info: {
+    description: 'Scored definitions grouped by market';
+    displayName: 'Scored';
+    pluralName: 'scoreds';
+    singularName: 'scored';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    Description: Schema.Attribute.Text;
+    Label: Schema.Attribute.String & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::scored.scored'
+    > &
+      Schema.Attribute.Private;
+    Market: Schema.Attribute.Relation<'manyToOne', 'api::market.market'>;
+    publishedAt: Schema.Attribute.DateTime;
+    trades: Schema.Attribute.Relation<'manyToMany', 'api::trade.trade'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1073,6 +1106,8 @@ export interface ApiTradeTrade extends Struct.CollectionTypeSchema {
     note: Schema.Attribute.Blocks;
     pnl: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
+    scored: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    scoreds: Schema.Attribute.Relation<'manyToMany', 'api::scored.scored'>;
     strategy: Schema.Attribute.Relation<'manyToOne', 'api::strategy.strategy'>;
     symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
     trade_details: Schema.Attribute.Relation<
@@ -1724,6 +1759,7 @@ declare module '@strapi/strapi' {
       'api::plan.plan': ApiPlanPlan;
       'api::roadmap.roadmap': ApiRoadmapRoadmap;
       'api::rule.rule': ApiRuleRule;
+      'api::scored.scored': ApiScoredScored;
       'api::setting.setting': ApiSettingSetting;
       'api::signal.signal': ApiSignalSignal;
       'api::strategy.strategy': ApiStrategyStrategy;

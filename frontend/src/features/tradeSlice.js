@@ -19,7 +19,7 @@ export const fetchTrades = createAsyncThunk(
             // If the user passes a raw query string or object, adapting is tricky without 'qs'.
             // Let's implement specific action for Account Detail first: fetchAccountTrades
 
-            let url = '/trades?populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot';
+            let url = '/trades?populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot&populate[3]=scoreds&populate[4]=scoreds.Market';
             if (params.accountId) {
                 // Determine if documentId or id
                 // Assuming documentId is safer for v5, relying on caller to pass correct ID type
@@ -50,7 +50,7 @@ export const fetchOpenTrades = createAsyncThunk(
     'trades/fetchOpenTrades',
     async ({ accountId }, { rejectWithValue }) => {
         try {
-            const url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Open&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot`;
+            const url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Open&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot&populate[3]=scoreds&populate[4]=scoreds.Market`;
             const res = await api.get(url);
             return res.data.data;
         } catch (error) {
@@ -63,7 +63,7 @@ export const fetchClosedTrades = createAsyncThunk(
     'trades/fetchClosedTrades',
     async ({ accountId, strategyId }, { rejectWithValue }) => {
         try {
-            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot`;
+            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot&populate[3]=scoreds&populate[4]=scoreds.Market`;
             // if (strategyId) {
             //     url += `&filters[strategy][documentId][$eq]=${strategyId}`;
             // }
@@ -93,6 +93,7 @@ export const saveTrade = createAsyncThunk(
 
             // Convert Note to Blocks
             tradePayload.note = createBlocksFromText(tradePayload.note);
+            tradePayload.scored = Array.isArray(tradePayload.scoreds) ? tradePayload.scoreds.length : 0;
 
             // 2. Save Parent Trade (Create or Update)
             let savedTradeId;
@@ -261,6 +262,7 @@ export const executeSignalTrade = createAsyncThunk(
                 date: new Date().toISOString(),
                 account: accountId,
                 symbol: symbolId,
+                scored: 0,
             };
 
             const tradeRes = await api.post('/trades', { data: tradePayload });
