@@ -29,7 +29,8 @@ const Sidebar = () => {
                         { label: 'Calendar', path: '/journal-calendar' },
                         { label: 'Plan', path: '/journal-plan' },
                         { label: 'Trades', path: '/trades' },
-                        { label: 'Journal', path: '/journal-trade' }
+                        { label: 'Journal', path: '/journal-trade' },
+                        { label: 'Analysis', path: '/journal-analysis' }
                     ]
                 },
                 {

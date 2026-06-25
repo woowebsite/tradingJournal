@@ -21,6 +21,7 @@ import AccountDetail from './pages/AccountDetail';
 import Journal from './pages/Journal';
 import JournalCalendar from './pages/JournalCalendar';
 import JournalTrade from './pages/JournalTrade';
+import JournalAnalysis from './pages/JournalAnalysis';
 import Plan from './pages/Plan';
 import Roadmap from './pages/Roadmap';
 import TCBSStrategySignals from './pages/TCBSStrategySignals';
@@ -45,6 +46,7 @@ function App() {
             <Route path="journal-plan" element={<Plan />} />
             <Route path="journal-roadmap" element={<Roadmap />} />
             <Route path="journal-trade" element={<JournalTrade />} />
+            <Route path="journal-analysis" element={<JournalAnalysis />} />
             <Route path="settings" element={<Settings />} />
             <Route path="signals" element={<Signals />} />
             <Route path="tcbs-strategy-signals" element={<TCBSStrategySignals />} />
