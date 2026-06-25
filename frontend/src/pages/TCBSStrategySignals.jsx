@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSelector } from 'react-redux';
 import { Bell, RefreshCw, TrendingUp, Loader2, X } from 'lucide-react';
 import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals, getStrategyDetail, syncStrategyDetail, getAllStrategyDetails, getBacktestConclusion } from '../services/tcbsStrategy';
-import { useAccount } from '../context/AccountContext';
+import api from '../services/api';
 
 const DEFAULT_PARAMS = {
     strategyKey: 'price_volume_increase',
@@ -209,14 +208,14 @@ const getConclusionMessage = (item) => {
 };
 
 const TCBSStrategySignals = () => {
-    const { selectedAccount } = useAccount();
-    const { items: watchlists } = useSelector(state => state.watchlists);
     const [strategyKey, setStrategyKey] = useState(DEFAULT_PARAMS.strategyKey);
     const [ticker, setTicker] = useState(DEFAULT_PARAMS.ticker);
     const [summary, setSummary] = useState(null);
     const [signals, setSignals] = useState([]);
     const [recentSignals, setRecentSignals] = useState([]);
     const [bestStrategies, setBestStrategies] = useState([]);
+    const [stockSymbols, setStockSymbols] = useState([]);
+    const [loadingStockSymbols, setLoadingStockSymbols] = useState(false);
     const [strategyProbabilityTotals, setStrategyProbabilityTotals] = useState([]);
     const [backtestConclusion, setBacktestConclusion] = useState([]);
     const [loadingConclusion, setLoadingConclusion] = useState(false);
@@ -233,33 +232,42 @@ const TCBSStrategySignals = () => {
     const [detailOpen, setDetailOpen] = useState(false);
     const [loadingDetail, setLoadingDetail] = useState(false);
     const [detailData, setDetailData] = useState(null);
-    const accountWatchlists = useMemo(() => {
-        if (!selectedAccount || !watchlists?.length) return [];
-
-        const currentAccId = selectedAccount.documentId || selectedAccount.id;
-        return watchlists.filter((watchlist) => {
-            const watchlistAccId = watchlist.account?.documentId || watchlist.account?.id;
-            return watchlistAccId === currentAccId;
-        });
-    }, [selectedAccount, watchlists]);
 
     const tickerOptions = useMemo(() => {
-        if (!accountWatchlists.length) return [];
-
         const seen = new Set();
         const result = [];
 
-        accountWatchlists.forEach((watchlist) => {
-            (watchlist.symbols || []).forEach((symbol) => {
-                const name = String(symbol?.Name || '').trim().toUpperCase();
-                if (!name || seen.has(name)) return;
-                seen.add(name);
-                result.push(symbol);
-            });
+        stockSymbols.forEach((symbol) => {
+            const name = String(symbol?.Name || '').trim().toUpperCase();
+            if (!name || seen.has(name)) return;
+            seen.add(name);
+            result.push({ ...symbol, Name: name });
         });
 
         return result.sort((a, b) => String(a.Name || '').localeCompare(String(b.Name || '')));
-    }, [accountWatchlists]);
+    }, [stockSymbols]);
+
+    useEffect(() => {
+        const loadStockSymbols = async () => {
+            setLoadingStockSymbols(true);
+            setError(null);
+
+            try {
+                const response = await api.get(
+                    '/symbols?populate=market&filters[market][Name][$eq]=Stocks&sort=Name:asc&pagination[pageSize]=1000'
+                );
+                setStockSymbols(response.data.data || []);
+            } catch (err) {
+                console.error('Failed to load stock symbols:', err);
+                setError(err.response?.data?.error?.message || err.message || 'Failed to load stock symbols');
+                setStockSymbols([]);
+            } finally {
+                setLoadingStockSymbols(false);
+            }
+        };
+
+        loadStockSymbols();
+    }, []);
 
     useEffect(() => {
         const nextTicker = tickerOptions[0]?.Name || '';
@@ -540,10 +548,12 @@ const TCBSStrategySignals = () => {
                             value={ticker}
                             onChange={(event) => setTicker(event.target.value.toUpperCase())}
                             className="bg-transparent text-white text-sm font-semibold outline-none cursor-pointer focus:ring-0 focus:border-transparent"
-                            disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
+                            disabled={loading || syncingAll || syncingDetailAll || loadingDetail || loadingStockSymbols || tickerOptions.length === 0}
                         >
-                            {tickerOptions.length === 0 ? (
-                                <option value="" className="bg-gray-900">No symbols</option>
+                            {loadingStockSymbols ? (
+                                <option value="" className="bg-gray-900">Loading stocks...</option>
+                            ) : tickerOptions.length === 0 ? (
+                                <option value="" className="bg-gray-900">No stock symbols</option>
                             ) : (
                                 tickerOptions.map((symbol) => (
                                     <option key={symbol.documentId || symbol.id || symbol.Name} value={symbol.Name} className="bg-gray-900">
