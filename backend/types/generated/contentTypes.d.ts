@@ -934,6 +934,40 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiTcbsRecommenTcbsRecommen
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'tcbs_recommens';
+  info: {
+    displayName: 'TCBSRecommen';
+    pluralName: 'tcbs-recommens';
+    singularName: 'tcbs-recommen';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    d: Schema.Attribute.Date & Schema.Attribute.Required;
+    listHisBuy: Schema.Attribute.JSON;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::tcbs-recommen.tcbs-recommen'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.Text;
+    ticker: Schema.Attribute.String & Schema.Attribute.Required;
+    type: Schema.Attribute.Integer;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    value: Schema.Attribute.Decimal;
+  };
+}
+
 export interface ApiTcbsStrategyDetailTcbsStrategyDetail
   extends Struct.CollectionTypeSchema {
   collectionName: 'tcbs_strategy_details';
@@ -1765,6 +1799,7 @@ declare module '@strapi/strapi' {
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
       'api::symbol.symbol': ApiSymbolSymbol;
+      'api::tcbs-recommen.tcbs-recommen': ApiTcbsRecommenTcbsRecommen;
       'api::tcbs-strategy-detail.tcbs-strategy-detail': ApiTcbsStrategyDetailTcbsStrategyDetail;
       'api::tcbs-strategy-signal.tcbs-strategy-signal': ApiTcbsStrategySignalTcbsStrategySignal;
       'api::tcbs-strategy.tcbs-strategy': ApiTcbsStrategyTcbsStrategy;

@@ -25,6 +25,7 @@ import JournalAnalysis from './pages/JournalAnalysis';
 import Plan from './pages/Plan';
 import Roadmap from './pages/Roadmap';
 import TCBSStrategySignals from './pages/TCBSStrategySignals';
+import TCBSRecommendations from './pages/TCBSRecommendations';
 import { AccountProvider } from './context/AccountContext';
 
 function App() {
@@ -50,6 +51,7 @@ function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="signals" element={<Signals />} />
             <Route path="tcbs-strategy-signals" element={<TCBSStrategySignals />} />
+            <Route path="tcbs-recommendation" element={<TCBSRecommendations />} />
             <Route path="manage-market" element={<ManageMarket />} />
             <Route path="manage-scored" element={<ManageScored />} />
             <Route path="manage-rules" element={<ManageRules />} />
