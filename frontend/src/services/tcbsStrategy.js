@@ -98,3 +98,27 @@ export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NN
     const response = await api.get(`/tcbs-strategies/sync-detail?${params.toString()}`, { headers });
     return response.data.data;
 };
+
+export const getBacktestConclusion = async (ticker = 'All') => {
+    const normalizedTicker = String(ticker || 'All').trim() || 'All';
+    const token = import.meta.env.VITE_TCBS_TOKEN;
+    const headers = {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+    };
+
+    if (token && /^[\x00-\x7F]+$/.test(token)) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(
+        `/api-tcbs/tcbs-hfc-data/v2/digital/backtest-conclusion?ticker=${encodeURIComponent(normalizedTicker)}`,
+        { method: 'GET', headers }
+    );
+
+    if (!response.ok) {
+        throw new Error(`TCBS backtest conclusion API error: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
+};
