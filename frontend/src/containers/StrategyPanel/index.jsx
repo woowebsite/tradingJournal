@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Activity } from 'lucide-react';
+import { Activity, Sparkles, TrendingUp } from 'lucide-react';
 import { fetchClosedTrades } from '../../features/tradeSlice';
 import { useAccount } from '../../context/AccountContext';
-import RecentTradeBox from '../../components/RecentTradeBox';
+import RecentTradeBox from '../RecentTradeBox';
+import TCBSRecommendPanel from '../TCBSRecommendPanel';
+import TCBSSignalPanel from '../TCBSSignalPanel';
 
-const StrategyPanel = ({ activeStrategy, allSignals, trades }) => {
+const StrategyPanel = ({ activeStrategy, allSignals, trades, recommendations = [], tcbsSignals = [], loadingTcbsInsights = false }) => {
     const [activeTab, setActiveTab] = useState('summary');
     const dispatch = useDispatch();
     const { selectedAccount } = useAccount();
@@ -101,6 +103,20 @@ const StrategyPanel = ({ activeStrategy, allSignals, trades }) => {
                 >
                     Recent Trades ({trades ? trades.length : 0})
                 </button>
+                <button
+                    onClick={() => setActiveTab('recommendation')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'recommendation' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <Sparkles size={14} className={activeTab === 'recommendation' ? 'text-amber-300' : 'text-gray-500'} />
+                    Recommendation ({recommendations.length})
+                </button>
+                <button
+                    onClick={() => setActiveTab('tcbsSignals')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'tcbsSignals' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <TrendingUp size={14} className={activeTab === 'tcbsSignals' ? 'text-green-400' : 'text-gray-500'} />
+                    Signals ({tcbsSignals.length})
+                </button>
             </div>
             <div className="p-2 overflow-y-auto custom-scrollbar flex-1 text-sm text-gray-300">
                 {activeTab === 'summary' ? (
@@ -142,8 +158,12 @@ const StrategyPanel = ({ activeStrategy, allSignals, trades }) => {
                     ) : (
                         <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>
                     )
-                ) : (
+                ) : activeTab === 'trades' ? (
                     <RecentTradeBox trades={trades || []} onTradeClick={(trade) => console.log('Clicked trade:', trade)} />
+                ) : activeTab === 'recommendation' ? (
+                    <TCBSRecommendPanel recommendations={recommendations} loading={loadingTcbsInsights} />
+                ) : (
+                    <TCBSSignalPanel signals={tcbsSignals} loading={loadingTcbsInsights} />
                 )}
             </div>
         </div>

@@ -11,7 +11,7 @@ import { formatNumber } from '../utils/formatNumber';
 import { calculateSymbolOpenVolume, calculateSymbolOpenPnL } from '../utils/tradeCalculations';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
-import RecentTradeBox from '../components/RecentTradeBox';
+import RecentTradeBox from '../containers/RecentTradeBox';
 
 const AccountDetail = () => {
     const { id } = useParams();

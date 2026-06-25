@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
 import dayjs from 'dayjs';
-import RecentTradeBox from '../components/RecentTradeBox';
+import RecentTradeBox from './RecentTradeBox';
 
 const SignalPanel = ({ trades, signals }) => {
     const [activeTab, setActiveTab] = useState('signals');

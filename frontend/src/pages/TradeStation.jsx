@@ -11,6 +11,8 @@ import TechnicalPanel from '../containers/TechnicalPanel';
 import SignalPanel from '../containers/SignalPanel';
 import { Search, RefreshCw } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import { getTcbsRecommendations } from '../services/tcbsRecommendation';
+import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
@@ -20,6 +22,9 @@ const TradeStation = () => {
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
     const [selectedSymbolId, setSelectedSymbolId] = useState(null);
+    const [tcbsRecommendations, setTcbsRecommendations] = useState([]);
+    const [tcbsRecentSignals, setTcbsRecentSignals] = useState([]);
+    const [loadingTcbsInsights, setLoadingTcbsInsights] = useState(false);
     const symbolParam = searchParams.get('symbol');
 
     useEffect(() => {
@@ -64,6 +69,35 @@ const TradeStation = () => {
     }, [dispatch, selectedAccount]);
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
+
+    useEffect(() => {
+        const loadTcbsInsights = async () => {
+            const ticker = selectedSymbol?.Name?.trim().toUpperCase();
+            if (!ticker) {
+                setTcbsRecommendations([]);
+                setTcbsRecentSignals([]);
+                return;
+            }
+
+            setLoadingTcbsInsights(true);
+            try {
+                const [recommendations, recentSignals] = await Promise.all([
+                    getTcbsRecommendations({ ticker }),
+                    fetchRecentTcbsStrategySignals(ticker),
+                ]);
+                setTcbsRecommendations(recommendations);
+                setTcbsRecentSignals(recentSignals);
+            } catch (err) {
+                console.error('Failed to load TCBS insights for trade station:', err);
+                setTcbsRecommendations([]);
+                setTcbsRecentSignals([]);
+            } finally {
+                setLoadingTcbsInsights(false);
+            }
+        };
+
+        loadTcbsInsights();
+    }, [selectedSymbol?.Name]);
 
     // Active Strategy Look-up
     const activeStrategyId = (() => {
@@ -145,7 +179,14 @@ const TradeStation = () => {
                     </div>
 
                     {/* Strategy Panel */}
-                    <StrategyPanel activeStrategy={activeStrategy} allSignals={allSignals} trades={symbolTrades} />
+                    <StrategyPanel
+                        activeStrategy={activeStrategy}
+                        allSignals={allSignals}
+                        trades={symbolTrades}
+                        recommendations={tcbsRecommendations}
+                        tcbsSignals={tcbsRecentSignals}
+                        loadingTcbsInsights={loadingTcbsInsights}
+                    />
                 </div>
                 <div className="w-80 flex flex-col gap-4 h-full shrink-0">
                     <SignalPanel trades={symbolTrades} signals={symbolSignals} />
