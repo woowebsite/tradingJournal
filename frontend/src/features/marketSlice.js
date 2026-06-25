@@ -31,7 +31,7 @@ export const fetchHistories = createAsyncThunk(
     'market/fetchHistories',
     async (filterSymbolId, { rejectWithValue }) => {
         try {
-            let url = '/symbol-histories?populate=symbol&sort=date:desc';
+            let url = '/symbol-histories?populate=symbol&sort=date:desc&pagination[pageSize]=1000';
             if (filterSymbolId) {
                 url += `&filters[symbol][documentId][$eq]=${filterSymbolId}`;
             }

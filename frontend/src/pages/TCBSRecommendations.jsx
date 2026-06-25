@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
-import { getTcbsRecommendationOptions, getTcbsRecommendations } from '../services/tcbsRecommendation';
+import { getTcbsRecommendationOptions, getTcbsRecommendations, syncTcbsRecommendations } from '../services/tcbsRecommendation';
 
 const getTypeLabel = (type) => {
     const labels = {
@@ -63,13 +63,17 @@ const TCBSRecommendations = () => {
         }
     };
 
-    const loadRecommendations = async ({ ticker = selectedTicker, type = selectedType } = {}) => {
+    const loadRecommendations = async ({ ticker = selectedTicker, type = selectedType, sync = false } = {}) => {
         setLoading(true);
         setError(null);
 
         try {
+            if (sync) {
+                await syncTcbsRecommendations();
+            }
+
             const data = await getTcbsRecommendations({ ticker, type });
-            setRecommendations(data);
+            setRecommendations(Array.isArray(data) ? data : []);
         } catch (err) {
             console.error('Failed to load TCBS recommendations:', err);
             setError(err.response?.data?.error?.message || err.message || 'Failed to load TCBS recommendations.');
@@ -131,7 +135,7 @@ const TCBSRecommendations = () => {
                     </div>
 
                     <button
-                        onClick={() => loadRecommendations()}
+                        onClick={() => loadRecommendations({ sync: true })}
                         disabled={loading}
                         className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 font-semibold text-white shadow-lg shadow-amber-600/20 transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-600/50"
                     >
