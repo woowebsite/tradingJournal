@@ -145,7 +145,7 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
                                 onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                             >
                                 <option value="USD">USD</option>
-                                <option value="VND">VND</option>
+                                <option value="tr">tr</option>
                                 <option value="EUR">EUR</option>
                                 <option value="USDT">USDT</option>
                             </select>

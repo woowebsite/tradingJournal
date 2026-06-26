@@ -481,11 +481,10 @@ const Roadmap = () => {
                                 key={preset}
                                 type="button"
                                 onClick={() => setTargetGrowth(String(preset))}
-                                className={`rounded-xl border px-4 py-3 text-left transition ${
-                                    String(targetGrowth) === String(preset)
-                                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 shadow-lg shadow-emerald-500/10'
-                                        : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800'
-                                }`}
+                                className={`rounded-xl border px-4 py-3 text-left transition ${String(targetGrowth) === String(preset)
+                                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 shadow-lg shadow-emerald-500/10'
+                                    : 'border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800'
+                                    }`}
                             >
                                 <div className="text-xs uppercase tracking-wider text-gray-500">Target</div>
                                 <div className="mt-1 text-xl font-black">+{preset}%</div>
@@ -587,11 +586,10 @@ const Roadmap = () => {
                                         return (
                                             <tr
                                                 key={row.tradeNumber}
-                                                className={`transition ${
-                                                    isTargetRow
-                                                        ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/40 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.18)]'
-                                                        : 'hover:bg-gray-800/70'
-                                                }`}
+                                                className={`transition ${isTargetRow
+                                                    ? 'bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/40 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.18)]'
+                                                    : 'hover:bg-gray-800/70'
+                                                    }`}
                                             >
                                                 <td className="px-4 py-3 font-semibold text-white">
                                                     <div className="flex items-center gap-2">
@@ -603,11 +601,11 @@ const Roadmap = () => {
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 font-mono text-gray-300">{formatMoney(row.startEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="px-4 py-3 font-mono text-emerald-300">{formatMoney(row.winEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="px-4 py-3 font-mono text-emerald-400">+{formatMoney(row.winProfit, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="px-4 py-3 font-mono text-red-300">{formatMoney(row.lossEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="px-4 py-3 font-mono text-red-400">-{formatMoney(row.lossAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-gray-300">{formatMoney(row.startEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-emerald-300">{formatMoney(row.winEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-emerald-400">+{formatMoney(row.winProfit, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-red-300">{formatMoney(row.lossEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-red-400">-{formatMoney(row.lossAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-3">
                                                         <div className="h-2 w-28 rounded-full bg-gray-700 overflow-hidden">
@@ -706,11 +704,10 @@ const Roadmap = () => {
                     {milestones.map(item => (
                         <div
                             key={item.growth}
-                            className={`rounded-2xl border p-4 ${
-                                item.recommended
-                                    ? 'border-emerald-500/40 bg-emerald-500/10'
-                                    : 'border-gray-700 bg-gray-900/60'
-                            }`}
+                            className={`rounded-2xl border p-4 ${item.recommended
+                                ? 'border-emerald-500/40 bg-emerald-500/10'
+                                : 'border-gray-700 bg-gray-900/60'
+                                }`}
                         >
                             <div className="flex items-center justify-between">
                                 <div className="text-xs uppercase tracking-wider text-gray-500">Milestone</div>
@@ -718,7 +715,7 @@ const Roadmap = () => {
                             </div>
                             <div className="mt-2 text-2xl font-black text-white">+{item.growth}%</div>
                             <div className="mt-3 space-y-2 text-sm">
-                                <div className="flex justify-between gap-3"><span className="text-gray-400">Target NAV</span><span className="font-mono text-gray-100">{formatMoney(item.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}</span></div>
+                                <div className="flex justify-between gap-3"><span className="text-gray-400">Target NAV</span><span className="whitespace-nowrap font-mono text-gray-100">{formatMoney(item.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}</span></div>
                                 <div className="flex justify-between gap-3"><span className="text-gray-400">Min wins</span><span className="font-mono text-emerald-300">{item.winsOnlyNeeded ?? 'N/A'}</span></div>
                                 <div className="flex justify-between gap-3"><span className="text-gray-400">Wins in plan</span><span className="font-mono text-gray-100">{item.winsNeededInPlannedTrades ?? 'N/A'}</span></div>
                                 <div className="flex justify-between gap-3"><span className="text-gray-400">Est. trades</span><span className="font-mono text-gray-100">{item.estimatedTradesToGoal ?? 'N/A'}</span></div>
@@ -807,11 +804,10 @@ const Roadmap = () => {
                                                     type="button"
                                                     onClick={() => handleProcessRoadmap(item)}
                                                     disabled={savingRoadmap}
-                                                    className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                                                        roadmapStatus === 'process'
-                                                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
-                                                            : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-emerald-500 hover:text-emerald-300'
-                                                    }`}
+                                                    className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${roadmapStatus === 'process'
+                                                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                                                        : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-emerald-500 hover:text-emerald-300'
+                                                        }`}
                                                 >
                                                     <Target size={14} />
                                                     Process
