@@ -5,7 +5,7 @@ export const fetchStrategies = createAsyncThunk(
     'strategies/fetchStrategies',
     async (_, { rejectWithValue }) => {
         try {
-            const res = await api.get('/strategies?sort=name:asc&populate=rules');
+            const res = await api.get('/strategies?sort=name:asc&populate=*');
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);

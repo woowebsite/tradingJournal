@@ -1335,13 +1335,8 @@ const Plan = () => {
                     </div>
 
                     <div className="rounded-2xl border border-gray-700 bg-gray-800 p-4">
-                        <div className={clsx('flex items-center justify-between gap-3', !collapsedBoxes.createPlan && 'mb-4')}>
-                            <div>
-                                <h2 className="text-lg font-bold text-white">{isEditing ? 'Edit Plan' : 'Create Plan'}</h2>
-                                <p className="text-xs text-gray-400 mt-1">
-                                    Gợi ý form: bối cảnh, setup, rủi ro, checklist, và review sau phiên.
-                                </p>
-                            </div>
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="whitespace-nowrap text-lg font-bold text-white">{isEditing ? 'Edit Plan' : 'Create Plan'}</h2>
                             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                                 <button
                                     type="button"
@@ -1380,6 +1375,9 @@ const Plan = () => {
                                 </button>
                             </div>
                         </div>
+                        <p className="create-plan-desc mt-2 mb-4 text-xs text-gray-400">
+                            Gợi ý form: bối cảnh, setup, rủi ro, checklist, và review sau phiên.
+                        </p>
 
                         {!collapsedBoxes.createPlan && (
                             <form id="plan-form" className="max-h-[68vh] space-y-4 overflow-y-auto pr-1" onSubmit={handleSubmit}>

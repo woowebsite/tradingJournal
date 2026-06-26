@@ -43,9 +43,6 @@ const Sidebar = () => {
                         { label: 'Webhook Signals', path: '/webhook-signals' }
                     ]
                 },
-                { icon: List, label: 'Watchlists', path: '/manage-watchlists' },
-                { icon: Tag, label: 'Symbols', path: '/manage-symbols' },
-                { icon: Wallet, label: 'Accounts', path: '/accounts' },
             ]
         },
         {
@@ -58,8 +55,12 @@ const Sidebar = () => {
                     ]
                 },
                 { icon: CheckSquare, label: 'Scored', path: '/manage-scored' },
-                { icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies' },
-                { icon: Activity, label: 'Rules', path: '/manage-rules' },
+                {
+                    icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies',
+                    subItems: [
+                        { label: 'Rules', path: '/manage-rules' },
+                    ]
+                },
                 {
                     icon: Webhook,
                     label: 'Webhooks',
@@ -68,6 +69,9 @@ const Sidebar = () => {
                         { label: 'Manage', path: '/manage-webhooks' },
                     ]
                 },
+                { icon: List, label: 'Watchlists', path: '/manage-watchlists' },
+                { icon: Tag, label: 'Symbols', path: '/manage-symbols' },
+                { icon: Wallet, label: 'Accounts', path: '/accounts' },
             ]
         },
         {
@@ -78,7 +82,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market', '/signals']);
+    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market', '/signals', '/manage-strategies']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>

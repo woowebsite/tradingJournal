@@ -19,6 +19,14 @@
     "description": {
       "type": "text"
     },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "Rules",
+        "Webhook"
+      ],
+      "default": "Rules"
+    },
     "trades": {
       "type": "relation",
       "relation": "oneToMany",
@@ -30,6 +38,12 @@
       "relation": "manyToMany",
       "target": "api::rule.rule",
       "mappedBy": "strategies"
+    },
+    "webhook": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::webhook.webhook",
+      "inversedBy": "strategies"
     },
     "account": {
       "type": "relation",

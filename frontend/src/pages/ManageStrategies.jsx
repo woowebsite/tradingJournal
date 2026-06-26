@@ -3,11 +3,16 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Plus, Edit, Trash2, Save, X, Search } from 'lucide-react';
 import { fetchStrategies, createStrategy, updateStrategy, deleteStrategy } from '../features/strategySlice';
 import { fetchRules } from '../features/ruleSlice';
+import { fetchWebhooks } from '../features/webhookSlice';
 
-const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules }) => {
+/* eslint-disable react-hooks/set-state-in-effect */
+
+const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules, availableWebhooks }) => {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
+        type: 'Rules',
+        webhook: '',
         rules: [] // Array of IDs
     });
     const [showRuleScanner, setShowRuleScanner] = useState(false);
@@ -18,12 +23,16 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules 
             setFormData({
                 name: initialData.name || '',
                 description: initialData.description || '',
+                type: initialData.type || (initialData.webhook ? 'Webhook' : 'Rules'),
+                webhook: initialData.webhook ? (initialData.webhook.documentId || initialData.webhook.id) : '',
                 rules: initialData.rules ? initialData.rules.map(r => r.id || r.documentId) : []
             });
         } else {
             setFormData({
                 name: '',
                 description: '',
+                type: 'Rules',
+                webhook: '',
                 rules: []
             });
         }
@@ -31,7 +40,17 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules 
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        setFormData(prev => {
+            if (name === 'type') {
+                return {
+                    ...prev,
+                    type: value,
+                    webhook: value === 'Webhook' ? prev.webhook : '',
+                    rules: value === 'Rules' ? prev.rules : []
+                };
+            }
+            return { ...prev, [name]: value };
+        });
     };
 
     const handleAddRule = (ruleId) => {
@@ -50,7 +69,11 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules 
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit(formData);
+        onSubmit({
+            ...formData,
+            webhook: formData.type === 'Webhook' ? formData.webhook : null,
+            rules: formData.type === 'Rules' ? formData.rules : []
+        });
     };
 
     // Get full rule objects for selected IDs
@@ -117,104 +140,138 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules 
                         </div>
                     </div>
 
-                    {/* Rules Table */}
                     <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-sm text-gray-400">Associated Rules</label>
-                            {!showRuleScanner && (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowRuleScanner(true)}
-                                    className="text-xs flex items-center gap-1 bg-blue-600/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-600/30 transition"
-                                >
-                                    <Plus size={14} /> Add Rule
-                                </button>
+                        <label className="block text-sm text-gray-400 mb-1">Type</label>
+                        <select
+                            name="type"
+                            value={formData.type}
+                            onChange={handleChange}
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
+                        >
+                            <option value="Rules">Rules</option>
+                            <option value="Webhook">Webhook</option>
+                        </select>
+                    </div>
+
+                    {formData.type === 'Webhook' ? (
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">Webhook</label>
+                            <select
+                                name="webhook"
+                                required
+                                value={formData.webhook}
+                                onChange={handleChange}
+                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
+                            >
+                                <option value="">Select webhook...</option>
+                                {availableWebhooks.map(webhook => (
+                                    <option key={webhook.documentId || webhook.id} value={webhook.documentId || webhook.id}>
+                                        {webhook.Title || webhook.App || webhook.WebhookUrl || 'Untitled webhook'}
+                                    </option>
+                                ))}
+                            </select>
+                            {availableWebhooks.length === 0 && (
+                                <p className="mt-2 text-sm text-gray-500">No webhooks found.</p>
                             )}
                         </div>
-
-                        <div className="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden mb-4">
-                            <table className="w-full text-left text-sm">
-                                <thead className="text-gray-500 bg-gray-800/50">
-                                    <tr>
-                                        <th className="p-3 font-medium">Name</th>
-                                        <th className="p-3 font-medium">Type</th>
-                                        <th className="p-3 font-medium text-right">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700/50">
-                                    {selectedRules.length === 0 ? (
-                                        <tr>
-                                            <td colSpan="3" className="p-4 text-center text-gray-500">No rules added yet.</td>
-                                        </tr>
-                                    ) : (
-                                        selectedRules.map(r => (
-                                            <tr key={r.id || r.documentId}>
-                                                <td className="p-3 text-white">{r.Name}</td>
-                                                <td className="p-3"><TypeBadge type={r.Type} /></td>
-                                                <td className="p-3 text-right">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRemoveRule(r.id || r.documentId)}
-                                                        className="text-red-500 hover:text-red-400"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Inline Rule Scanner */}
-                        {showRuleScanner && (
-                            <div className="mt-4 border border-gray-700 rounded-xl p-4 bg-gray-900/30 animate-in fade-in slide-in-from-top-2 duration-200">
-                                <div className="flex justify-between items-center mb-3">
-                                    <h4 className="font-bold text-gray-300 text-sm">Add Rule</h4>
-                                    <button onClick={() => setShowRuleScanner(false)} className="text-gray-500 hover:text-white">
-                                        <X size={16} />
+                    ) : (
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="block text-sm text-gray-400">Associated Rules</label>
+                                {!showRuleScanner && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowRuleScanner(true)}
+                                        className="text-xs flex items-center gap-1 bg-blue-600/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-600/30 transition"
+                                    >
+                                        <Plus size={14} /> Add Rule
                                     </button>
-                                </div>
-                                <div className="relative mb-3">
-                                    <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
-                                    <input
-                                        type="text"
-                                        placeholder="Search available rules..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
-                                        autoFocus
-                                    />
-                                </div>
-                                <div className="rule-list max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                                    {rulesToSelect.length === 0 ? (
-                                        <p className="text-gray-500 text-center py-4 text-sm">No matching rules found.</p>
-                                    ) : (
-                                        rulesToSelect.map(r => (
-                                            <button
-                                                key={r.id || r.documentId}
-                                                type="button"
-                                                onClick={() => handleAddRule(r.id || r.documentId)}
-                                                className="w-full text-left p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 flex justify-between items-center group transition"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <div>
-                                                        <p className="text-gray-200 font-medium text-sm">{r.Name}</p>
-                                                        <p className="text-gray-500 text-xs">{r.Description}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <TypeBadge type={r.Type} />
-                                                    <Plus size={16} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                </div>
-                                            </button>
-                                        ))
-                                    )}
-                                </div>
+                                )}
                             </div>
-                        )}
-                    </div>
+
+                            <div className="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden mb-4">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="text-gray-500 bg-gray-800/50">
+                                        <tr>
+                                            <th className="p-3 font-medium">Name</th>
+                                            <th className="p-3 font-medium">Type</th>
+                                            <th className="p-3 font-medium text-right">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/50">
+                                        {selectedRules.length === 0 ? (
+                                            <tr>
+                                                <td colSpan="3" className="p-4 text-center text-gray-500">No rules added yet.</td>
+                                            </tr>
+                                        ) : (
+                                            selectedRules.map(r => (
+                                                <tr key={r.id || r.documentId}>
+                                                    <td className="p-3 text-white">{r.Name}</td>
+                                                    <td className="p-3"><TypeBadge type={r.Type} /></td>
+                                                    <td className="p-3 text-right">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveRule(r.id || r.documentId)}
+                                                            className="text-red-500 hover:text-red-400"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {showRuleScanner && (
+                                <div className="mt-4 border border-gray-700 rounded-xl p-4 bg-gray-900/30 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className="flex justify-between items-center mb-3">
+                                        <h4 className="font-bold text-gray-300 text-sm">Add Rule</h4>
+                                        <button onClick={() => setShowRuleScanner(false)} className="text-gray-500 hover:text-white">
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                    <div className="relative mb-3">
+                                        <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
+                                        <input
+                                            type="text"
+                                            placeholder="Search available rules..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div className="rule-list max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                                        {rulesToSelect.length === 0 ? (
+                                            <p className="text-gray-500 text-center py-4 text-sm">No matching rules found.</p>
+                                        ) : (
+                                            rulesToSelect.map(r => (
+                                                <button
+                                                    key={r.id || r.documentId}
+                                                    type="button"
+                                                    onClick={() => handleAddRule(r.id || r.documentId)}
+                                                    className="w-full text-left p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 flex justify-between items-center group transition"
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <div>
+                                                            <p className="text-gray-200 font-medium text-sm">{r.Name}</p>
+                                                            <p className="text-gray-500 text-xs">{r.Description}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <TypeBadge type={r.Type} />
+                                                        <Plus size={16} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                    </div>
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="p-4 border-t border-gray-700 flex justify-end gap-3 bg-gray-900/50">
@@ -243,12 +300,14 @@ const ManageStrategies = () => {
     const dispatch = useDispatch();
     const { items: strategies, loading } = useSelector(state => state.strategies);
     const { items: rules } = useSelector(state => state.rules); // Get rules from store
+    const { items: webhooks } = useSelector(state => state.webhooks);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingStrategy, setEditingStrategy] = useState(null);
 
     useEffect(() => {
         dispatch(fetchStrategies());
         dispatch(fetchRules()); // Fetch rules so we can select them
+        dispatch(fetchWebhooks());
     }, [dispatch]);
 
     const handleCreate = () => {
@@ -330,10 +389,14 @@ const ManageStrategies = () => {
                             {strategy.description || 'No description provided.'}
                         </p>
 
-                        {/* Show rule count */}
+                        {/* Show strategy source */}
                         <div className="mt-auto pt-4 border-t border-gray-700 text-xs text-gray-500 flex justify-between">
-                            <span>Rules</span>
-                            <span className="text-gray-300 font-medium">{strategy.rules?.length || 0}</span>
+                            <span>{strategy.type === 'Webhook' ? 'Webhook' : 'Rules'}</span>
+                            <span className="text-gray-300 font-medium">
+                                {strategy.type === 'Webhook'
+                                    ? (strategy.webhook?.Title || strategy.webhook?.App || '-')
+                                    : `${strategy.rules?.length || 0}`}
+                            </span>
                         </div>
                     </div>
                 ))}
@@ -345,6 +408,7 @@ const ManageStrategies = () => {
                 onSubmit={handleModalSubmit}
                 initialData={editingStrategy}
                 availableRules={rules}
+                availableWebhooks={webhooks}
             />
         </div>
     );

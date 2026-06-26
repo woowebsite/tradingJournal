@@ -850,9 +850,12 @@ export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     rules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
+    type: Schema.Attribute.Enumeration<['Rules', 'Webhook']> &
+      Schema.Attribute.DefaultTo<'Rules'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    webhook: Schema.Attribute.Relation<'manyToOne', 'api::webhook.webhook'>;
   };
 }
 
@@ -1262,6 +1265,10 @@ export interface ApiWebhookWebhook extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    strategies: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::strategy.strategy'
+    >;
     Title: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
