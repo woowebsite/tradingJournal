@@ -28,6 +28,7 @@ import { extractTextFromBlocks } from '../utils/textUtils';
 import { createPlan, deletePlan, listPlans, updatePlan } from '../services/planService';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { formatNumber } from '../utils/formatNumber';
+import { formatMoney } from '../utils/formatMoney';
 import { buildRoadmapProjection, resolveSetting, summarizeClosedTrades, toNumber } from '../utils/roadmapCalculations';
 
 const getLocalDateValue = (date = new Date()) => {
@@ -66,12 +67,6 @@ const getDateValueFromDateLike = (dateLike) => {
     const date = new Date(dateLike);
     if (Number.isNaN(date.getTime())) return '';
     return getLocalDateValue(date);
-};
-
-const formatMoney = (value, currency = 'USD', pattern = '#,###.##') => {
-    const formatted = formatNumber(value, pattern);
-    if (formatted === '-') return '-';
-    return currency ? `${formatted} ${currency}` : formatted;
 };
 
 const formatDetailTime = (dateLike) => {
@@ -977,7 +972,7 @@ const Plan = () => {
                                                             {row.detail.type || '-'}
                                                         </td>
                                                         <td className="px-3 py-2 whitespace-nowrap text-gray-300">
-                                                            {formatMoney(row.detail.price, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                                            {formatMoney(row.detail.price, selectedAccount)}
                                                         </td>
                                                         <td className="px-3 py-2 whitespace-nowrap text-gray-300">
                                                             {formatNumber(row.detail.volume, selectedAccount?.moneyFormat || '#,###.##')}
@@ -1114,7 +1109,7 @@ const Plan = () => {
                             <h2 className="balance text-xl font-black text-white xl:text-2xl">
                                 {currentBalance === null
                                     ? '-'
-                                    : formatMoney(currentBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                    : formatMoney(currentBalance, selectedAccount)}
                             </h2>
                             <p className="mt-1.5 max-w-2xl text-xs text-gray-400 xl:text-sm">
                                 {roadmapSummary
@@ -1125,10 +1120,10 @@ const Plan = () => {
 
                         {roadmapSummary ? (
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-                                <MiniMetric label="Target NAV" value={formatMoney(roadmapSummary.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
-                                <MiniMetric label="Profit needed" value={formatMoney(roadmapSummary.profitTarget, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
-                                <MiniMetric label="Risk / trade" value={formatMoney(roadmapSummary.riskPerTradeAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
-                                <MiniMetric label="Reward / trade" value={formatMoney(roadmapSummary.rewardPerTradeAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)} />
+                                <MiniMetric label="Target NAV" value={formatMoney(roadmapSummary.targetBalance, selectedAccount)} />
+                                <MiniMetric label="Profit needed" value={formatMoney(roadmapSummary.profitTarget, selectedAccount)} />
+                                <MiniMetric label="Risk / trade" value={formatMoney(roadmapSummary.riskPerTradeAmount, selectedAccount)} />
+                                <MiniMetric label="Reward / trade" value={formatMoney(roadmapSummary.rewardPerTradeAmount, selectedAccount)} />
                             </div>
                         ) : null}
                     </div>
@@ -1166,11 +1161,11 @@ const Plan = () => {
                                 </div>
                                 <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
                                     <p className="text-[10px] uppercase tracking-wider text-gray-500">Equity if all wins</p>
-                                    <p className="mt-1 font-semibold text-white">{formatMoney(roadmapSummary.equityAfterPlannedTradesIfAllWins, selectedAccount?.currency, selectedAccount?.moneyFormat)}</p>
+                                    <p className="mt-1 font-semibold text-white">{formatMoney(roadmapSummary.equityAfterPlannedTradesIfAllWins, selectedAccount)}</p>
                                 </div>
                                 <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
                                     <p className="text-[10px] uppercase tracking-wider text-gray-500">Loss Budget</p>
-                                    <p className="mt-1 font-semibold text-white">{formatMoney(roadmapSummary.lossBudget, selectedAccount?.currency, selectedAccount?.moneyFormat)}</p>
+                                    <p className="mt-1 font-semibold text-white">{formatMoney(roadmapSummary.lossBudget, selectedAccount)}</p>
                                 </div>
                                 <div className="rounded-xl border border-gray-700 bg-gray-800/80 p-2.5">
                                     <p className="text-[10px] uppercase tracking-wider text-gray-500">Max Drawdown</p>

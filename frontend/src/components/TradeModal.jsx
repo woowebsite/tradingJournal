@@ -9,6 +9,7 @@ import { extractTextFromBlocks } from '../utils/textUtils';
 import { fetchLatestHistory, fetchBatchLatestMinutePrices } from '../features/marketSlice';
 import useEscapeKey from '../hooks/useEscapeKey';
 import { executeBinanceOrder } from '../services/binanceExecution';
+import CalcVolForm from './CalcVolForm';
 
 const getLocalDateTimeInputValue = (date = new Date()) => {
   const offset = date.getTimezoneOffset();
@@ -17,6 +18,7 @@ const getLocalDateTimeInputValue = (date = new Date()) => {
 };
 
 const getRelationId = (relation) => relation?.documentId || relation?.id || '';
+const getSymbolId = (symbol) => symbol?.documentId || symbol?.id || '';
 
 const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
   const { selectedAccount } = useAccount();
@@ -138,7 +140,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
     if (isOpen && formData.symbol) {
       setCurrentPrice('');
       const symbolId = formData.symbol;
-      const selectedSymbol = symbols.find(s => (s.documentId || s.id) === symbolId);
+      const selectedSymbol = symbols.find(s => String(getSymbolId(s)) === String(symbolId));
 
       const marketName = selectedSymbol?.market?.Name || selectedSymbol?.market?.name || '';
       const symbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
@@ -150,7 +152,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
         dispatch(fetchBatchLatestMinutePrices([selectedSymbol])).then(resultAction => {
           if (fetchBatchLatestMinutePrices.fulfilled.match(resultAction)) {
             const pricesMap = resultAction.payload || {};
-            const realTimePrice = pricesMap[symbolId];
+            const realTimePrice = pricesMap[symbolId] ?? pricesMap[selectedSymbol.id] ?? pricesMap[selectedSymbol.documentId];
             if (realTimePrice !== undefined && realTimePrice !== null) {
               setCurrentPrice(realTimePrice);
             }
@@ -179,7 +181,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
   useEffect(() => {
     if (!isOpen) return;
 
-    const selectedSymbol = symbols.find(s => (s.documentId || s.id) === formData.symbol);
+    const selectedSymbol = symbols.find(s => String(getSymbolId(s)) === String(formData.symbol));
     const marketId = selectedSymbol?.market?.documentId || selectedSymbol?.market?.id || selectedAccount?.market?.documentId || selectedAccount?.market?.id || '';
     fetchScoredForMarket(marketId);
   }, [isOpen, formData.symbol, symbols, selectedAccount]);
@@ -331,7 +333,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
     if (isBinanceAccount) {
       setExecutingOrder(true);
       try {
-        const selectedSymbol = symbols.find(s => (s.documentId || s.id) === formData.symbol);
+        const selectedSymbol = symbols.find(s => String(getSymbolId(s)) === String(formData.symbol));
         const symbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
         if (!symbolName) {
           throw new Error('Symbol details not found to place order on Binance.');
@@ -409,7 +411,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+      <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-6xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
           <h3 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
             {initialData ? 'Edit Trade' : 'New Trade'}
@@ -419,7 +421,9 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1">
+          <div className={initialData ? 'space-y-6' : 'grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6'}>
+            <div className="space-y-6">
           {/* Top Row: Symbol & Type */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -433,7 +437,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
               >
                 <option value="">Select Symbol</option>
                 {symbols.map(s => (
-                  <option key={s.id} value={s.documentId}>{s.Name}</option>
+                  <option key={getSymbolId(s)} value={getSymbolId(s)}>{s.Name}</option>
                 ))}
               </select>
             </div>
@@ -683,6 +687,17 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
                 Save Trade
               </button>
             </div>
+          </div>
+            </div>
+            {!initialData && (
+              <div className="lg:sticky lg:top-0 lg:self-start">
+                <CalcVolForm
+                  currentPrice={currentPrice}
+                  tradeType={formData.type}
+                  selectedAccount={selectedAccount}
+                />
+              </div>
+            )}
           </div>
         </form>
       </div >

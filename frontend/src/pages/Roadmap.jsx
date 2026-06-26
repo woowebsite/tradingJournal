@@ -5,7 +5,7 @@ import { useAccount } from '../context/AccountContext';
 import AccountModal from '../components/AccountModal';
 import api from '../services/api';
 import { fetchTrades } from '../features/tradeSlice';
-import { formatNumber } from '../utils/formatNumber';
+import { formatMoney } from '../utils/formatMoney';
 import {
     buildRoadmapProjection,
     recommendGrowthTarget,
@@ -13,12 +13,6 @@ import {
     summarizeClosedTrades,
     toNumber
 } from '../utils/roadmapCalculations';
-
-const formatMoney = (value, currency = 'USD', pattern = '#,###.##') => {
-    const formatted = formatNumber(value, pattern);
-    if (formatted === '-') return '-';
-    return currency ? `${formatted} ${currency}` : formatted;
-};
 
 const ROADMAP_STATUS_META = {
     unprocess: {
@@ -455,7 +449,7 @@ const Roadmap = () => {
                         <div className="flex items-center gap-2 shrink-0">
                             <div className="balance inline-flex items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300">
                                 <Wallet size={16} className="text-blue-400" />
-                                {formatMoney(activeBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                {formatMoney(activeBalance, selectedAccount)}
                             </div>
                             <button
                                 type="button"
@@ -510,7 +504,7 @@ const Roadmap = () => {
                             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Current Balance</span>
                             <input
                                 type="text"
-                                value={formatMoney(currentBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                value={formatMoney(currentBalance, selectedAccount)}
                                 readOnly
                                 className="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-gray-100 outline-none focus:border-blue-500"
                             />
@@ -601,11 +595,11 @@ const Roadmap = () => {
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-gray-300">{formatMoney(row.startEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-emerald-300">{formatMoney(row.winEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-emerald-400">+{formatMoney(row.winProfit, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-red-300">{formatMoney(row.lossEquity, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-red-400">-{formatMoney(row.lossAmount, selectedAccount?.currency, selectedAccount?.moneyFormat)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-gray-300">{formatMoney(row.startEquity, selectedAccount)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-emerald-300">{formatMoney(row.winEquity, selectedAccount)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-emerald-400">+{formatMoney(row.winProfit, selectedAccount)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-red-300">{formatMoney(row.lossEquity, selectedAccount)}</td>
+                                                <td className="whitespace-nowrap px-4 py-3 font-mono text-red-400">-{formatMoney(row.lossAmount, selectedAccount)}</td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-3">
                                                         <div className="h-2 w-28 rounded-full bg-gray-700 overflow-hidden">
@@ -639,8 +633,8 @@ const Roadmap = () => {
                         </div>
 
                         <div className="mt-4 space-y-3">
-                            <Metric label="Target NAV" value={formatMoney(roadmap.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)} accent="text-white" />
-                            <Metric label="Profit needed" value={formatMoney(roadmap.profitTarget, selectedAccount?.currency, selectedAccount?.moneyFormat)} accent="text-emerald-400" />
+                            <Metric label="Target NAV" value={formatMoney(roadmap.targetBalance, selectedAccount)} accent="text-white" />
+                            <Metric label="Profit needed" value={formatMoney(roadmap.profitTarget, selectedAccount)} accent="text-emerald-400" />
                             <Metric label="Risk / trade" value={`${roadmap.riskPct.toFixed(2)}%`} accent="text-blue-400" />
                             <Metric label="Reward / trade" value={`${roadmap.rewardPct.toFixed(2)}%`} accent="text-purple-400" />
                             <Metric label="Min wins if all wins" value={roadmap.winsOnlyNeeded ?? 'N/A'} accent="text-amber-400" />
@@ -662,9 +656,9 @@ const Roadmap = () => {
                             <Metric label="Setting" value={activeSettingName} accent="text-blue-300" />
                             <Metric label="Avg win / loss" value={closedSummary.avgLoss > 0 ? `${(closedSummary.avgWin / closedSummary.avgLoss).toFixed(2)}R` : 'N/A'} accent="text-emerald-400" />
                             <Metric label="Historical win rate" value={`${closedSummary.winRate.toFixed(1)}%`} accent="text-amber-400" />
-                            <Metric label="Loss budget at start" value={formatMoney(roadmap.lossBudget, selectedAccount?.currency, selectedAccount?.moneyFormat)} accent="text-red-400" />
-                            <Metric label="Max drawdown budget" value={formatMoney(roadmap.maxDrawDownLossBudget, selectedAccount?.currency, selectedAccount?.moneyFormat)} accent="text-red-300" />
-                            <Metric label="Projected NAV after all wins" value={formatMoney(roadmap.equityAfterPlannedTradesIfAllWins, selectedAccount?.currency, selectedAccount?.moneyFormat)} accent="text-gray-100" />
+                            <Metric label="Loss budget at start" value={formatMoney(roadmap.lossBudget, selectedAccount)} accent="text-red-400" />
+                            <Metric label="Max drawdown budget" value={formatMoney(roadmap.maxDrawDownLossBudget, selectedAccount)} accent="text-red-300" />
+                            <Metric label="Projected NAV after all wins" value={formatMoney(roadmap.equityAfterPlannedTradesIfAllWins, selectedAccount)} accent="text-gray-100" />
                         </div>
                     </div>
                 </div>
@@ -715,7 +709,7 @@ const Roadmap = () => {
                             </div>
                             <div className="mt-2 text-2xl font-black text-white">+{item.growth}%</div>
                             <div className="mt-3 space-y-2 text-sm">
-                                <div className="flex justify-between gap-3"><span className="text-gray-400">Target NAV</span><span className="whitespace-nowrap font-mono text-gray-100">{formatMoney(item.targetBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}</span></div>
+                                <div className="flex justify-between gap-3"><span className="text-gray-400">Target NAV</span><span className="whitespace-nowrap font-mono text-gray-100">{formatMoney(item.targetBalance, selectedAccount)}</span></div>
                                 <div className="flex justify-between gap-3"><span className="text-gray-400">Min wins</span><span className="font-mono text-emerald-300">{item.winsOnlyNeeded ?? 'N/A'}</span></div>
                                 <div className="flex justify-between gap-3"><span className="text-gray-400">Wins in plan</span><span className="font-mono text-gray-100">{item.winsNeededInPlannedTrades ?? 'N/A'}</span></div>
                                 <div className="flex justify-between gap-3"><span className="text-gray-400">Est. trades</span><span className="font-mono text-gray-100">{item.estimatedTradesToGoal ?? 'N/A'}</span></div>
@@ -778,7 +772,7 @@ const Roadmap = () => {
                                             +{Number(item.targetGrowthPercent || item.snapshot?.targetGrowthPercent || 0).toFixed(2)}%
                                         </td>
                                         <td className="px-4 py-3 font-mono text-gray-200">
-                                            {formatMoney(item.startingBalance, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                            {formatMoney(item.startingBalance, selectedAccount)}
                                         </td>
                                         <td className="px-4 py-3 text-gray-200">
                                             {item.plannedTrades ?? '-'}

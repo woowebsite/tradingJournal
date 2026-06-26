@@ -7,18 +7,13 @@ import { useAccount } from '../context/AccountContext';
 import { fetchTrades } from '../features/tradeSlice';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { formatNumber } from '../utils/formatNumber';
+import { formatMoney } from '../utils/formatMoney';
 
 const getLocalDateValue = (date = new Date()) => {
     const d = new Date(date);
     if (Number.isNaN(d.getTime())) return '';
     const offset = d.getTimezoneOffset();
     return new Date(d.getTime() - offset * 60000).toISOString().slice(0, 10);
-};
-
-const formatMoney = (value, currency = 'USD', pattern = '#,###.##') => {
-    const formatted = formatNumber(value, pattern);
-    if (formatted === '-') return '-';
-    return currency ? `${formatted} ${currency}` : formatted;
 };
 
 const formatMonthLabel = (date) =>
@@ -322,7 +317,7 @@ const JournalCalendar = () => {
                                 <Wallet size={16} className="text-blue-400" />
                             </div>
                             <p className="mt-2 text-2xl font-black text-white">
-                                {formatMoney(currentNav, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                {formatMoney(currentNav, selectedAccount)}
                             </p>
                         </div>
                         <div className="rounded-2xl border border-gray-700 bg-gray-800/80 p-4">
@@ -335,7 +330,7 @@ const JournalCalendar = () => {
                                 monthlyTotals.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
                             )}>
                                 {monthlyTotals.pnl >= 0 ? '+' : ''}
-                                {formatMoney(monthlyTotals.pnl, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                {formatMoney(monthlyTotals.pnl, selectedAccount)}
                             </p>
                         </div>
                         <div className="rounded-2xl border border-gray-700 bg-gray-800/80 p-4">
@@ -466,7 +461,7 @@ const JournalCalendar = () => {
                                                         day.dayStats.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
                                                     )}>
                                                         {day.dayStats.pnl >= 0 ? '+' : ''}
-                                                        {formatMoney(day.dayStats.pnl, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                                        {formatMoney(day.dayStats.pnl, selectedAccount)}
                                                     </p>
                                                 </div>
                                             )}
@@ -503,14 +498,14 @@ const JournalCalendar = () => {
                                         selectedDayData.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
                                     )}>
                                         {selectedDayData.pnl >= 0 ? '+' : ''}
-                                        {formatMoney(selectedDayData.pnl, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                        {formatMoney(selectedDayData.pnl, selectedAccount)}
                                     </p>
                                 </div>
                             )}
                             <div className="rounded-xl border border-gray-700 bg-gray-900/70 p-4">
                                 <p className="text-xs uppercase tracking-wider text-gray-500">NAV</p>
                                 <p className="mt-2 text-2xl font-black font-mono text-white">
-                                    {formatMoney(selectedDayData.nav, selectedAccount?.currency, selectedAccount?.moneyFormat)}
+                                    {formatMoney(selectedDayData.nav, selectedAccount)}
                                 </p>
                             </div>
                             <div className="rounded-xl border border-gray-700 bg-gray-900/70 p-4">
