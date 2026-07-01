@@ -119,8 +119,7 @@ const buildEmptyForm = (selectedAccount, accounts) => {
         riskPlan: '',
         checklist: '',
         reviewNotes: '',
-        status: 'Draft',
-        maxTrades: 3
+        status: 'Draft'
     };
 };
 
@@ -588,8 +587,7 @@ const Plan = () => {
             ...plan,
             id: plan.id ?? null,
             documentId: plan.documentId ?? null,
-            accountId: String(plan.accountId || ''),
-            maxTrades: Number(plan.maxTrades || 1)
+            accountId: String(plan.accountId || '')
         });
     };
 
@@ -673,12 +671,12 @@ const Plan = () => {
             return;
         }
 
-        if (!form.accountId) {
-            setError('Vui lòng chọn tài khoản.');
+        if (!selectedAccount) {
+            setError('Vui lòng chọn Active Account.');
             return;
         }
 
-        const accountInfo = getAccountInfo(accounts, form.accountId);
+        const accountInfo = getAccountInfo(accounts, selectedAccount.id || selectedAccount.documentId);
         const payload = {
             accountId: accountInfo.accountId,
             accountName: accountInfo.accountName,
@@ -694,8 +692,7 @@ const Plan = () => {
             riskPlan: form.riskPlan.trim(),
             checklist: form.checklist.trim(),
             reviewNotes: form.reviewNotes.trim(),
-            status: form.status,
-            maxTrades: Number(form.maxTrades || 1)
+            status: form.status
         };
 
         try {
@@ -708,8 +705,7 @@ const Plan = () => {
                 ...prev,
                 ...savedPlan,
                 id: savedPlan?.id ?? planId ?? null,
-                documentId: savedPlan?.documentId ?? form.documentId ?? null,
-                maxTrades: Number(savedPlan?.maxTrades ?? payload.maxTrades)
+                documentId: savedPlan?.documentId ?? form.documentId ?? null
             }));
             setMessage('Plan đã được lưu.');
         } catch (err) {
@@ -1378,26 +1374,6 @@ const Plan = () => {
                             <form id="plan-form" className="max-h-[68vh] space-y-4 overflow-y-auto pr-1" onSubmit={handleSubmit}>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label className="space-y-2">
-                                        <span className="text-xs font-medium text-gray-300">Account</span>
-                                        <select
-                                            value={form.accountId}
-                                            onChange={(e) => {
-                                                const accountId = e.target.value;
-                                                const accountInfo = getAccountInfo(accounts, accountId);
-                                                setForm(prev => ({ ...prev, accountId, accountName: accountInfo.accountName }));
-                                            }}
-                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                        >
-                                            <option value="">Select account</option>
-                                            {accounts.map(account => (
-                                                <option key={account.id || account.documentId} value={String(account.id || account.documentId)}>
-                                                    {account.name || account.currency || `Account ${account.id || account.documentId}`}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-
-                                    <label className="space-y-2">
                                         <span className="text-xs font-medium text-gray-300">Scope</span>
                                         <select
                                             value={form.scope}
@@ -1413,6 +1389,19 @@ const Plan = () => {
                                         >
                                             <option value="Daily">Daily</option>
                                             <option value="Weekly">Weekly</option>
+                                        </select>
+                                    </label>
+                                    <label className="space-y-2">
+                                        <span className="text-xs font-medium text-gray-300">Status</span>
+                                        <select
+                                            value={form.status}
+                                            onChange={(e) => setForm(prev => ({ ...prev, status: e.target.value }))}
+                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
+                                        >
+                                            <option value="Draft">Draft</option>
+                                            <option value="Active">Active</option>
+                                            <option value="Done">Done</option>
+                                            <option value="Skipped">Skipped</option>
                                         </select>
                                     </label>
                                 </div>
@@ -1476,32 +1465,7 @@ const Plan = () => {
                                     </label>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <label className="space-y-2">
-                                        <span className="text-xs font-medium text-gray-300">Max trades</span>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            value={form.maxTrades}
-                                            onChange={(e) => setForm(prev => ({ ...prev, maxTrades: e.target.value }))}
-                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                        />
-                                    </label>
 
-                                    <label className="space-y-2">
-                                        <span className="text-xs font-medium text-gray-300">Status</span>
-                                        <select
-                                            value={form.status}
-                                            onChange={(e) => setForm(prev => ({ ...prev, status: e.target.value }))}
-                                            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-gray-100 outline-none focus:border-blue-500"
-                                        >
-                                            <option value="Draft">Draft</option>
-                                            <option value="Active">Active</option>
-                                            <option value="Done">Done</option>
-                                            <option value="Skipped">Skipped</option>
-                                        </select>
-                                    </label>
-                                </div>
 
                                 <label className="space-y-2 block">
                                     <span className="text-xs font-medium text-gray-300">Symbols / watchlist</span>

@@ -23,6 +23,11 @@ const INDICATORS = {
         defaults: { period: 20 },
         outputs: ['ema']
     },
+    'supertrend': {
+        params: ['period', 'multiplier'],
+        defaults: { period: 10, multiplier: 3 },
+        outputs: ['supertrend', 'direction']
+    },
     'close': { params: [], defaults: {}, outputs: ['price'] },
     'open': { params: [], defaults: {}, outputs: ['price'] },
     'high': { params: [], defaults: {}, outputs: ['price'] },

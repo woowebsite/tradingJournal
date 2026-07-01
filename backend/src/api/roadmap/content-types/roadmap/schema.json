@@ -25,10 +25,24 @@
     },
     "startingBalance": {
       "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      },
       "required": true
     },
     "targetGrowthPercent": {
       "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      },
       "required": true
     },
     "plannedTrades": {
@@ -36,13 +50,34 @@
       "default": 25
     },
     "riskPercent": {
-      "type": "decimal"
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
     },
     "rewardMultiple": {
-      "type": "decimal"
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
     },
     "maxDrawDownPercent": {
-      "type": "decimal"
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
     },
     "status": {
       "type": "enumeration",
@@ -54,13 +89,34 @@
       "default": "unprocess"
     },
     "targetBalance": {
-      "type": "decimal"
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
     },
     "profitTarget": {
-      "type": "decimal"
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
     },
     "winRateEstimate": {
-      "type": "decimal"
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
     },
     "snapshot": {
       "type": "json"

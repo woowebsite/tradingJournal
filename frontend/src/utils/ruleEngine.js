@@ -1,3 +1,5 @@
+import { calculateSupertrend } from '../indicators/supertrend';
+
 /**
  * Utility to evaluate rules against a dataset (candles).
  */
@@ -91,7 +93,7 @@ const executeFunction = (funcNode, history, index) => {
     if (name === 'highest') {
         const field = params.field || 'high';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         let maxVal = -Infinity;
         let count = 0;
@@ -116,7 +118,7 @@ const executeFunction = (funcNode, history, index) => {
     if (name === 'lowest') {
         const field = params.field || 'low';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         let minVal = Infinity;
         let count = 0;
@@ -141,7 +143,7 @@ const executeFunction = (funcNode, history, index) => {
     if (name === 'sma') {
         const field = params.field || 'close';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         let sum = 0;
         let count = 0;
@@ -167,7 +169,7 @@ const executeFunction = (funcNode, history, index) => {
         // For short history (50), we might just calc from end?
         const field = params.field || 'close';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         // Effective index is the point in time we want the value for.
         // Since history is DESC (0 is newest), "index + offset" is the target time.
@@ -203,7 +205,7 @@ const executeFunction = (funcNode, history, index) => {
         const slow = params.slow || 26;
         const sig = params.signal || 9;
         const output = params.output || 'macd'; // 'macd', 'signal', 'hist'
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         // We need to calculate MACD series to get the Signal line (which is EMA of MACD).
         // Target: index + offset.
@@ -273,7 +275,7 @@ const executeFunction = (funcNode, history, index) => {
     if (name === 'rsi') {
         const field = params.field || 'close';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         const targetIdx = index + offset;
         // Needs previous date for change.
@@ -346,8 +348,50 @@ const executeFunction = (funcNode, history, index) => {
         return currentRSI;
     }
 
+    if (['close', 'open', 'high', 'low', 'volume'].includes(name)) {
+        const offset = Math.abs(params.offset || 0);
+        const targetIdx = index + offset;
+        const candle = getCandle(targetIdx);
+        if (!candle) return null;
+        return getValue(candle, name);
+    }
+
+    if (name === 'supertrend') {
+        const period = params.period || 10;
+        const multiplier = params.multiplier || 3;
+        const output = params.output || 'supertrend'; // 'supertrend' or 'direction'
+        const offset = Math.abs(params.offset || 0);
+
+        const targetIdx = index + offset;
+        if (targetIdx >= history.length) return null;
+
+        // Minimum lookback to stabilize ATR is period * 3 + 20
+        const lookback = Math.min(history.length - 1, targetIdx + period * 3 + 20);
+        if (lookback - targetIdx < period) return null;
+
+        // Slice and reverse to get ASC (oldest first)
+        const subHistory = history.slice(targetIdx, lookback + 1).reverse();
+
+        const formattedData = subHistory.map(candle => ({
+            open: getValue(candle, 'open'),
+            close: getValue(candle, 'close'),
+            high: getValue(candle, 'high'),
+            low: getValue(candle, 'low')
+        }));
+
+        const results = calculateSupertrend(period, multiplier, formattedData);
+        if (results.length === 0) return null;
+
+        const lastResult = results[results.length - 1];
+        if (output === 'direction') {
+            return lastResult.direction;
+        }
+        return lastResult.value;
+    }
+
     return null;
 };
+
 
 /**
  * Filter a history array to return only candles that satisfy the rule.

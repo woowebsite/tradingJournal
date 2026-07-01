@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { calculateSMA } from '../indicators/movingAverages';
+import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 
 const TradingViewChart = ({ data, symbol, signals = [] }) => {
     const chartContainerRef = useRef(null);
@@ -84,15 +85,19 @@ const TradingViewChart = ({ data, symbol, signals = [] }) => {
         candlestickSeries.setData(candleData);
 
         // MA20 Series
-        const ma20Data = calculateSMA(candleData, 20);
+        const ma20Data = calculateSMA(candleData, 5);
         const ma20Series = chart.addSeries(LineSeries, {
             color: '#f59e0b', // amber-500
-            lineWidth: 2,
+            lineWidth: 1,
             crosshairMarkerVisible: false,
             priceLineVisible: false,
             lastValueVisible: false,
         });
         ma20Series.setData(ma20Data);
+
+        // Supertrend Series
+        const supertrendData = calculateSupertrend(10, 3, sortedData);
+        drawSupertrend(chart, LineSeries, supertrendData);
 
         // Volume Series 
         const volumeSeries = volumeChart.addSeries(HistogramSeries, {

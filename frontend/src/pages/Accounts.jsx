@@ -139,17 +139,25 @@ const Accounts = () => {
                         <h3 className="text-xl font-bold text-white mb-1">{account.name}</h3>
                         <p className="text-sm text-gray-400 mb-3">{account.market?.Name || account.market?.name || 'Unknown Market'} - {account.currency}</p>
 
-                        <div className="mb-4">
-                            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Setting Risk</p>
-                            <p className="text-sm font-medium text-emerald-400">
-                                {account.setting?.Name || account.setting?.name || 'No linked setting'}
-                            </p>
+                        <div className="mb-4 grid grid-cols-2 gap-2">
+                            <div>
+                                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Setting Risk</p>
+                                <p className="text-sm font-medium text-emerald-400 truncate">
+                                    {account.setting?.Name || account.setting?.name || 'No linked setting'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Strategy</p>
+                                <p className="text-sm font-medium text-blue-400 truncate">
+                                    {account.strategy?.Name || account.strategy?.name || 'No linked strategy'}
+                                </p>
+                            </div>
                         </div>
 
                         <div className="pt-4 border-t border-gray-700">
                             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Initial Balance</p>
                             <p className="text-2xl font-bold text-green-400">
-                                ${account.initial_balance?.toLocaleString()}
+                                {account.initial_balance?.toLocaleString()} {account.currency || 'USD'}
                             </p>
                         </div>
                     </div>

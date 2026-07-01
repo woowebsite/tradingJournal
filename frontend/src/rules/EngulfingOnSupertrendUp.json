@@ -1,0 +1,43 @@
+{
+    "rules": [
+        {
+            "left": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "right": {
+                "name": "supertrend",
+                "type": "function",
+                "params": {
+                    "field": "close",
+                    "output": "supertrend",
+                    "period": 10,
+                    "multiplier": 3
+                }
+            },
+            "operator": ">"
+        },
+        {
+            "left": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "right": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "offset": -1,
+                    "output": "price"
+                }
+            },
+            "operator": ">="
+        }
+    ],
+    "condition": "AND"
+}

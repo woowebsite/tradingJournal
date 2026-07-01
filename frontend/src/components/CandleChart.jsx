@@ -1,5 +1,8 @@
 import React, { useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
+import { calculateMA } from '../indicators/ma';
+import { calculateMACD } from '../indicators/macd';
+import { calculateSupertrend } from '../indicators/supertrend';
 
 const CandleChart = ({ data, symbol, signals = [] }) => {
     const chartOption = useMemo(() => {
@@ -67,56 +70,6 @@ const CandleChart = ({ data, symbol, signals = [] }) => {
             };
         }).filter(Boolean);
 
-        const calculateMA = (dayCount, data) => {
-            const result = [];
-            for (let i = 0, len = data.length; i < len; i++) {
-                if (i < dayCount - 1) {
-                    result.push('-');
-                    continue;
-                }
-                let sum = 0;
-                for (let j = 0; j < dayCount; j++) {
-                    sum += data[i - j].close;
-                }
-                result.push(+(sum / dayCount).toFixed(2));
-            }
-            return result;
-        };
-
-        const calculateEMA = (dayCount, data, key = 'close') => {
-            const k = 2 / (dayCount + 1);
-            const result = [];
-            let ema = data[0][key];
-            result.push(ema);
-            for (let i = 1; i < data.length; i++) {
-                ema = (data[i][key] * k) + (ema * (1 - k));
-                result.push(ema);
-            }
-            return result;
-        };
-
-        const calculateMACD = (shortPeriod, longPeriod, signalPeriod, data) => {
-            const shortEMA = calculateEMA(shortPeriod, data);
-            const longEMA = calculateEMA(longPeriod, data);
-
-            const macdLine = [];
-            for (let i = 0; i < data.length; i++) {
-                macdLine.push(shortEMA[i] - longEMA[i]);
-            }
-
-            // Calculate Signal Line (EMA of MACD Line)
-            // We need to handle the initial ramp up where EMA might differ, 
-            // but standard simple approach:
-            const signalLineData = macdLine.map(val => ({ close: val })); // Wrap for helper
-            const signalLine = calculateEMA(signalPeriod, signalLineData, 'close');
-
-            const histogram = [];
-            for (let i = 0; i < data.length; i++) {
-                histogram.push(macdLine[i] - signalLine[i]);
-            }
-
-            return { macdLine, signalLine, histogram };
-        };
 
         // We need data in ascending order for EMA calculation
         const ascendingData = [...sortedData].reverse();
@@ -135,13 +88,18 @@ const CandleChart = ({ data, symbol, signals = [] }) => {
         const lastDataPoint = sortedData[sortedData.length - 1];
         const lastClose = lastDataPoint ? lastDataPoint.close : null;
 
+        const supertrendReverse = calculateSupertrend(10, 3, ascendingData);
+        const supertrendResult = [...supertrendReverse].reverse();
+        const supertrendUp = supertrendResult.map(item => item.direction === 1 ? item.value : '-');
+        const supertrendDown = supertrendResult.map(item => item.direction === -1 ? item.value : '-');
+
         return {
             backgroundColor: '#1f2937', // gray-800
             animation: false,
             legend: {
                 bottom: 10,
                 left: 'center',
-                data: [symbol || 'Chart', 'MACD', 'Signal', 'Histogram'],
+                data: [symbol || 'Chart', 'MA9', 'Supertrend Up', 'Supertrend Down', 'MACD', 'Signal', 'Histogram'],
                 textStyle: { color: '#9ca3af' }
             },
             tooltip: {
@@ -329,6 +287,28 @@ const CandleChart = ({ data, symbol, signals = [] }) => {
                         opacity: 0.8,
                         width: 1.5,
                         color: '#fbbf24' // Amber-400
+                    }
+                },
+                {
+                    name: 'Supertrend Up',
+                    type: 'line',
+                    data: supertrendUp,
+                    smooth: true,
+                    showSymbol: false,
+                    lineStyle: {
+                        width: 2,
+                        color: '#10b981' // Green
+                    }
+                },
+                {
+                    name: 'Supertrend Down',
+                    type: 'line',
+                    data: supertrendDown,
+                    smooth: true,
+                    showSymbol: false,
+                    lineStyle: {
+                        width: 2,
+                        color: '#ef4444' // Red
                     }
                 },
                 {
