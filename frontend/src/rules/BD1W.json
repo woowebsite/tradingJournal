@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "left": {
+        "type": "field",
+        "value": "close"
+      },
+      "right": {
+        "name": "lowest",
+        "type": "function",
+        "params": {
+          "field": "low",
+          "offset": 1,
+          "period": 5
+        }
+      },
+      "operator": "<",
+      "identifier": "price_check"
+    }
+  ],
+  "condition": "AND"
+}

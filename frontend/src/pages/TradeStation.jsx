@@ -5,11 +5,14 @@ import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicat
 import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { fetchOpenTrades, fetchTrades } from '../features/tradeSlice';
+import { createSymbol } from '../features/symbolSlice';
+import { fetchWatchlists, updateWatchlist } from '../features/watchlistSlice';
 import TradingViewChart from '../components/TradingViewChart';
+import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
 import TechnicalPanel from '../containers/TechnicalPanel';
 import SignalPanel from '../containers/SignalPanel';
-import { Search, RefreshCw } from 'lucide-react';
+import { Search, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
@@ -17,7 +20,7 @@ import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
 const TradeStation = () => {
     const dispatch = useDispatch();
     const { symbols, histories, externalIndicators, loading } = useSelector(state => state.market);
-    const { items: trades, openTrades, loading: tradesLoading } = useSelector(state => state.trades);
+    const { items: trades } = useSelector(state => state.trades);
     const { items: allSignals } = useSelector(state => state.signals);
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -25,15 +28,29 @@ const TradeStation = () => {
     const [tcbsRecommendations, setTcbsRecommendations] = useState([]);
     const [tcbsRecentSignals, setTcbsRecentSignals] = useState([]);
     const [loadingTcbsInsights, setLoadingTcbsInsights] = useState(false);
+    const [showCreateSymbolModal, setShowCreateSymbolModal] = useState(false);
+    const [creatingSymbol, setCreatingSymbol] = useState(false);
+    const [addingToWatchlist, setAddingToWatchlist] = useState(false);
     const lastAutoRefreshedSymbolRef = useRef(null);
+    const autoOpenedMissingSymbolRef = useRef('');
+    const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
 
     useEffect(() => {
         if (symbolParam && symbols.length > 0) {
-            const found = symbols.find(s => s.Name === symbolParam);
+            const normalizedParam = symbolParam.trim().toUpperCase();
+            const found = symbols.find(s => String(s.Name || '').trim().toUpperCase() === normalizedParam);
             if (found) {
                 const id = found.documentId || found.id;
                 setSelectedSymbolId(id);
+                setShowCreateSymbolModal(false);
+                autoOpenedMissingSymbolRef.current = '';
+                return;
+            }
+
+            if (autoOpenedMissingSymbolRef.current !== normalizedParam) {
+                autoOpenedMissingSymbolRef.current = normalizedParam;
+                setShowCreateSymbolModal(true);
             }
         }
     }, [symbolParam, symbols]);
@@ -43,7 +60,7 @@ const TradeStation = () => {
         dispatch(fetchSignals());
         dispatch(fetchStrategies());
         dispatch(fetchOpenTrades({ accountId: selectedAccount?.documentId }));
-    }, [dispatch]);
+    }, [dispatch, selectedAccount?.documentId]);
 
     // Select first symbol by default if likely?
     // Or just wait for user.
@@ -58,9 +75,7 @@ const TradeStation = () => {
                 dispatch(fetchExternalIndicators(sym.Name));
             }
         }
-    }, [dispatch, selectedSymbolId]); // 'symbols' dependency might trigger too often if not careful, but selectedSymbolId change is main driver
-
-    const { selectedAccount } = useAccount();
+    }, [dispatch, selectedSymbolId, symbols]); // 'symbols' dependency keeps the selected symbol lookup stable
 
     useEffect(() => {
         if (selectedAccount) {
@@ -70,6 +85,87 @@ const TradeStation = () => {
     }, [dispatch, selectedAccount]);
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
+
+    const handleCreateMissingSymbol = useCallback(async (formData) => {
+        const name = String(formData?.Name || '').trim();
+        if (!name) return;
+
+        const normalizedName = name.toUpperCase();
+        const existing = symbols.find(s => String(s.Name || '').trim().toUpperCase() === normalizedName);
+        if (existing) {
+            const existingId = existing.documentId || existing.id;
+            setSelectedSymbolId(existingId);
+            setShowCreateSymbolModal(false);
+            setSearchParams({ symbol: normalizedName }, { replace: true });
+            return;
+        }
+
+        setCreatingSymbol(true);
+        try {
+            const payload = {
+                Name: normalizedName,
+                Description: formData.Description || '',
+                exchange: formData.exchange || '',
+                sector: formData.sector || ''
+            };
+
+            if (selectedAccount?.market) {
+                payload.market = selectedAccount.market.documentId || selectedAccount.market.id;
+            }
+
+            const created = await dispatch(createSymbol(payload)).unwrap();
+            const createdId = created?.documentId || created?.id;
+            const createdName = created?.Name || normalizedName;
+
+            await dispatch(fetchSymbols());
+            setShowCreateSymbolModal(false);
+
+            if (createdId) {
+                setSelectedSymbolId(createdId);
+                setSearchParams({ symbol: createdName }, { replace: true });
+            }
+        } catch (error) {
+            console.error('Failed to create missing symbol:', error);
+            alert(`Failed to create symbol: ${error?.error?.message || error?.message || error}`);
+        } finally {
+            setCreatingSymbol(false);
+        }
+    }, [dispatch, selectedAccount?.market, setSearchParams, symbols]);
+
+    const handleAddCurrentSymbolToWatchlist = useCallback(async () => {
+        if (!selectedSymbol) return;
+        if (!defaultWatchlist) {
+            alert('No default watchlist found for the current account.');
+            return;
+        }
+
+        const currentSymbolId = selectedSymbol.documentId || selectedSymbol.id;
+        if (!currentSymbolId) return;
+
+        const existingSymbolIds = (defaultWatchlist.symbols || [])
+            .map(sym => sym.documentId || sym.id)
+            .filter(Boolean);
+
+        if (existingSymbolIds.includes(currentSymbolId)) {
+            alert('Symbol is already in the current watchlist.');
+            return;
+        }
+
+        setAddingToWatchlist(true);
+        try {
+            const nextSymbolIds = Array.from(new Set([...existingSymbolIds, currentSymbolId]));
+            await dispatch(updateWatchlist({
+                id: defaultWatchlist.documentId || defaultWatchlist.id,
+                data: { symbols: nextSymbolIds }
+            })).unwrap();
+            await dispatch(fetchWatchlists());
+        } catch (error) {
+            console.error('Failed to add symbol to watchlist:', error);
+            alert(`Failed to add symbol to watchlist: ${error?.error?.message || error?.message || error}`);
+        } finally {
+            setAddingToWatchlist(false);
+        }
+    }, [defaultWatchlist, dispatch, selectedSymbol]);
 
     useEffect(() => {
         const loadTcbsInsights = async () => {
@@ -186,6 +282,15 @@ const TradeStation = () => {
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
+            <CreateSymbolModal
+                key={symbolParam || 'create-symbol'}
+                isOpen={showCreateSymbolModal}
+                onClose={() => setShowCreateSymbolModal(false)}
+                onSubmit={handleCreateMissingSymbol}
+                initialName={symbolParam || ''}
+                isSubmitting={creatingSymbol}
+            />
+
             <div className="flex flex-1 gap-4 min-h-0">
                 {/* Left Column: Chart & Strategy */}
                 <div className="flex flex-col flex-1 gap-4 min-h-0">
@@ -199,19 +304,34 @@ const TradeStation = () => {
                                 <span className="text-sm text-gray-400">{selectedSymbol?.exchange} - {selectedSymbol?.sector}</span>
                             </div>
 
-                            <div className="flex items-end justify-end gap-3">
+                            {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
+                            
+                            <div className="ml-auto flex items-end justify-end gap-2">
                                 {selectedSymbol && (
                                     <button
+                                        type="button"
+                                        onClick={handleAddCurrentSymbolToWatchlist}
+                                        disabled={addingToWatchlist || !defaultWatchlist}
+                                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                        title={defaultWatchlist ? 'Add current symbol to default watchlist' : 'No default watchlist available'}
+                                    >
+                                        <Plus size={16} />
+                                        {addingToWatchlist ? 'Adding...' : 'AddTo Watchlist'}
+                                    </button>
+                                )}
+                                {selectedSymbol && (
+                                    <button
+                                        type="button"
                                         onClick={handleRefresh}
                                         disabled={loading}
-                                        className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-blue-400 disabled:opacity-50 transition shadow-sm"
+                                        className="refresh-btn inline-flex items-center gap-2 rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-blue-400 transition hover:bg-gray-600 disabled:opacity-50"
                                         title="Refresh Data"
                                     >
                                         <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                                        Refresh
                                     </button>
                                 )}
                             </div>
-                            {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
                         </div>
                         <div className="flex-1 min-h-0">
                             <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} />

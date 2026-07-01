@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Bell, RefreshCw, TrendingUp, Loader2, X } from 'lucide-react';
 import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals, getStrategyDetail, syncStrategyDetail, getAllStrategyDetails, getBacktestConclusion } from '../services/tcbsStrategy';
 import api from '../services/api';
@@ -695,7 +696,14 @@ const TCBSStrategySignals = () => {
 
                                     return (
                                         <tr key={`best-${strategy.ticker}-${strategy.strategyKey}`} className="hover:bg-gray-700/30 transition">
-                                            <td className="px-4 py-4 text-gray-200 font-bold">{strategy.ticker}</td>
+                                            <td className="px-4 py-4 text-gray-200 font-bold">
+                                                <Link
+                                                    to={`/trade-station?symbol=${encodeURIComponent(strategy.ticker || '')}`}
+                                                    className="text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                                                >
+                                                    {strategy.ticker}
+                                                </Link>
+                                            </td>
                                             <td className="px-4 py-4 text-gray-300">
                                                 <div className="font-medium text-white">{strategy.strategyName || getStrategyName(strategy)}</div>
                                                 <div className="text-xs text-gray-500 font-mono">{strategy.strategyKey}</div>

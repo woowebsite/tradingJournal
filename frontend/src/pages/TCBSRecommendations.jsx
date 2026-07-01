@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { getTcbsRecommendationOptions, getTcbsRecommendations, syncTcbsRecommendations } from '../services/tcbsRecommendation';
 
 const getTypeLabel = (type) => {
@@ -185,7 +186,18 @@ const TCBSRecommendations = () => {
                             ) : sortedRecommendations.map(item => (
                                 <tr key={item.documentId || item.id || `${item.d}-${item.ticker}-${item.type}`} className="align-top transition hover:bg-gray-700/30">
                                     <td className="whitespace-nowrap px-5 py-4 font-mono text-gray-300">{item.d || '-'}</td>
-                                    <td className="px-5 py-4 font-bold text-white">{item.ticker || '-'}</td>
+                                    <td className="px-5 py-4 font-bold text-white">
+                                        {item.ticker ? (
+                                            <Link
+                                                to={`/trade-station?symbol=${encodeURIComponent(item.ticker)}`}
+                                                className="text-blue-300 underline underline-offset-2 transition hover:text-blue-200"
+                                            >
+                                                {item.ticker}
+                                            </Link>
+                                        ) : (
+                                            '-'
+                                        )}
+                                    </td>
                                     <td className="px-5 py-4">
                                         <div className="inline-flex flex-col items-start gap-1">
                                             <span className={`inline-flex whitespace-nowrap rounded border px-2 py-1 text-xs font-semibold ${getTypeTone(item.type)}`}>

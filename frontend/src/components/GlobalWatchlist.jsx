@@ -1,25 +1,33 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, RefreshCw, TrendingUp, TrendingDown, List as ListIcon } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchHistories, loadExternalHistory } from '../features/marketSlice';
+import { fetchSymbols } from '../features/symbolSlice';
 import { useNavigate } from 'react-router-dom';
 
 const GlobalWatchlist = () => {
     const dispatch = useDispatch();
     const { symbols } = useSelector(state => state.market);
     const { items: watchlists } = useSelector(state => state.watchlists);
-    const { selectedAccount, accountSymbols, defaultWatchlist } = useAccount();
+    const { selectedAccount, accountSymbols } = useAccount();
     const [searchTerm, setSearchTerm] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [selectedWatchlist, setSelectedWatchlist] = useState(null);
-    const [searchParams, setSearchParams] = useSearchParams();
+    const [searchParams] = useSearchParams();
     const [isWatchlistLoading, setIsWatchlistLoading] = useState(false);
     const [selectedSymbolId, setSelectedSymbolId] = useState(null);
     const navigate = useNavigate();
     const dropdownRef = useRef(null);
     const symbolParam = searchParams.get('symbol');
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const marketId = selectedAccount?.market?.documentId || selectedAccount?.market?.id;
+        dispatch(fetchSymbols(marketId));
+    }, [dispatch, isOpen, selectedAccount?.market?.documentId, selectedAccount?.market?.id]);
 
     useEffect(() => {
         if (symbolParam && symbols.length > 0) {
@@ -32,12 +40,15 @@ const GlobalWatchlist = () => {
     }, [symbolParam, symbols]);
 
     // Fetch account's watchlists
-    const accountWatchlists = watchlists ? watchlists.filter(wl => {
-        if (!selectedAccount) return false;
-        const wlAccId = wl.account?.documentId || wl.account?.id;
+    const accountWatchlists = useMemo(() => {
+        if (!watchlists || !selectedAccount) return [];
+
         const accId = selectedAccount?.documentId || selectedAccount?.id;
-        return wlAccId === accId;
-    }) : [];
+        return watchlists.filter(wl => {
+            const wlAccId = wl.account?.documentId || wl.account?.id;
+            return wlAccId === accId;
+        });
+    }, [watchlists, selectedAccount]);
 
     // Initialize and sync selectedWatchlist
     useEffect(() => {
@@ -47,7 +58,7 @@ const GlobalWatchlist = () => {
         } else {
             setSelectedWatchlist(null);
         }
-    }, [selectedAccount?.documentId, selectedAccount?.id, accountWatchlists.length]);
+    }, [selectedAccount, accountWatchlists]);
 
     const filteredSymbols = (() => {
         if (searchTerm) {
