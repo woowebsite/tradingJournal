@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, DollarSign, Image as ImageIcon, Pencil } from 'lucide-react';
+import { X, DollarSign, Image as ImageIcon, Pencil, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../utils/formatNumber';
 import { useAccount } from '../context/AccountContext';
 import { useDispatch } from 'react-redux';
@@ -11,6 +12,7 @@ import useEscapeKey from '../hooks/useEscapeKey';
 const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
+    const navigate = useNavigate();
     const [currentPrice, setCurrentPrice] = useState('');
 
     useEffect(() => {
@@ -90,6 +92,14 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
         onClose();
     };
 
+    const handleGoToTradeStation = () => {
+        const symbolName = trade.symbol?.Name || trade.symbol?.name;
+        if (!symbolName) return;
+
+        navigate(`/trade-station?symbol=${encodeURIComponent(symbolName)}`);
+        onClose();
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div className="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-4xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col">
@@ -113,6 +123,13 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
                             >
                                 <Pencil size={14} />
                                 Edit Trade
+                            </button>
+                            <button
+                                onClick={handleGoToTradeStation}
+                                className="flex items-center gap-2 px-3 py-1 rounded-lg border border-gray-500/30 bg-gray-500/10 text-gray-300 hover:bg-gray-500/20 hover:border-gray-400 transition"
+                            >
+                                <ExternalLink size={14} />
+                                Go
                             </button>
                         </div>
                         <div className="flex items-center gap-4 text-gray-400 text-sm">

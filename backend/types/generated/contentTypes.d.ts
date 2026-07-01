@@ -1142,6 +1142,8 @@ export interface ApiTradeTrade extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'> &
       Schema.Attribute.Private;
+    mode: Schema.Attribute.Enumeration<['Real', 'Demo']> &
+      Schema.Attribute.DefaultTo<'Real'>;
     note: Schema.Attribute.Blocks;
     pnl: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;

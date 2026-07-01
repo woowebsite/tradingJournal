@@ -17,13 +17,14 @@ const Trades = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [tradeToEdit, setTradeToEdit] = useState(null);
+    const [modeFilter, setModeFilter] = useState('');
 
     useEffect(() => {
         if (selectedAccount) {
             const accountId = selectedAccount.documentId || selectedAccount.id;
-            dispatch(fetchTrades({ accountId }));
+            dispatch(fetchTrades({ accountId, mode: modeFilter }));
         }
-    }, [dispatch, selectedAccount]);
+    }, [dispatch, selectedAccount, modeFilter]);
 
     useEffect(() => {
         if (rawTrades && rawTrades.length > 0) {
@@ -71,7 +72,7 @@ const Trades = () => {
 
             // Refresh list
             if (selectedAccount) {
-                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id, mode: modeFilter }));
             }
 
             setIsModalOpen(false);
@@ -100,7 +101,7 @@ const Trades = () => {
             })).unwrap();
 
             if (selectedAccount) {
-                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id, mode: modeFilter }));
             }
 
             setIsModalOpen(false);
@@ -136,10 +137,19 @@ const Trades = () => {
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-3xl font-bold">Trade Log</h2>
                 <div className="flex gap-3">
-                    <button className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-700 transition">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg">
                         <Filter size={18} />
-                        Filter
-                    </button>
+                        <span className="text-sm text-gray-400">Mode</span>
+                        <select
+                            value={modeFilter}
+                            onChange={(e) => setModeFilter(e.target.value)}
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500"
+                        >
+                            <option value="">All</option>
+                            <option value="Real">Real</option>
+                            <option value="Demo">Demo</option>
+                        </select>
+                    </div>
                     <button
                         onClick={handleOpenCreateModal}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
@@ -157,6 +167,7 @@ const Trades = () => {
                             <th className="p-4">Date</th>
                             <th className="p-4">Symbol</th>
                             <th className="p-4">Type</th>
+                            <th className="p-4">Mode</th>
                             <th className="p-4">Status</th>
                             <th className="p-4 text-right">P&L</th>
                             <th className="p-4 text-right">Actions</th>
@@ -177,6 +188,11 @@ const Trades = () => {
                                 <td onClick={() => setSelectedTrade(trade)} className="p-4">
                                     <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.type === 'Long' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                                         {trade.type}
+                                    </span>
+                                </td>
+                                <td onClick={() => setSelectedTrade(trade)} className="p-4">
+                                    <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.mode === 'Demo' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-600/20 text-gray-300'}`}>
+                                        {trade.mode || 'Real'}
                                     </span>
                                 </td>
                                 <td onClick={() => setSelectedTrade(trade)} className="p-4">

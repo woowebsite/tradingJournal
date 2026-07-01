@@ -29,14 +29,31 @@
                 }
             },
             "right": {
-                "name": "close",
+                "name": "high",
                 "type": "function",
                 "params": {
-                    "offset": -1,
+                    "offset": 1,
                     "output": "price"
                 }
             },
             "operator": ">="
+        },
+        {
+            "left": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "right": {
+                "name": "open",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "operator": ">"
         }
     ],
     "condition": "AND"

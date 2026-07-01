@@ -29,6 +29,9 @@ export const fetchTrades = createAsyncThunk(
                 // Filter by symbol
                 url += `&filters[symbol][documentId][$eq]=${params.symbolId}`;
             }
+            if (params.mode) {
+                url += `&filters[mode][$eq]=${params.mode}`;
+            }
             if (params.sort) {
                 url += `&sort=${params.sort}`;
             } else {

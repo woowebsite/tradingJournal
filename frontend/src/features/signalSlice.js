@@ -1,12 +1,13 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { evaluateRule } from '../utils/ruleEngine';
+import { createBlocksFromText } from '../utils/textUtils';
 
 export const fetchSignals = createAsyncThunk(
     'signals/fetchSignals',
     async (_, { rejectWithValue }) => {
         try {
-            const res = await api.get('/signals?populate=*&sort=date:desc');
+            const res = await api.get('/signals?populate=*&sort=date:desc&pagination[pageSize]=1000');
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
@@ -16,7 +17,7 @@ export const fetchSignals = createAsyncThunk(
 
 export const scanSignals = createAsyncThunk(
     'signals/scanSignals',
-    async ({ selectedRuleId, selectedRuleIds, scanSymbols, accountId }, { dispatch, getState, rejectWithValue }) => {
+    async ({ selectedRuleId, selectedRuleIds, scanSymbols, accountId, strategyId }, { dispatch, getState, rejectWithValue }) => {
         try {
             const state = getState();
             const ruleIds = selectedRuleIds?.length ? selectedRuleIds : [selectedRuleId];
@@ -35,6 +36,139 @@ export const scanSignals = createAsyncThunk(
 
                 return rule;
             });
+            const activeStrategy = strategyId
+                ? state.strategies.items.find(strategy =>
+                    (strategy.documentId && strategy.documentId.toString() === strategyId.toString()) ||
+                    (strategy.id && strategy.id.toString() === strategyId.toString())
+                )
+                : null;
+            const tradeDetailRuleGroups = [
+                { fieldName: 'entryRules', signal: 'Entry', detailType: 'Buy' },
+                { fieldName: 'takeProfitRules', signal: 'TakeProfit', detailType: 'Sell' },
+                { fieldName: 'stoplossRules', signal: 'Stoploss', detailType: 'Sell' },
+                { fieldName: 'exitRules', signal: 'Exit', detailType: 'Sell' }
+            ];
+            const ruleGroupById = new Map();
+
+            tradeDetailRuleGroups.forEach(group => {
+                (activeStrategy?.[group.fieldName] || []).forEach(rule => {
+                    const id = (rule.documentId || rule.id)?.toString();
+                    if (id) ruleGroupById.set(id, group);
+                });
+            });
+
+            const buildDemoTradeUrl = ({ symId, date, status }) => {
+                let url = `/trades?filters[mode][$eq]=Demo`;
+                if (date) {
+                    url += `&filters[date][$eq]=${encodeURIComponent(date)}`;
+                }
+                if (status) {
+                    url += `&filters[trade_status][$eq]=${status}`;
+                }
+                if (typeof symId === 'string') {
+                    url += `&filters[symbol][documentId][$eq]=${symId}`;
+                } else {
+                    url += `&filters[symbol][id][$eq]=${symId}`;
+                }
+                if (typeof strategyId === 'string') {
+                    url += `&filters[strategy][documentId][$eq]=${strategyId}`;
+                } else {
+                    url += `&filters[strategy][id][$eq]=${strategyId}`;
+                }
+                return `${url}&sort=date:desc&populate=trade_details`;
+            };
+
+            const createTradeDetail = async ({ tradeId, group, rule, historyItem }) => {
+                const noteText = `Auto-created from ${group.signal} signal: ${rule.Name || 'Rule'}`;
+                const price = Number(historyItem.close ?? historyItem.Close ?? historyItem.price ?? 0);
+                const detailPayload = {
+                    price: Number.isFinite(price) ? price : 0,
+                    type: group.detailType,
+                    volume: 100,
+                    signal: group.signal,
+                    date: historyItem.date,
+                    note: createBlocksFromText(noteText),
+                    trade: tradeId
+                };
+
+                await api.post('/trade-details', { data: detailPayload });
+            };
+
+            const findEligibleOpenTrade = (trades, signalDate) => {
+                const signalTime = new Date(signalDate).getTime();
+
+                return [...(trades || [])]
+                    .filter(trade => {
+                        const tradeTime = new Date(trade.date || trade.createdAt).getTime();
+                        return Number.isFinite(tradeTime) && Number.isFinite(signalTime) && tradeTime < signalTime;
+                    })
+                    .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))[0];
+            };
+
+            const syncDemoTradeDetailForSignal = async ({ symbol, symId, rule, historyItem }) => {
+                if (!accountId || !strategyId) return;
+
+                const ruleId = (rule.documentId || rule.id)?.toString();
+                const group = ruleGroupById.get(ruleId);
+                if (!group) return;
+
+                if (group.signal === 'Entry') {
+                    const existingTrade = await api.get(buildDemoTradeUrl({ symId, date: historyItem.date }));
+                    if (existingTrade.data.data && existingTrade.data.data.length > 0) {
+                        console.log(`Demo trade already exists for ${symbol.Name} on ${historyItem.date}. Skipping.`);
+                        return;
+                    }
+
+                    const noteText = `Auto-created from Entry signal: ${rule.Name || 'Entry rule'}`;
+                    const tradePayload = {
+                        type: 'Long',
+                        trade_status: 'Open',
+                        mode: 'Demo',
+                        date: historyItem.date,
+                        account: accountId,
+                        strategy: strategyId,
+                        symbol: symId,
+                        scored: 0,
+                        note: createBlocksFromText(noteText),
+                        pnl: 0
+                    };
+
+                    const tradeRes = await api.post('/trades', { data: tradePayload });
+                    const savedTradeId = tradeRes.data.data.documentId || tradeRes.data.data.id;
+                    await createTradeDetail({ tradeId: savedTradeId, group, rule, historyItem });
+                    return;
+                }
+
+                const openTrades = await api.get(buildDemoTradeUrl({ symId, status: 'Open' }));
+                const trade = findEligibleOpenTrade(openTrades.data.data, historyItem.date);
+                if (!trade) {
+                    console.log(`No eligible open demo trade found for ${symbol.Name} before ${historyItem.date}. Skipping ${group.signal} detail.`);
+                    return;
+                }
+
+                const tradeId = trade.documentId || trade.id;
+                const hasExistingDetail = trade.trade_details?.some(detail =>
+                    detail.signal === group.signal &&
+                    detail.date === historyItem.date
+                );
+
+                if (hasExistingDetail) {
+                    console.log(`Demo trade detail already exists for ${symbol.Name} ${group.signal} on ${historyItem.date}. Skipping.`);
+                    return;
+                }
+
+                await createTradeDetail({ tradeId, group, rule, historyItem });
+
+                if (group.signal === 'TakeProfit' || group.signal === 'Stoploss' || group.signal === 'Exit') {
+                    const closeNote = `Auto-closed by ${group.signal} signal: ${rule.Name || 'Rule'}`;
+                    await api.put(`/trades/${tradeId}`, {
+                        data: {
+                            trade_status: 'Closed',
+                            note: createBlocksFromText(closeNote)
+                        }
+                    });
+                }
+            };
 
             // Fetch Symbols, unless the page supplied a filtered scan list.
             const symbols = scanSymbols?.length
@@ -84,6 +218,7 @@ export const scanSignals = createAsyncThunk(
                                 const existing = await api.get(checkUrl);
                                 if (existing.data.data && existing.data.data.length > 0) {
                                     console.log(`Signal already exists for ${symbol.Name} on ${checkDate} with ${rule.Name}. Skipping.`);
+                                    await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
                                     break;
                                 }
 
@@ -100,6 +235,7 @@ export const scanSignals = createAsyncThunk(
                                 console.log(`Match found for symbol ${symbol.Name} with ${rule.Name} at index ${i} (Date: ${history[i].date})`);
 
                                 await api.post('/signals', payload);
+                                await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
                                 matchCount++;
                                 break; // Stop after finding the most recent signal matches this rule
                             }

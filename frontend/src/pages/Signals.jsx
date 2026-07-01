@@ -43,7 +43,7 @@ const Signals = () => {
             return;
         }
 
-        dispatch(scanSignals({ selectedRuleIds, scanSymbols, accountId }))
+        dispatch(scanSignals({ selectedRuleIds, scanSymbols, accountId, strategyId: activeStrategyId }))
             .unwrap()
             .then((count) => {
                 alert(`Scan complete. Found ${count} new signals.`);
@@ -189,16 +189,33 @@ const Signals = () => {
         })
         : baseFilteredSignals;
 
-    const TypeBadge = ({ type }) => {
-        const colors = {
-            entry: 'text-blue-400',
-            takeprofit: 'text-green-400',
-            stoploss: 'text-red-400',
-            exit: 'text-orange-400'
-        };
+    const rulePurposeConfig = {
+        entryRules: { label: 'Entry', className: 'bg-blue-500/20 text-blue-400' },
+        stoplossRules: { label: 'Stoploss', className: 'bg-red-500/20 text-red-400' },
+        takeProfitRules: { label: 'Take Profit', className: 'bg-green-500/20 text-green-400' },
+        exitRules: { label: 'Exit', className: 'bg-yellow-500/20 text-yellow-400' }
+    };
+
+    const getRulePurpose = (rule) => {
+        const ruleId = (rule.documentId || rule.id)?.toString();
+        if (!ruleId || !activeStrategy) return null;
+
+        for (const [fieldName, config] of Object.entries(rulePurposeConfig)) {
+            const hasRule = activeStrategy[fieldName]?.some(strategyRule =>
+                (strategyRule.documentId || strategyRule.id)?.toString() === ruleId
+            );
+            if (hasRule) return config;
+        }
+
+        return null;
+    };
+
+    const RulePurposeBadge = ({ rule }) => {
+        const purpose = getRulePurpose(rule);
+
         return (
-            <span className={`font-mono uppercase font-bold ${colors[type] || 'text-gray-400'}`}>
-                {type}
+            <span className={`px-2 py-1 rounded text-xs font-bold ${purpose?.className || 'bg-gray-500/20 text-gray-400'}`}>
+                {purpose?.label || 'Rule'}
             </span>
         );
     };
@@ -330,14 +347,16 @@ const Signals = () => {
                                         </td>
                                         <td className="p-4">
                                             {signal.rules?.length > 0 ? (
-                                                signal.rules.map(rule => (
-                                                    <>
-                                                        <div className="flex items-center gap-2"><TypeBadge type={rule.Type} /> </div>
-                                                        <span key={rule.id || rule.documentId} className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">
+                                                <div className="flex flex-wrap gap-2">
+                                                    {signal.rules.map(rule => (
+                                                        <div key={rule.id || rule.documentId} className="flex flex-col items-start gap-1">
+                                                            <RulePurposeBadge rule={rule} />
+                                                            <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">
                                                             {rule.Name}
-                                                        </span>
-                                                    </>
-                                                ))
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             ) : (
                                                 <span className="text-gray-500 text-sm">-</span>
                                             )}

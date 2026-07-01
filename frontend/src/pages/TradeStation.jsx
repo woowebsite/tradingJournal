@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata } from '../features/marketSlice';
-import { fetchSignals } from '../features/signalSlice';
+import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { fetchOpenTrades, fetchTrades } from '../features/tradeSlice';
 import TradingViewChart from '../components/TradingViewChart';
@@ -25,6 +25,7 @@ const TradeStation = () => {
     const [tcbsRecommendations, setTcbsRecommendations] = useState([]);
     const [tcbsRecentSignals, setTcbsRecentSignals] = useState([]);
     const [loadingTcbsInsights, setLoadingTcbsInsights] = useState(false);
+    const lastAutoRefreshedSymbolRef = useRef(null);
     const symbolParam = searchParams.get('symbol');
 
     useEffect(() => {
@@ -120,10 +121,24 @@ const TradeStation = () => {
 
     const symbolTrades = selectedSymbolId ? trades.filter(t => t.symbol.id === selectedSymbolId || t.symbol.documentId === selectedSymbolId) : [];
 
-    const handleRefresh = () => {
+    const handleRefresh = useCallback(() => {
         if (!selectedSymbol || !selectedSymbolId) return;
         const ticker = selectedSymbol.Name;
         if (!ticker) return;
+        const accountId = selectedAccount ? (selectedAccount.documentId || selectedAccount.id) : null;
+        const selectedRuleIds = Array.from(new Set([
+            ...(activeStrategy?.rules || []),
+            ...(activeStrategy?.entryRules || []),
+            ...(activeStrategy?.takeProfitRules || []),
+            ...(activeStrategy?.stoplossRules || []),
+            ...(activeStrategy?.exitRules || [])
+        ].map(rule => rule.documentId || rule.id).filter(Boolean)));
+        const scanSymbols = [{
+            id: selectedSymbolId,
+            documentId: selectedSymbolId,
+            name: selectedSymbol.Name,
+            Name: selectedSymbol.Name
+        }];
 
         dispatch(loadExternalHistory({
             symbol: ticker,
@@ -134,6 +149,21 @@ const TradeStation = () => {
             .then(count => {
                 if (count > 0) console.log(`Updated ${count} new records for ${ticker}`);
                 else if (count === 0) console.log('No new records');
+
+                if (selectedRuleIds.length > 0) {
+                    return dispatch(scanSignals({
+                        selectedRuleIds,
+                        scanSymbols,
+                        accountId,
+                        strategyId: activeStrategyId
+                    })).unwrap();
+                }
+
+                return 0;
+            })
+            .then(() => {
+                dispatch(fetchSignals());
+                if (accountId) dispatch(fetchTrades({ accountId, pageSize: 50 }));
             })
             .catch(err => console.error(`Failed to refresh history: ${err}`));
 
@@ -142,7 +172,17 @@ const TradeStation = () => {
             .unwrap()
             .then(() => console.log(`Metadata synced for ${ticker}`))
             .catch(err => console.error(`Failed to sync metadata: ${err}`));
-    };
+    }, [activeStrategy, activeStrategyId, dispatch, selectedAccount, selectedSymbol, selectedSymbolId]);
+
+    useEffect(() => {
+        if (!symbolParam || !selectedSymbol || !selectedSymbolId) return;
+
+        const refreshKey = `${selectedSymbolId}:${symbolParam}`;
+        if (lastAutoRefreshedSymbolRef.current === refreshKey) return;
+
+        lastAutoRefreshedSymbolRef.current = refreshKey;
+        handleRefresh();
+    }, [handleRefresh, selectedSymbol, selectedSymbolId, symbolParam]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
