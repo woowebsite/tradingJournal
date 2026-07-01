@@ -717,9 +717,7 @@ export interface ApiRuleRule extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::strategy.strategy'
     >;
-    Type: Schema.Attribute.Enumeration<
-      ['entry', 'takeprofit', 'stoploss', 'exit']
-    >;
+    Type: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -840,6 +838,8 @@ export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
+    entryRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    exitRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -849,6 +849,8 @@ export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     rules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    stoplossRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    takeProfitRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
     type: Schema.Attribute.Enumeration<['Rules', 'Webhook']> &
       Schema.Attribute.DefaultTo<'Rules'>;

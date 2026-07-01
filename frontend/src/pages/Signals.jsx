@@ -13,9 +13,10 @@ const Signals = () => {
     const { items: rules } = useSelector(state => state.rules);
     const { items: strategies } = useSelector(state => state.strategies);
     const { items: watchlists } = useSelector(state => state.watchlists);
-    const { selectedAccount } = useAccount();
+    const { selectedAccount, accountSymbols, defaultWatchlist } = useAccount();
 
     const [selectedRule, setSelectedRule] = useState('');
+    const [selectedSymbol, setSelectedSymbol] = useState('');
 
     useEffect(() => {
         dispatch(fetchSignals());
@@ -24,16 +25,25 @@ const Signals = () => {
     }, [dispatch]);
 
     const handleLoadSignals = () => {
-        if (!selectedRule) {
-            if (window.confirm('No rule selected. Just refresh list? (Cancel to select a rule for scanning)')) {
-                dispatch(fetchSignals());
-            }
+        if (!selectedRule && availableRules.length === 0) {
+            alert('No rules available to scan.');
             return;
         }
 
         const accountId = selectedAccount ? (selectedAccount.documentId || selectedAccount.id) : null;
+        const selectedRuleIds = selectedRule
+            ? [selectedRule]
+            : availableRules.map(rule => rule.documentId || rule.id).filter(Boolean);
+        const scanSymbols = selectedSymbol
+            ? availableSymbols.filter(symbol => symbol.id === selectedSymbol)
+            : availableSymbols;
 
-        dispatch(scanSignals({ selectedRuleId: selectedRule, accountId }))
+        if (scanSymbols.length === 0) {
+            alert('No symbols available to scan.');
+            return;
+        }
+
+        dispatch(scanSignals({ selectedRuleIds, scanSymbols, accountId }))
             .unwrap()
             .then((count) => {
                 alert(`Scan complete. Found ${count} new signals.`);
@@ -85,7 +95,7 @@ const Signals = () => {
     })();
 
     // Filter signals based on selected rule AND active strategy
-    const filteredSignals = (() => {
+    const baseFilteredSignals = (() => {
         if (!selectedAccount) return [];
         if (!activeStrategy) return [];
 
@@ -146,6 +156,39 @@ const Signals = () => {
         return list;
     })();
 
+    const availableSymbols = (() => {
+        const sourceSymbols = defaultWatchlist?.symbols?.length
+            ? defaultWatchlist.symbols
+            : accountSymbols;
+
+        return sourceSymbols
+            .map(symbol => {
+                const symbolId = symbol.documentId || symbol.id;
+                if (!symbolId) return null;
+
+                return {
+                    id: symbolId.toString(),
+                    name: symbol.Name || 'Unknown'
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.name.localeCompare(b.name));
+    })();
+
+    useEffect(() => {
+        if (!selectedSymbol) return;
+        if (!availableSymbols.some(symbol => symbol.id === selectedSymbol)) {
+            setSelectedSymbol('');
+        }
+    }, [availableSymbols, selectedSymbol]);
+
+    const filteredSignals = selectedSymbol
+        ? baseFilteredSignals.filter(signal => {
+            const symbolId = signal.symbol?.documentId || signal.symbol?.id;
+            return symbolId?.toString() === selectedSymbol;
+        })
+        : baseFilteredSignals;
+
     const TypeBadge = ({ type }) => {
         const colors = {
             entry: 'text-blue-400',
@@ -190,7 +233,7 @@ const Signals = () => {
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-sm">
                 {/* Toolbar */}
                 <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                         <div className="flex items-center gap-2">
                             <Filter size={18} className="text-gray-400" />
                             <span className="text-sm font-medium text-gray-400">Filter by Rule:</span>
@@ -204,6 +247,22 @@ const Signals = () => {
                             {availableRules.map(rule => (
                                 <option key={rule.id || rule.documentId} value={rule.id || rule.documentId}>
                                     {rule.Name}
+                                </option>
+                            ))}
+                        </select>
+
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-400">Filter by Symbol:</span>
+                        </div>
+                        <select
+                            value={selectedSymbol}
+                            onChange={(e) => setSelectedSymbol(e.target.value)}
+                            className="bg-gray-800 border border-gray-600 text-gray-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none min-w-[180px]"
+                        >
+                            <option value="">All Symbols</option>
+                            {availableSymbols.map(symbol => (
+                                <option key={symbol.id} value={symbol.id}>
+                                    {symbol.name}
                                 </option>
                             ))}
                         </select>
@@ -270,20 +329,18 @@ const Signals = () => {
                                             </span>
                                         </td>
                                         <td className="p-4">
-                                            <div className="flex flex-wrap gap-2">
-                                                {signal.rules?.length > 0 ? (
-                                                    signal.rules.map(rule => (
-                                                        <>
-                                                            <span key={rule.id || rule.documentId} className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">
-                                                                {rule.Name}
-                                                            </span>
-                                                            <TypeBadge type={rule.Type} />
-                                                        </>
-                                                    ))
-                                                ) : (
-                                                    <span className="text-gray-500 text-sm">-</span>
-                                                )}
-                                            </div>
+                                            {signal.rules?.length > 0 ? (
+                                                signal.rules.map(rule => (
+                                                    <>
+                                                        <div className="flex items-center gap-2"><TypeBadge type={rule.Type} /> </div>
+                                                        <span key={rule.id || rule.documentId} className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">
+                                                            {rule.Name}
+                                                        </span>
+                                                    </>
+                                                ))
+                                            ) : (
+                                                <span className="text-gray-500 text-sm">-</span>
+                                            )}
                                         </td>
                                         <td className="p-4">
                                             <span className={`px - 2 py - 1 rounded text - xs font - bold ${signal.expired ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'} `}>

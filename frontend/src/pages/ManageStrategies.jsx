@@ -7,25 +7,49 @@ import { fetchWebhooks } from '../features/webhookSlice';
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
+const RULE_GROUPS = [
+    { key: 'entryRules', label: 'Entry Rules', labelClassName: 'text-blue-400' },
+    { key: 'takeProfitRules', label: 'Take Profit Rules', labelClassName: 'text-green-400' },
+    { key: 'stoplossRules', label: 'Stoploss Rules', labelClassName: 'text-red-400' },
+    { key: 'exitRules', label: 'Exit Rules', labelClassName: 'text-yellow-400' }
+];
+
+const getRuleId = (rule) => rule?.documentId || rule?.id;
+
 const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules, availableWebhooks }) => {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
         type: 'Rules',
         webhook: '',
-        rules: [] // Array of IDs
+        entryRules: [],
+        takeProfitRules: [],
+        stoplossRules: [],
+        exitRules: []
     });
-    const [showRuleScanner, setShowRuleScanner] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
+    const [openRuleGroup, setOpenRuleGroup] = useState(null);
+    const [ruleSearchTerms, setRuleSearchTerms] = useState({});
 
     useEffect(() => {
         if (initialData) {
+            const fallbackRules = initialData.rules || [];
+            const getInitialRules = (fieldName) => {
+                const sourceRules = initialData[fieldName]?.length
+                    ? initialData[fieldName]
+                    : fieldName === 'entryRules' ? fallbackRules : [];
+
+                return sourceRules.map(getRuleId).filter(Boolean);
+            };
+
             setFormData({
                 name: initialData.name || '',
                 description: initialData.description || '',
                 type: initialData.type || (initialData.webhook ? 'Webhook' : 'Rules'),
                 webhook: initialData.webhook ? (initialData.webhook.documentId || initialData.webhook.id) : '',
-                rules: initialData.rules ? initialData.rules.map(r => r.id || r.documentId) : []
+                entryRules: getInitialRules('entryRules'),
+                takeProfitRules: getInitialRules('takeProfitRules'),
+                stoplossRules: getInitialRules('stoplossRules'),
+                exitRules: getInitialRules('exitRules')
             });
         } else {
             setFormData({
@@ -33,9 +57,14 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules,
                 description: '',
                 type: 'Rules',
                 webhook: '',
-                rules: []
+                entryRules: [],
+                takeProfitRules: [],
+                stoplossRules: [],
+                exitRules: []
             });
         }
+        setOpenRuleGroup(null);
+        setRuleSearchTerms({});
     }, [initialData, isOpen]);
 
     const handleChange = (e) => {
@@ -46,56 +75,163 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules,
                     ...prev,
                     type: value,
                     webhook: value === 'Webhook' ? prev.webhook : '',
-                    rules: value === 'Rules' ? prev.rules : []
+                    entryRules: value === 'Rules' ? prev.entryRules : [],
+                    takeProfitRules: value === 'Rules' ? prev.takeProfitRules : [],
+                    stoplossRules: value === 'Rules' ? prev.stoplossRules : [],
+                    exitRules: value === 'Rules' ? prev.exitRules : []
                 };
             }
             return { ...prev, [name]: value };
         });
     };
 
-    const handleAddRule = (ruleId) => {
-        if (!formData.rules.includes(ruleId)) {
-            setFormData(prev => ({ ...prev, rules: [...prev.rules, ruleId] }));
+    const handleAddRule = (fieldName, ruleId) => {
+        if (!formData[fieldName].includes(ruleId)) {
+            setFormData(prev => ({ ...prev, [fieldName]: [...prev[fieldName], ruleId] }));
         }
-        setShowRuleScanner(false);
+        setOpenRuleGroup(null);
     };
 
-    const handleRemoveRule = (ruleId) => {
+    const handleRemoveRule = (fieldName, ruleId) => {
         setFormData(prev => ({
             ...prev,
-            rules: prev.rules.filter(id => id !== ruleId)
+            [fieldName]: prev[fieldName].filter(id => id !== ruleId)
         }));
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        const ruleIds = RULE_GROUPS.flatMap(group => formData[group.key]);
+
         onSubmit({
             ...formData,
             webhook: formData.type === 'Webhook' ? formData.webhook : null,
-            rules: formData.type === 'Rules' ? formData.rules : []
+            rules: formData.type === 'Rules' ? [...new Set(ruleIds)] : [],
+            entryRules: formData.type === 'Rules' ? formData.entryRules : [],
+            takeProfitRules: formData.type === 'Rules' ? formData.takeProfitRules : [],
+            stoplossRules: formData.type === 'Rules' ? formData.stoplossRules : [],
+            exitRules: formData.type === 'Rules' ? formData.exitRules : []
         });
     };
 
-    // Get full rule objects for selected IDs
-    const selectedRules = availableRules.filter(r => formData.rules.includes(r.id) || formData.rules.includes(r.documentId));
-
-    // Filter available rules for scanner
-    const rulesToSelect = availableRules.filter(r =>
-        !formData.rules.includes(r.id) &&
-        !formData.rules.includes(r.documentId) &&
-        (r.Name.toLowerCase().includes(searchTerm.toLowerCase()) || r.Description?.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-
     // Helper for badges
     const TypeBadge = ({ type }) => {
+        const styles = {
+            priceaction: 'bg-blue-500/20 text-blue-400',
+            indicator: 'bg-purple-500/20 text-purple-400'
+        };
+
         return (
-            <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${type === 'entry' ? 'bg-blue-500/20 text-blue-400' :
-                type === 'takeprofit' ? 'bg-green-500/20 text-green-400' :
-                    type === 'stoploss' ? 'bg-red-500/20 text-red-400' :
-                        'bg-orange-500/20 text-orange-400'
-                }`}>
+            <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${styles[type] || 'bg-gray-500/20 text-gray-400'}`}>
                 {type}
             </span>
+        );
+    };
+
+    const RuleGroupSelector = ({ group }) => {
+        const selectedIds = formData[group.key];
+        const searchTerm = ruleSearchTerms[group.key] || '';
+        const selectedRules = availableRules.filter(rule =>
+            selectedIds.includes(rule.id) || selectedIds.includes(rule.documentId)
+        );
+        const rulesToSelect = availableRules.filter(rule => {
+            const name = rule.Name || '';
+            const description = rule.Description || '';
+
+            return !selectedIds.includes(rule.id) &&
+                !selectedIds.includes(rule.documentId) &&
+                (name.toLowerCase().includes(searchTerm.toLowerCase()) || description.toLowerCase().includes(searchTerm.toLowerCase()));
+        });
+        const isScannerOpen = openRuleGroup === group.key;
+
+        return (
+            <div>
+                <div className="flex justify-between items-center mb-2">
+                    <label className={`block text-sm font-medium ${group.labelClassName}`}>{group.label}</label>
+                    {!isScannerOpen && (
+                        <button
+                            type="button"
+                            onClick={() => setOpenRuleGroup(group.key)}
+                            className="text-xs flex items-center gap-1 bg-blue-600/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-600/30 transition"
+                        >
+                            <Plus size={14} /> Add Rule
+                        </button>
+                    )}
+                </div>
+
+                <div className="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden mb-4">
+                    <table className="w-full text-left text-sm">
+                        <tbody className="divide-y divide-gray-700/50">
+                            {selectedRules.length === 0 ? (
+                                <tr>
+                                    <td colSpan="3" className="p-4 text-center text-gray-500">No rules added yet.</td>
+                                </tr>
+                            ) : (
+                                selectedRules.map(rule => (
+                                    <tr key={getRuleId(rule)}>
+                                        <td className="p-3 text-white">{rule.Name}</td>
+                                        <td className="p-3"><TypeBadge type={rule.Type} /></td>
+                                        <td className="p-3 text-right">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveRule(group.key, getRuleId(rule))}
+                                                className="text-red-500 hover:text-red-400"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {isScannerOpen && (
+                    <div className="mt-4 border border-gray-700 rounded-xl p-4 bg-gray-900/30 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="flex justify-between items-center mb-3">
+                            <h4 className="font-bold text-gray-300 text-sm">Add {group.label}</h4>
+                            <button type="button" onClick={() => setOpenRuleGroup(null)} className="text-gray-500 hover:text-white">
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="relative mb-3">
+                            <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
+                            <input
+                                type="text"
+                                placeholder="Search available rules..."
+                                value={searchTerm}
+                                onChange={(e) => setRuleSearchTerms(prev => ({ ...prev, [group.key]: e.target.value }))}
+                                className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                                autoFocus
+                            />
+                        </div>
+                        <div className="rule-list max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                            {rulesToSelect.length === 0 ? (
+                                <p className="text-gray-500 text-center py-4 text-sm">No matching rules found.</p>
+                            ) : (
+                                rulesToSelect.map(rule => (
+                                    <button
+                                        key={getRuleId(rule)}
+                                        type="button"
+                                        onClick={() => handleAddRule(group.key, getRuleId(rule))}
+                                        className="w-full text-left p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 flex justify-between items-center group transition"
+                                    >
+                                        <div>
+                                            <p className="text-gray-200 font-medium text-sm">{rule.Name}</p>
+                                            <p className="text-gray-500 text-xs">{rule.Description}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <TypeBadge type={rule.Type} />
+                                            <Plus size={16} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        </div>
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
         );
     };
 
@@ -175,101 +311,10 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules,
                             )}
                         </div>
                     ) : (
-                        <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="block text-sm text-gray-400">Associated Rules</label>
-                                {!showRuleScanner && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowRuleScanner(true)}
-                                        className="text-xs flex items-center gap-1 bg-blue-600/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-600/30 transition"
-                                    >
-                                        <Plus size={14} /> Add Rule
-                                    </button>
-                                )}
-                            </div>
-
-                            <div className="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden mb-4">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="text-gray-500 bg-gray-800/50">
-                                        <tr>
-                                            <th className="p-3 font-medium">Name</th>
-                                            <th className="p-3 font-medium">Type</th>
-                                            <th className="p-3 font-medium text-right">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-700/50">
-                                        {selectedRules.length === 0 ? (
-                                            <tr>
-                                                <td colSpan="3" className="p-4 text-center text-gray-500">No rules added yet.</td>
-                                            </tr>
-                                        ) : (
-                                            selectedRules.map(r => (
-                                                <tr key={r.id || r.documentId}>
-                                                    <td className="p-3 text-white">{r.Name}</td>
-                                                    <td className="p-3"><TypeBadge type={r.Type} /></td>
-                                                    <td className="p-3 text-right">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleRemoveRule(r.id || r.documentId)}
-                                                            className="text-red-500 hover:text-red-400"
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {showRuleScanner && (
-                                <div className="mt-4 border border-gray-700 rounded-xl p-4 bg-gray-900/30 animate-in fade-in slide-in-from-top-2 duration-200">
-                                    <div className="flex justify-between items-center mb-3">
-                                        <h4 className="font-bold text-gray-300 text-sm">Add Rule</h4>
-                                        <button onClick={() => setShowRuleScanner(false)} className="text-gray-500 hover:text-white">
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-                                    <div className="relative mb-3">
-                                        <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
-                                        <input
-                                            type="text"
-                                            placeholder="Search available rules..."
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
-                                            autoFocus
-                                        />
-                                    </div>
-                                    <div className="rule-list max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                                        {rulesToSelect.length === 0 ? (
-                                            <p className="text-gray-500 text-center py-4 text-sm">No matching rules found.</p>
-                                        ) : (
-                                            rulesToSelect.map(r => (
-                                                <button
-                                                    key={r.id || r.documentId}
-                                                    type="button"
-                                                    onClick={() => handleAddRule(r.id || r.documentId)}
-                                                    className="w-full text-left p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 flex justify-between items-center group transition"
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        <div>
-                                                            <p className="text-gray-200 font-medium text-sm">{r.Name}</p>
-                                                            <p className="text-gray-500 text-xs">{r.Description}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <TypeBadge type={r.Type} />
-                                                        <Plus size={16} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                    </div>
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
-                            )}
+                        <div className="space-y-6">
+                            {RULE_GROUPS.map(group => (
+                                <RuleGroupSelector key={group.key} group={group} />
+                            ))}
                         </div>
                     )}
                 </div>
@@ -323,6 +368,11 @@ const ManageStrategies = () => {
     const handleDelete = async (id) => {
         if (!window.confirm('Delete this strategy?')) return;
         dispatch(deleteStrategy(id));
+    };
+
+    const getStrategyRuleCount = (strategy) => {
+        const groupedRuleCount = RULE_GROUPS.reduce((count, group) => count + (strategy[group.key]?.length || 0), 0);
+        return groupedRuleCount || strategy.rules?.length || 0;
     };
 
     const handleModalSubmit = async (data) => {
@@ -395,7 +445,7 @@ const ManageStrategies = () => {
                             <span className="text-gray-300 font-medium">
                                 {strategy.type === 'Webhook'
                                     ? (strategy.webhook?.Title || strategy.webhook?.App || '-')
-                                    : `${strategy.rules?.length || 0}`}
+                                    : `${getStrategyRuleCount(strategy)}`}
                             </span>
                         </div>
                     </div>

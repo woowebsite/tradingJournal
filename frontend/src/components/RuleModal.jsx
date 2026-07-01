@@ -7,7 +7,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     const [formData, setFormData] = useState({
         Name: '',
         Description: '',
-        Type: 'entry',
+        Type: '',
         Active: 'Enable',
         Rule: JSON.stringify({
             condition: "AND",
@@ -23,7 +23,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             setFormData({
                 Name: initialData.Name || '',
                 Description: initialData.Description || '',
-                Type: initialData.Type || 'entry',
+                Type: initialData.Type || '',
                 Active: initialData.Active || 'Enable',
                 Rule: initialData.Rule ? JSON.stringify(initialData.Rule, null, 2) : JSON.stringify({
                     condition: "AND",
@@ -34,7 +34,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             setFormData({
                 Name: '',
                 Description: '',
-                Type: 'entry',
+                Type: '',
                 Active: 'Enable',
                 Rule: JSON.stringify({
                     condition: "AND",
@@ -95,17 +95,14 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Type</label>
-                            <select
+                            <input
+                                type="text"
                                 name="Type"
                                 value={formData.Type}
                                 onChange={handleChange}
                                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
-                            >
-                                <option value="entry">Entry</option>
-                                <option value="takeprofit">Take Profit</option>
-                                <option value="stoploss">Stop Loss</option>
-                                <option value="exit">Exit</option>
-                            </select>
+                                placeholder="e.g. priceaction, indicator, volume"
+                            />
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Status</label>

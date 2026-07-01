@@ -18,13 +18,7 @@
       "type": "string"
     },
     "Type": {
-      "type": "enumeration",
-      "enum": [
-        "entry",
-        "takeprofit",
-        "stoploss",
-        "exit"
-      ]
+      "type": "string"
     },
     "Rule": {
       "type": "json"

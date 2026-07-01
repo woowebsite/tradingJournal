@@ -115,7 +115,7 @@ const StrategyPanel = ({ activeStrategy, allSignals, trades, recommendations = [
                     className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'tcbsSignals' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
                 >
                     <TrendingUp size={14} className={activeTab === 'tcbsSignals' ? 'text-green-400' : 'text-gray-500'} />
-                    Signals ({tcbsSignals.length})
+                    TCB Signals ({tcbsSignals.length})
                 </button>
             </div>
             <div className="p-2 overflow-y-auto custom-scrollbar flex-1 text-sm text-gray-300">
