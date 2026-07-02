@@ -32,6 +32,12 @@ export const fetchTrades = createAsyncThunk(
             if (params.mode) {
                 url += `&filters[mode][$eq]=${params.mode}`;
             }
+            if (params.strategyId) {
+                url += `&filters[strategy][documentId][$eq]=${params.strategyId}`;
+            }
+            if (params.tradeStatus) {
+                url += `&filters[trade_status][$eq]=${params.tradeStatus}`;
+            }
             if (params.sort) {
                 url += `&sort=${params.sort}`;
             } else {
