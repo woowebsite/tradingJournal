@@ -50,8 +50,17 @@ const Trades = () => {
 
             // Calc PnL
             const symbolId = item.symbol?.documentId || item.symbol?.id;
-            const currentPrice = symbolId ? latestPricesMap[symbolId] : null;
-            const pnl = calculateTradePnL(item, currentPrice);
+            const rawCurrentPrice = symbolId ? latestPricesMap[symbolId] : null;
+            const currentPrice = rawCurrentPrice !== null && rawCurrentPrice !== undefined && rawCurrentPrice !== ''
+                ? Number(rawCurrentPrice)
+                : null;
+
+            const savedPnl = item.pnl !== null && item.pnl !== undefined && item.pnl !== ''
+                ? Number(item.pnl)
+                : null;
+            const pnl = item.trade_status === 'Closed' && Number.isFinite(savedPnl)
+                ? savedPnl
+                : Number.isFinite(currentPrice) ? calculateTradePnL(item, currentPrice) : null;
 
             return {
                 id: item.id || item.documentId,
@@ -200,7 +209,7 @@ const Trades = () => {
                                         {trade.trade_status}
                                     </span>
                                 </td>
-                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                <td onClick={() => setSelectedTrade(trade)} className={`p-4 text-right font-medium font-mono ${trade.derivedPnl == null ? 'text-gray-400' : trade.derivedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                     {trade.derivedPnl != null ? formatNumber(trade.derivedPnl, selectedAccount?.moneyFormat || '#,###.##') : '-'}
                                 </td>
                                 <td className="p-4 text-right flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>

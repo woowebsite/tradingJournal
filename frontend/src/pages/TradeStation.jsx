@@ -341,7 +341,6 @@ const TradeStation = () => {
                     {/* Strategy Panel */}
                     <StrategyPanel
                         activeStrategy={activeStrategy}
-                        allSignals={allSignals}
                         trades={symbolTrades}
                         recommendations={tcbsRecommendations}
                         tcbsSignals={tcbsRecentSignals}

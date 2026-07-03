@@ -2,6 +2,7 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { evaluateRule } from '../utils/ruleEngine';
 import { createBlocksFromText } from '../utils/textUtils';
+import { calculateTradePnL } from '../utils/tradeCalculations';
 
 export const fetchSignals = createAsyncThunk(
     'signals/fetchSignals',
@@ -57,6 +58,16 @@ export const scanSignals = createAsyncThunk(
                 });
             });
 
+            const getRuleScanOrder = (rule) => {
+                const ruleId = (rule.documentId || rule.id)?.toString();
+                const group = ruleGroupById.get(ruleId);
+                const groupIndex = tradeDetailRuleGroups.findIndex(item => item.signal === group?.signal);
+
+                return groupIndex === -1 ? tradeDetailRuleGroups.length : groupIndex;
+            };
+
+            rulesToScan.sort((a, b) => getRuleScanOrder(a) - getRuleScanOrder(b));
+
             const buildDemoTradeUrl = ({ symId, date, status }) => {
                 let url = `/trades?filters[mode][$eq]=Demo`;
                 if (date) {
@@ -75,6 +86,11 @@ export const scanSignals = createAsyncThunk(
                 } else {
                     url += `&filters[strategy][id][$eq]=${strategyId}`;
                 }
+                if (typeof accountId === 'string') {
+                    url += `&filters[account][documentId][$eq]=${accountId}`;
+                } else {
+                    url += `&filters[account][id][$eq]=${accountId}`;
+                }
                 return `${url}&sort=date:desc&populate=trade_details`;
             };
 
@@ -91,7 +107,8 @@ export const scanSignals = createAsyncThunk(
                     trade: tradeId
                 };
 
-                await api.post('/trade-details', { data: detailPayload });
+                const detailRes = await api.post('/trade-details', { data: detailPayload });
+                return detailRes.data.data || detailPayload;
             };
 
             const findEligibleOpenTrade = (trades, signalDate) => {
@@ -100,9 +117,14 @@ export const scanSignals = createAsyncThunk(
                 return [...(trades || [])]
                     .filter(trade => {
                         const tradeTime = new Date(trade.date || trade.createdAt).getTime();
-                        return Number.isFinite(tradeTime) && Number.isFinite(signalTime) && tradeTime < signalTime;
+                        return Number.isFinite(tradeTime) && Number.isFinite(signalTime) && tradeTime <= signalTime;
                     })
                     .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))[0];
+            };
+
+            const findOpenTradeBeforeSignal = async ({ symId, signalDate }) => {
+                const openTrades = await api.get(buildDemoTradeUrl({ symId, status: 'Open' }));
+                return findEligibleOpenTrade(openTrades.data.data, signalDate);
             };
 
             const syncDemoTradeDetailForSignal = async ({ symbol, symId, rule, historyItem }) => {
@@ -110,9 +132,19 @@ export const scanSignals = createAsyncThunk(
 
                 const ruleId = (rule.documentId || rule.id)?.toString();
                 const group = ruleGroupById.get(ruleId);
-                if (!group) return;
+
+                if (!group) {
+                    console.log(`Rule ${rule.Name || ruleId} is not assigned to an Entry/TakeProfit/Stoploss/Exit group in the active strategy. Skipping demo trade sync.`);
+                    return;
+                }
 
                 if (group.signal === 'Entry') {
+                    const priorOpenTrade = await findOpenTradeBeforeSignal({ symId, signalDate: historyItem.date });
+                    if (priorOpenTrade) {
+                        console.log(`Open demo trade already exists for ${symbol.Name} before ${historyItem.date}. Skipping Entry detail.`);
+                        return;
+                    }
+
                     const existingTrade = await api.get(buildDemoTradeUrl({ symId, date: historyItem.date }));
                     if (existingTrade.data.data && existingTrade.data.data.length > 0) {
                         console.log(`Demo trade already exists for ${symbol.Name} on ${historyItem.date}. Skipping.`);
@@ -139,8 +171,7 @@ export const scanSignals = createAsyncThunk(
                     return;
                 }
 
-                const openTrades = await api.get(buildDemoTradeUrl({ symId, status: 'Open' }));
-                const trade = findEligibleOpenTrade(openTrades.data.data, historyItem.date);
+                const trade = await findOpenTradeBeforeSignal({ symId, signalDate: historyItem.date });
                 if (!trade) {
                     console.log(`No eligible open demo trade found for ${symbol.Name} before ${historyItem.date}. Skipping ${group.signal} detail.`);
                     return;
@@ -157,17 +188,49 @@ export const scanSignals = createAsyncThunk(
                     return;
                 }
 
-                await createTradeDetail({ tradeId, group, rule, historyItem });
+                const createdDetail = await createTradeDetail({ tradeId, group, rule, historyItem });
 
                 if (group.signal === 'TakeProfit' || group.signal === 'Stoploss' || group.signal === 'Exit') {
                     const closeNote = `Auto-closed by ${group.signal} signal: ${rule.Name || 'Rule'}`;
+                    const pnl = calculateTradePnL({
+                        ...trade,
+                        trade_details: [
+                            ...(trade.trade_details || []),
+                            createdDetail
+                        ]
+                    });
+
                     await api.put(`/trades/${tradeId}`, {
                         data: {
                             trade_status: 'Closed',
+                            pnl,
                             note: createBlocksFromText(closeNote)
                         }
                     });
                 }
+            };
+
+            const canCreateSignal = async ({ symbol, symId, rule, historyItem }) => {
+                const ruleId = (rule.documentId || rule.id)?.toString();
+                const group = ruleGroupById.get(ruleId);
+                if (!group) return true;
+
+                const openTrade = await findOpenTradeBeforeSignal({ symId, signalDate: historyItem.date });
+
+                if (group.signal === 'Entry') {
+                    if (openTrade) {
+                        console.log(`Open demo trade already exists for ${symbol.Name} before ${historyItem.date}. Skipping Entry signal.`);
+                        return false;
+                    }
+                    return true;
+                }
+
+                if (!openTrade) {
+                    console.log(`No eligible open demo trade found for ${symbol.Name} before ${historyItem.date}. Skipping ${group.signal} signal.`);
+                    return false;
+                }
+
+                return true;
             };
 
             // Fetch Symbols, unless the page supplied a filtered scan list.
@@ -194,15 +257,18 @@ export const scanSignals = createAsyncThunk(
 
                     if (!history || history.length === 0) return;
 
-                    for (const rule of rulesToScan) {
-                        // Loop through history to find the first match (most recent interaction)
-                        for (let i = 0; i < history.length; i++) {
+                    for (let i = history.length - 1; i >= 0; i--) {
+                        // Process each candle chronologically so demo trades open and close in chart order.
+                        for (const rule of rulesToScan) {
                             const isMatch = evaluateRule(history, rule.Rule, i);
 
                             if (isMatch) {
                                 // Uniqueness Check: Prevent duplicate signal for same Symbol + Date + Rule
                                 const checkDate = history[i].date;
                                 const ruleId = rule.documentId || rule.id;
+                                const isAllowedSignal = await canCreateSignal({ symbol, symId, rule, historyItem: history[i] });
+                                if (!isAllowedSignal) continue;
+
                                 let checkUrl = `/signals?filters[date][$eq]=${checkDate}`;
                                 if (typeof symId === 'string') {
                                     checkUrl += `&filters[symbol][documentId][$eq]=${symId}`;
@@ -219,7 +285,7 @@ export const scanSignals = createAsyncThunk(
                                 if (existing.data.data && existing.data.data.length > 0) {
                                     console.log(`Signal already exists for ${symbol.Name} on ${checkDate} with ${rule.Name}. Skipping.`);
                                     await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
-                                    break;
+                                    continue;
                                 }
 
                                 const payload = {
@@ -237,7 +303,6 @@ export const scanSignals = createAsyncThunk(
                                 await api.post('/signals', payload);
                                 await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
                                 matchCount++;
-                                break; // Stop after finding the most recent signal matches this rule
                             }
                         }
                     }
