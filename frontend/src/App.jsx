@@ -3,6 +3,7 @@ import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
+import Backtest from './pages/Backtest';
 import Accounts from './pages/Accounts';
 import ManageMarket from './pages/ManageMarket';
 import ManageScored from './pages/ManageScored';
@@ -42,6 +43,7 @@ function App() {
             <Route path="today-trades" element={<TodayTrades />} />
             <Route path="market-flow" element={<MarketFlow />} />
             <Route path="trades" element={<Trades />} />
+            <Route path="backtest" element={<Backtest />} />
             <Route path="journal" element={<Journal />} />
             <Route path="journal-calendar" element={<JournalCalendar />} />
             <Route path="journal-plan" element={<Plan />} />

@@ -1,25 +1,22 @@
 import React, { useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchTrades } from '../features/tradeSlice';
-import { useAccount } from '../context/AccountContext';
 
 const StrategySummary = ({ activeStrategy }) => {
     const dispatch = useDispatch();
-    const { selectedAccount } = useAccount();
     const { items: strategyTrades, loading: strategyTradesLoading } = useSelector(state => state.trades);
 
     useEffect(() => {
-        if (!activeStrategy || !selectedAccount) return;
+        if (!activeStrategy) return;
         const strategyId = activeStrategy.documentId || activeStrategy.id;
-        const accountId = selectedAccount.documentId || selectedAccount.id;
 
         dispatch(fetchTrades({
-            accountId,
             strategyId,
             tradeStatus: 'Closed',
+            mode: 'Demo',
             pageSize: 1000
         }));
-    }, [activeStrategy, selectedAccount, dispatch]);
+    }, [activeStrategy, dispatch]);
 
     const { winRate, totalFinished, winCount, lossCount, strategyStats } = useMemo(() => {
         if (!strategyTrades || strategyTrades.length === 0) {
@@ -39,7 +36,7 @@ const StrategySummary = ({ activeStrategy }) => {
 
         strategyTrades.forEach(trade => {
             const pnl = Number(trade.pnl);
-            if (trade.trade_status !== 'Closed' || !Number.isFinite(pnl)) return;
+            if (trade.trade_status !== 'Closed' || trade.mode !== 'Demo' || !Number.isFinite(pnl)) return;
 
             if (pnl > 0) {
                 wins++;

@@ -43,7 +43,7 @@ const Signals = () => {
             return;
         }
 
-        dispatch(scanSignals({ selectedRuleIds, scanSymbols, accountId, strategyId: activeStrategyId }))
+        dispatch(scanSignals({ selectedRuleIds, scanSymbols, accountId, strategyId: activeStrategyId, syncDemoTrades: false }))
             .unwrap()
             .then((count) => {
                 alert(`Scan complete. Found ${count} new signals.`);

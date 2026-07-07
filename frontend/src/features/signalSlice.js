@@ -18,7 +18,7 @@ export const fetchSignals = createAsyncThunk(
 
 export const scanSignals = createAsyncThunk(
     'signals/scanSignals',
-    async ({ selectedRuleId, selectedRuleIds, scanSymbols, accountId, strategyId }, { dispatch, getState, rejectWithValue }) => {
+    async ({ selectedRuleId, selectedRuleIds, scanSymbols, accountId, strategyId, syncDemoTrades = true }, { dispatch, getState, rejectWithValue }) => {
         try {
             const state = getState();
             const ruleIds = selectedRuleIds?.length ? selectedRuleIds : [selectedRuleId];
@@ -211,6 +211,8 @@ export const scanSignals = createAsyncThunk(
             };
 
             const canCreateSignal = async ({ symbol, symId, rule, historyItem }) => {
+                if (!syncDemoTrades) return true;
+
                 const ruleId = (rule.documentId || rule.id)?.toString();
                 const group = ruleGroupById.get(ruleId);
                 if (!group) return true;
@@ -284,7 +286,9 @@ export const scanSignals = createAsyncThunk(
                                 const existing = await api.get(checkUrl);
                                 if (existing.data.data && existing.data.data.length > 0) {
                                     console.log(`Signal already exists for ${symbol.Name} on ${checkDate} with ${rule.Name}. Skipping.`);
-                                    await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
+                                    if (syncDemoTrades) {
+                                        await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
+                                    }
                                     continue;
                                 }
 
@@ -301,7 +305,9 @@ export const scanSignals = createAsyncThunk(
                                 console.log(`Match found for symbol ${symbol.Name} with ${rule.Name} at index ${i} (Date: ${history[i].date})`);
 
                                 await api.post('/signals', payload);
-                                await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
+                                if (syncDemoTrades) {
+                                    await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
+                                }
                                 matchCount++;
                             }
                         }

@@ -38,6 +38,7 @@ const Sidebar = () => {
                     label: 'Signals',
                     path: '/signals',
                     subItems: [
+                        { label: 'Strategy Signals', path: '/signals' },
                         { label: 'TCBS Signals', path: '/tcbs-strategy-signals' },
                         { label: 'Recommendation', path: '/tcbs-recommendation' },
                         { label: 'Webhook Signals', path: '/webhook-signals' }
@@ -58,6 +59,7 @@ const Sidebar = () => {
                 {
                     icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies',
                     subItems: [
+                        { label: 'Backtest', path: '/backtest' },
                         { label: 'Rules', path: '/manage-rules' },
                     ]
                 },
