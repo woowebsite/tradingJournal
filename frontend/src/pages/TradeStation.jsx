@@ -334,7 +334,7 @@ const TradeStation = () => {
                             </div>
                         </div>
                         <div className="flex-1 min-h-0">
-                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} />
+                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} />
                         </div>
                     </div>
 

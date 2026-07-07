@@ -231,13 +231,19 @@ const JournalCalendar = () => {
         const end = new Date(calendarRange.gridEnd);
         end.setHours(0, 0, 0, 0);
 
-        let cumulativePnl = 0;
         const navMap = new Map();
+        const sortedDailyStats = [...dailyStats.entries()].sort(([dateA], [dateB]) => dateA.localeCompare(dateB));
+        let dailyIndex = 0;
+        let cumulativePnl = 0;
 
         while (cursor <= end) {
             const key = getLocalDateValue(cursor);
+            while (dailyIndex < sortedDailyStats.length && sortedDailyStats[dailyIndex][0] <= key) {
+                cumulativePnl += sortedDailyStats[dailyIndex][1].pnl;
+                dailyIndex += 1;
+            }
+
             const dayStats = dailyStats.get(key) || { pnl: 0, count: 0 };
-            cumulativePnl += dayStats.pnl;
             const nav = accountBaseBalance + cumulativePnl;
 
             navMap.set(key, nav);

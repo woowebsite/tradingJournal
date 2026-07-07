@@ -1,11 +1,32 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { calculateSMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 
-const TradingViewChart = ({ data, symbol, signals = [] }) => {
+const getRuleId = (rule) => rule?.documentId || rule?.id || '';
+
+const TradingViewChart = ({ data, symbol, signals = [], strategy = null }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
+
+    const strategyRuleLookup = useMemo(() => {
+        const lookup = new Map();
+        const groups = [
+            { name: 'entry', rules: strategy?.entryRules || [] },
+            { name: 'takeprofit', rules: strategy?.takeProfitRules || [] },
+            { name: 'stoploss', rules: strategy?.stoplossRules || [] },
+            { name: 'exit', rules: strategy?.exitRules || [] }
+        ];
+
+        groups.forEach(group => {
+            group.rules.forEach(rule => {
+                const id = String(getRuleId(rule));
+                if (id) lookup.set(id, group.name);
+            });
+        });
+
+        return lookup;
+    }, [strategy]);
 
     useEffect(() => {
         if (!data || data.length === 0) return;
@@ -120,13 +141,15 @@ const TradingViewChart = ({ data, symbol, signals = [] }) => {
 
         // Markers (Signals)
         if (signals && signals.length > 0) {
+            const markerGapRatio = 0.02;
             const markers = signals.map(sig => {
                 const sigDate = sig.date.split('T')[0];
-                const exists = candleData.find(d => d.time === sigDate);
+                const exists = sortedData.find(d => d.date.split('T')[0] === sigDate);
                 if (!exists) return null;
 
-                const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Type: 'unknown', Name: 'Signal' };
-                const type = rule.Type || 'unknown';
+                const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
+                const ruleId = String(getRuleId(rule));
+                const type = strategyRuleLookup.get(ruleId) || 'unknown';
 
                 const colors = {
                     entry: '#60a5fa', // blue
@@ -137,10 +160,14 @@ const TradingViewChart = ({ data, symbol, signals = [] }) => {
                 };
 
                 const isEntry = type === 'entry';
+                const price = isEntry
+                    ? Number(exists.low) * (1 - markerGapRatio)
+                    : Number(exists.high) * (1 + markerGapRatio);
 
                 return {
                     time: sigDate,
-                    position: isEntry ? 'belowBar' : 'aboveBar',
+                    position: isEntry ? 'atPriceBottom' : 'atPriceTop',
+                    price,
                     color: colors[type] || colors.unknown,
                     shape: isEntry ? 'arrowUp' : 'arrowDown',
                     text: rule.Name,
@@ -209,7 +236,7 @@ const TradingViewChart = ({ data, symbol, signals = [] }) => {
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals]);
+    }, [data, symbol, signals, strategyRuleLookup]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">
