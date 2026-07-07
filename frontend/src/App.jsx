@@ -20,6 +20,7 @@ import MarketFlow from './pages/MarketFlow';
 import Derivation from './pages/Derivation';
 import AccountDetail from './pages/AccountDetail';
 import Journal from './pages/Journal';
+import JournalWorkflow from './pages/JournalWorkflow';
 import JournalCalendar from './pages/JournalCalendar';
 import JournalTrade from './pages/JournalTrade';
 import JournalAnalysis from './pages/JournalAnalysis';
@@ -45,6 +46,7 @@ function App() {
             <Route path="trades" element={<Trades />} />
             <Route path="backtest" element={<Backtest />} />
             <Route path="journal" element={<Journal />} />
+            <Route path="journal-workflow" element={<JournalWorkflow />} />
             <Route path="journal-calendar" element={<JournalCalendar />} />
             <Route path="journal-plan" element={<Plan />} />
             <Route path="journal-roadmap" element={<Roadmap />} />

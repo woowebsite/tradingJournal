@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata } from '../features/marketSlice';
@@ -12,6 +12,7 @@ import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
 import TechnicalPanel from '../containers/TechnicalPanel';
 import SignalPanel from '../containers/SignalPanel';
+import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import { Search, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
@@ -35,6 +36,9 @@ const TradeStation = () => {
     const autoOpenedMissingSymbolRef = useRef('');
     const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
+    const priceParam = searchParams.get('price');
+    const slPriceParam = searchParams.get('slPrice');
+    const tpPriceParam = searchParams.get('tpPrice');
 
     useEffect(() => {
         if (symbolParam && symbols.length > 0) {
@@ -54,6 +58,16 @@ const TradeStation = () => {
             }
         }
     }, [symbolParam, symbols]);
+
+    const tradeSetupValue = useMemo(() => ({
+        price: priceParam || '',
+        slPrice: slPriceParam || '',
+        tpPrice: tpPriceParam || ''
+    }), [priceParam, slPriceParam, tpPriceParam]);
+
+    const tradeSetupKey = useMemo(() => (
+        [symbolParam || '', priceParam || '', slPriceParam || '', tpPriceParam || ''].join(':')
+    ), [priceParam, slPriceParam, symbolParam, tpPriceParam]);
 
     useEffect(() => {
         dispatch(fetchSymbols());
@@ -85,6 +99,12 @@ const TradeStation = () => {
     }, [dispatch, selectedAccount]);
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
+
+    const refreshSelectedAccountTrades = useCallback(() => {
+        const accountId = selectedAccount?.documentId || selectedAccount?.id;
+        if (!accountId) return Promise.resolve();
+        return dispatch(fetchTrades({ accountId, pageSize: 50 })).unwrap();
+    }, [dispatch, selectedAccount]);
 
     const handleCreateMissingSymbol = useCallback(async (formData) => {
         const name = String(formData?.Name || '').trim();
@@ -371,6 +391,14 @@ const TradeStation = () => {
                     />
                 </div>
                 <div className="w-80 flex flex-col gap-4 h-full shrink-0">
+                    <TradeStationOrderForm
+                        key={tradeSetupKey}
+                        selectedAccount={selectedAccount}
+                        selectedSymbol={selectedSymbol}
+                        activeStrategy={activeStrategy}
+                        value={tradeSetupValue}
+                        onSaved={refreshSelectedAccountTrades}
+                    />
                     <SignalPanel trades={symbolTrades} signals={symbolSignals} />
                     <TechnicalPanel externalIndicators={externalIndicators} />
                 </div>
