@@ -1,30 +1,43 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchTrades, saveTrade, deleteTrade } from '../features/tradeSlice';
-import { Plus, Filter, Edit2, XCircle } from 'lucide-react';
+import { Filter, Edit2, RefreshCw } from 'lucide-react';
 import TradeModal from '../components/TradeModal';
 import TradeDetailModal from '../components/TradeDetailModal';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import { fetchBatchLatestPrices } from '../features/marketSlice';
+import { fetchStrategies } from '../features/strategySlice';
+import { fetchRules } from '../features/ruleSlice';
+import { scanSignals } from '../features/signalSlice';
+import StrategySummary from '../containers/StrategySummary';
 
-const Trades = () => {
+const Backtest = () => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const { items: rawTrades, loading } = useSelector(state => state.trades);
     const { latestPricesMap } = useSelector(state => state.market);
+    const { items: strategies } = useSelector(state => state.strategies);
+    const { items: rules } = useSelector(state => state.rules);
+    const { loading: scanningSignals } = useSelector(state => state.signals);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [tradeToEdit, setTradeToEdit] = useState(null);
-    const [modeFilter, setModeFilter] = useState('');
+    const [strategyFilter, setStrategyFilter] = useState('');
+
+    const refreshBacktestTrades = useCallback(() => {
+        dispatch(fetchTrades({ mode: 'Demo', strategyId: strategyFilter }));
+    }, [dispatch, strategyFilter]);
 
     useEffect(() => {
-        if (selectedAccount) {
-            const accountId = selectedAccount.documentId || selectedAccount.id;
-            dispatch(fetchTrades({ accountId, mode: modeFilter }));
-        }
-    }, [dispatch, selectedAccount, modeFilter]);
+        refreshBacktestTrades();
+    }, [refreshBacktestTrades]);
+
+    useEffect(() => {
+        dispatch(fetchStrategies());
+        dispatch(fetchRules());
+    }, [dispatch]);
 
     useEffect(() => {
         if (rawTrades && rawTrades.length > 0) {
@@ -73,6 +86,58 @@ const Trades = () => {
         }).sort((a, b) => new Date(b.derivedDate) - new Date(a.derivedDate));
     }, [rawTrades, latestPricesMap]);
 
+    const availableStrategies = useMemo(() => strategies || [], [strategies]);
+
+    const activeStrategy = useMemo(() => {
+        if (!strategyFilter) return null;
+        return availableStrategies.find(strategy =>
+            (strategy.documentId || strategy.id)?.toString() === strategyFilter
+        ) || null;
+    }, [availableStrategies, strategyFilter]);
+
+    const availableRules = useMemo(() => {
+        if (!activeStrategy?.rules?.length) return [];
+
+        const strategyRuleIds = activeStrategy.rules.map(rule =>
+            (rule.documentId || rule.id)?.toString()
+        ).filter(Boolean);
+
+        return rules.filter(rule =>
+            strategyRuleIds.includes((rule.documentId || rule.id)?.toString())
+        );
+    }, [activeStrategy, rules]);
+
+    const handleScanSignals = () => {
+        if (!activeStrategy) {
+            alert('Please select a strategy before scanning.');
+            return;
+        }
+
+        if (availableRules.length === 0) {
+            alert('Selected strategy has no rules available to scan.');
+            return;
+        }
+
+        if (!selectedAccount) {
+            alert('Please select an active account before scanning.');
+            return;
+        }
+
+        const accountId = selectedAccount.documentId || selectedAccount.id;
+        const selectedRuleIds = availableRules.map(rule => rule.documentId || rule.id).filter(Boolean);
+        const strategyId = activeStrategy.documentId || activeStrategy.id;
+
+        dispatch(scanSignals({ selectedRuleIds, accountId, strategyId, syncDemoTrades: true }))
+            .unwrap()
+            .then((count) => {
+                refreshBacktestTrades();
+                alert(`Scan complete. Found ${count} new signals.`);
+            })
+            .catch((err) => {
+                alert(`Scan failed: ${err}`);
+            });
+    };
+
 
 
     const handleSaveTrade = async (tradeData) => {
@@ -80,9 +145,7 @@ const Trades = () => {
             await dispatch(saveTrade({ tradeData, tradeToEdit })).unwrap();
 
             // Refresh list
-            if (selectedAccount) {
-                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id, mode: modeFilter }));
-            }
+            refreshBacktestTrades();
 
             setIsModalOpen(false);
             setTradeToEdit(null);
@@ -109,9 +172,7 @@ const Trades = () => {
                 tradeDetails: tradeToEdit.trade_details || []
             })).unwrap();
 
-            if (selectedAccount) {
-                dispatch(fetchTrades({ accountId: selectedAccount.documentId || selectedAccount.id, mode: modeFilter }));
-            }
+            refreshBacktestTrades();
 
             setIsModalOpen(false);
             setTradeToEdit(null);
@@ -119,11 +180,6 @@ const Trades = () => {
             console.error('Failed to delete trade:', error);
             alert(`Failed to delete trade: ${error.message || error}`);
         }
-    };
-
-    const handleOpenCreateModal = () => {
-        setTradeToEdit(null);
-        setIsModalOpen(true);
     };
 
     return (
@@ -144,29 +200,40 @@ const Trades = () => {
             />
 
             <div className="flex justify-between items-center mb-6">
-                <h2 className="text-3xl font-bold">Trade Log</h2>
+                <h2 className="text-3xl font-bold">Backtest</h2>
                 <div className="flex gap-3">
                     <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg">
                         <Filter size={18} />
-                        <span className="text-sm text-gray-400">Mode</span>
+                        <span className="text-sm text-gray-400">Strategy</span>
                         <select
-                            value={modeFilter}
-                            onChange={(e) => setModeFilter(e.target.value)}
-                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500"
+                            value={strategyFilter}
+                            onChange={(e) => setStrategyFilter(e.target.value)}
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500 min-w-[180px]"
                         >
-                            <option value="">All</option>
-                            <option value="Real">Real</option>
-                            <option value="Demo">Demo</option>
+                            <option value="">All Strategies</option>
+                            {availableStrategies.map(strategy => {
+                                const strategyId = strategy.documentId || strategy.id;
+                                return (
+                                    <option key={strategyId} value={strategyId}>
+                                        {strategy.name || 'Untitled strategy'}
+                                    </option>
+                                );
+                            })}
                         </select>
                     </div>
                     <button
-                        onClick={handleOpenCreateModal}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
+                        onClick={handleScanSignals}
+                        disabled={scanningSignals}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/50 disabled:cursor-not-allowed rounded-lg transition font-medium text-white shadow-lg shadow-emerald-500/20"
                     >
-                        <Plus size={18} />
-                        New Trade
+                        <RefreshCw size={18} className={scanningSignals ? 'animate-spin' : ''} />
+                        Scan Signals
                     </button>
                 </div>
+            </div>
+
+            <div className="mb-6 bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-lg">
+                <StrategySummary activeStrategy={activeStrategy} />
             </div>
 
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
@@ -176,7 +243,6 @@ const Trades = () => {
                             <th className="p-4">Date</th>
                             <th className="p-4">Symbol</th>
                             <th className="p-4">Type</th>
-                            <th className="p-4">Mode</th>
                             <th className="p-4">Status</th>
                             <th className="p-4 text-right">P&L</th>
                             <th className="p-4 text-right">Actions</th>
@@ -197,11 +263,6 @@ const Trades = () => {
                                 <td onClick={() => setSelectedTrade(trade)} className="p-4">
                                     <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.type === 'Long' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                                         {trade.type}
-                                    </span>
-                                </td>
-                                <td onClick={() => setSelectedTrade(trade)} className="p-4">
-                                    <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.mode === 'Demo' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-600/20 text-gray-300'}`}>
-                                        {trade.mode || 'Real'}
                                     </span>
                                 </td>
                                 <td onClick={() => setSelectedTrade(trade)} className="p-4">
@@ -230,4 +291,4 @@ const Trades = () => {
     );
 };
 
-export default Trades;
+export default Backtest;

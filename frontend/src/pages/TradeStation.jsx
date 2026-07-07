@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata } from '../features/marketSlice';
@@ -12,6 +12,7 @@ import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
 import TechnicalPanel from '../containers/TechnicalPanel';
 import SignalPanel from '../containers/SignalPanel';
+import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import { Search, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
@@ -35,6 +36,9 @@ const TradeStation = () => {
     const autoOpenedMissingSymbolRef = useRef('');
     const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
+    const priceParam = searchParams.get('price');
+    const slPriceParam = searchParams.get('slPrice');
+    const tpPriceParam = searchParams.get('tpPrice');
 
     useEffect(() => {
         if (symbolParam && symbols.length > 0) {
@@ -54,6 +58,16 @@ const TradeStation = () => {
             }
         }
     }, [symbolParam, symbols]);
+
+    const tradeSetupValue = useMemo(() => ({
+        price: priceParam || '',
+        slPrice: slPriceParam || '',
+        tpPrice: tpPriceParam || ''
+    }), [priceParam, slPriceParam, tpPriceParam]);
+
+    const tradeSetupKey = useMemo(() => (
+        [symbolParam || '', priceParam || '', slPriceParam || '', tpPriceParam || ''].join(':')
+    ), [priceParam, slPriceParam, symbolParam, tpPriceParam]);
 
     useEffect(() => {
         dispatch(fetchSymbols());
@@ -85,6 +99,12 @@ const TradeStation = () => {
     }, [dispatch, selectedAccount]);
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
+
+    const refreshSelectedAccountTrades = useCallback(() => {
+        const accountId = selectedAccount?.documentId || selectedAccount?.id;
+        if (!accountId) return Promise.resolve();
+        return dispatch(fetchTrades({ accountId, pageSize: 50 })).unwrap();
+    }, [dispatch, selectedAccount]);
 
     const handleCreateMissingSymbol = useCallback(async (formData) => {
         const name = String(formData?.Name || '').trim();
@@ -210,9 +230,32 @@ const TradeStation = () => {
         return strategies.find(s => (s.documentId == activeStrategyId || s.id == activeStrategyId));
     })();
 
-    // Filter signals for selected symbol
+    const strategySignals = activeStrategy
+        ? allSignals.filter(signal => {
+            if (!signal.rules || signal.rules.length === 0) return false;
+
+            const strategyRuleIds = new Set();
+            [
+                ...(activeStrategy.rules || []),
+                ...(activeStrategy.entryRules || []),
+                ...(activeStrategy.takeProfitRules || []),
+                ...(activeStrategy.stoplossRules || []),
+                ...(activeStrategy.exitRules || [])
+            ].forEach(rule => {
+                if (rule.id) strategyRuleIds.add(rule.id.toString());
+                if (rule.documentId) strategyRuleIds.add(rule.documentId.toString());
+            });
+
+            return signal.rules.some(rule =>
+                (rule.id && strategyRuleIds.has(rule.id.toString())) ||
+                (rule.documentId && strategyRuleIds.has(rule.documentId.toString()))
+            );
+        })
+        : [];
+
+    // Filter signals for selected symbol and current account strategy.
     const symbolSignals = selectedSymbolId
-        ? allSignals.filter(s => s.symbol.id === selectedSymbolId || s.symbol.documentId === selectedSymbolId)
+        ? strategySignals.filter(s => s.symbol.id === selectedSymbolId || s.symbol.documentId === selectedSymbolId)
         : [];
 
     const symbolTrades = selectedSymbolId ? trades.filter(t => t.symbol.id === selectedSymbolId || t.symbol.documentId === selectedSymbolId) : [];
@@ -341,7 +384,6 @@ const TradeStation = () => {
                     {/* Strategy Panel */}
                     <StrategyPanel
                         activeStrategy={activeStrategy}
-                        allSignals={allSignals}
                         trades={symbolTrades}
                         recommendations={tcbsRecommendations}
                         tcbsSignals={tcbsRecentSignals}
@@ -349,6 +391,14 @@ const TradeStation = () => {
                     />
                 </div>
                 <div className="w-80 flex flex-col gap-4 h-full shrink-0">
+                    <TradeStationOrderForm
+                        key={tradeSetupKey}
+                        selectedAccount={selectedAccount}
+                        selectedSymbol={selectedSymbol}
+                        activeStrategy={activeStrategy}
+                        value={tradeSetupValue}
+                        onSaved={refreshSelectedAccountTrades}
+                    />
                     <SignalPanel trades={symbolTrades} signals={symbolSignals} />
                     <TechnicalPanel externalIndicators={externalIndicators} />
                 </div>

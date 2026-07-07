@@ -5,7 +5,7 @@ import TCBSRecommendPanel from '../TCBSRecommendPanel';
 import TCBSSignalPanel from '../TCBSSignalPanel';
 import StrategySummary from '../StrategySummary';
 
-const StrategyPanel = ({ activeStrategy, allSignals, trades, recommendations = [], tcbsSignals = [], loadingTcbsInsights = false }) => {
+const StrategyPanel = ({ activeStrategy, trades, recommendations = [], tcbsSignals = [], loadingTcbsInsights = false }) => {
     const [activeTab, setActiveTab] = useState('summary');
 
     return (
@@ -43,7 +43,6 @@ const StrategyPanel = ({ activeStrategy, allSignals, trades, recommendations = [
                 {activeTab === 'summary' ? (
                     <StrategySummary
                         activeStrategy={activeStrategy}
-                        allSignals={allSignals}
                     />
                 ) : activeTab === 'trades' ? (
                     <RecentTradeBox trades={trades || []} onTradeClick={(trade) => console.log('Clicked trade:', trade)} />
