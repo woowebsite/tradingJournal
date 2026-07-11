@@ -6,15 +6,15 @@
         "value": "close"
       },
       "right": {
-        "name": "lowest_weekly",
+        "name": "highest_weekly",
         "type": "function",
         "params": {
-          "field": "low",
+          "field": "high",
           "offset": 1,
           "period": 2
         }
       },
-      "operator": "<",
+      "operator": ">",
       "identifier": "price_check"
     }
   ],

@@ -72,10 +72,10 @@ const JournalWorkflow = () => {
         if (!accountId) return;
         dispatch(fetchTrades({
             accountId,
-            strategyId: activeStrategy ? getEntityId(activeStrategy) : undefined,
+            strategyId: activeStrategyId || undefined,
             pageSize: 1000
         }));
-    }, [accountId, activeStrategy, dispatch]);
+    }, [accountId, activeStrategyId, dispatch]);
 
     const processedRoadmap = useMemo(() => {
         return roadmaps.find(roadmap => (roadmap.status || 'unprocess') === 'process') || null;
@@ -145,9 +145,15 @@ const JournalWorkflow = () => {
         return suggestions.slice(0, remainingRoadmapTrades || 10);
     }, [activeStrategy, entryRuleIds, openTradeSymbolIds, processedRoadmap, remainingRoadmapTrades, strategySignals]);
 
+    const suggestedSignalKey = useMemo(() => {
+        return suggestedSignals
+            .map(signal => getSignalPriceKey(signal))
+            .join('|');
+    }, [suggestedSignals]);
+
     useEffect(() => {
         if (suggestedSignals.length === 0) {
-            setSignalPrices({});
+            setSignalPrices(prev => (Object.keys(prev).length === 0 ? prev : {}));
             return;
         }
 
@@ -187,7 +193,7 @@ const JournalWorkflow = () => {
         return () => {
             cancelled = true;
         };
-    }, [suggestedSignals]);
+    }, [suggestedSignalKey]);
 
     return (
         <div className="space-y-6">

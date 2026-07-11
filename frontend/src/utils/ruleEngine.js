@@ -84,6 +84,64 @@ const getValue = (candle, field) => {
     return !isNaN(num) ? num : raw;
 };
 
+const getCandleDate = (candle) => {
+    const rawDate = candle?.date || candle?.createdAt || candle?.attributes?.date || candle?.attributes?.createdAt;
+    const date = new Date(rawDate);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getWeekStartKey = (date) => {
+    if (!date) return null;
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+};
+
+const getWeeklyBuckets = (history) => {
+    const buckets = new Map();
+
+    history.forEach(candle => {
+        const candleDate = getCandleDate(candle);
+        const weekKey = getWeekStartKey(candleDate);
+        if (!weekKey) return;
+
+        const current = buckets.get(weekKey) || {
+            key: weekKey,
+            candles: [],
+            low: Infinity,
+            high: -Infinity
+        };
+
+        const low = Number(getValue(candle, 'low'));
+        const high = Number(getValue(candle, 'high'));
+
+        if (Number.isFinite(low) && low < current.low) current.low = low;
+        if (Number.isFinite(high) && high > current.high) current.high = high;
+        current.candles.push(candle);
+        buckets.set(weekKey, current);
+    });
+
+    return [...buckets.values()].sort((a, b) => a.key.localeCompare(b.key));
+};
+
+const resolveWeeklyWindow = (history, index, offset, period) => {
+    const currentCandle = history[index];
+    const currentDate = getCandleDate(currentCandle);
+    if (!currentDate) return [];
+
+    const currentWeekStart = getWeekStartKey(currentDate);
+    const weeklyBuckets = getWeeklyBuckets(history);
+    const currentWeekIndex = weeklyBuckets.findIndex(bucket => bucket.key === currentWeekStart);
+    if (currentWeekIndex < 0) return [];
+
+    const startIndex = currentWeekIndex + offset;
+    const endIndex = startIndex + period;
+    return weeklyBuckets.slice(startIndex, endIndex);
+};
+
 const executeFunction = (funcNode, history, index) => {
     const { name, params } = funcNode;
 
@@ -115,6 +173,29 @@ const executeFunction = (funcNode, history, index) => {
         return maxVal;
     }
 
+    if (name === 'highest_weekly') {
+        const period = params.period || 2;
+        const offset = Math.abs(params.offset || 0);
+        const field = params.field || 'high';
+        const weeklyBuckets = resolveWeeklyWindow(history, index, offset, period);
+
+        if (weeklyBuckets.length === 0) return null;
+
+        let maxVal = -Infinity;
+        let count = 0;
+        weeklyBuckets.forEach(bucket => {
+            bucket.candles.forEach(candle => {
+                const val = getValue(candle, field);
+                if (val !== undefined && typeof val === 'number') {
+                    if (val > maxVal) maxVal = val;
+                    count++;
+                }
+            });
+        });
+
+        return count === 0 ? null : maxVal;
+    }
+
     if (name === 'lowest') {
         const field = params.field || 'low';
         const period = params.period || 14;
@@ -138,6 +219,29 @@ const executeFunction = (funcNode, history, index) => {
 
         if (count === 0) return null;
         return minVal;
+    }
+
+    if (name === 'lowest_weekly') {
+        const period = params.period || 2;
+        const offset = Math.abs(params.offset || 0);
+        const field = params.field || 'low';
+        const weeklyBuckets = resolveWeeklyWindow(history, index, offset, period);
+
+        if (weeklyBuckets.length === 0) return null;
+
+        let minVal = Infinity;
+        let count = 0;
+        weeklyBuckets.forEach(bucket => {
+            bucket.candles.forEach(candle => {
+                const val = getValue(candle, field);
+                if (val !== undefined && typeof val === 'number') {
+                    if (val < minVal) minVal = val;
+                    count++;
+                }
+            });
+        });
+
+        return count === 0 ? null : minVal;
     }
 
     if (name === 'sma') {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Save, ChevronDown, Loader2, CloudDownload, X, CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { getMarketFlowLeader } from '../services/tcbs';
 import { saveMarketFlow, getSavedMarketFlow, getSavedMarketFlowLast30 } from '../services/marketFlow';
 import { getIndustries, syncIndustriesFromTCBS, syncIndustries } from '../services/industry';
@@ -230,6 +231,8 @@ const MarketFlow = () => {
         return { bsi, psi };
     };
 
+    const getSymbolValue = (row) => row?.ticker || row?.symbol || row?.code || row?.Name || row?.name || '';
+
     const handleSave = async () => {
         const allEntries = [...rowsInc, ...rowsDesc];
         if (!allEntries.length) return;
@@ -367,7 +370,17 @@ const MarketFlow = () => {
                                 <tr key={row?.ticker || row?.symbol || row?.id || index} className="hover:bg-gray-700/30 transition-colors">
                                     {columns.map(column => (
                                         <td key={column} className="p-3 whitespace-nowrap text-gray-300 font-mono text-xs">
-                                            {formatValue(row?.[column])}
+                                            {['ticker', 'symbol', 'code', 'Name', 'name'].includes(column) ? (
+                                                <Link
+                                                    to={`/trade-station?symbol=${encodeURIComponent(getSymbolValue(row))}`}
+                                                    className="font-semibold text-blue-300 hover:text-blue-200 hover:underline"
+                                                    title={`Open ${getSymbolValue(row)} in Trade Station`}
+                                                >
+                                                    {formatValue(row?.[column])}
+                                                </Link>
+                                            ) : (
+                                                formatValue(row?.[column])
+                                            )}
                                         </td>
                                     ))}
                                 </tr>
