@@ -13,6 +13,12 @@ const formatValue = (value) => {
     return String(value);
 };
 
+const getAnalyticDateKey = (item) => {
+    const date = item?.date || item?.createdAt;
+    if (!date) return `unknown-${item?.documentId || item?.id || Math.random()}`;
+    return new Date(date).toISOString().slice(0, 10);
+};
+
 const MarketFlow = () => {
     const [payload, setPayload] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -25,8 +31,11 @@ const MarketFlow = () => {
     const [loadingIndustries, setLoadingIndustries] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [leaderboard, setLeaderboard] = useState([]);
+    const [marketFlowHistory, setMarketFlowHistory] = useState([]);
+    const [selectedTicker, setSelectedTicker] = useState('');
     const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
     const [analytics, setAnalytics] = useState([]);
+    const [analyticsHistory, setAnalyticsHistory] = useState([]);
     const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
     // Auto-hide toast after 3 seconds
@@ -52,6 +61,11 @@ const MarketFlow = () => {
 
     const columnsInc = useMemo(() => getColumns(rowsInc), [rowsInc]);
     const columnsDesc = useMemo(() => getColumns(rowsDesc), [rowsDesc]);
+
+    const selectedIndustryName = useMemo(() => {
+        if (!selectedIndustry) return 'Select Industry';
+        return industries.find(i => i.code === selectedIndustry)?.name || `Industry ${selectedIndustry}`;
+    }, [industries, selectedIndustry]);
 
     const handleSyncTCBS = async () => {
         setSyncing(true);
@@ -113,9 +127,9 @@ const MarketFlow = () => {
     const loadLeaderboard = async () => {
         setLoadingLeaderboard(true);
         try {
-            const now = new Date();
             const resp = await getSavedMarketFlowLast30();
             const data = Array.isArray(resp) ? resp : (resp?.data || []);
+            setMarketFlowHistory(data);
 
             const scores = data.reduce((acc, item) => {
                 // tolerate different field names
@@ -129,7 +143,7 @@ const MarketFlow = () => {
                 if (!acc[ticker]) {
                     acc[ticker] = { ticker, score: 0, count: 0, lastIndustry: item.industry };
                 }
-                if(ticker === "VGI") console.log("Processing VGI item:", scoreValue);
+                if (ticker === "VGI") console.log("Processing VGI item:", scoreValue);
 
                 acc[ticker].score += isNaN(scoreValue) ? 0 : scoreValue;
                 acc[ticker].count += 1;
@@ -138,8 +152,13 @@ const MarketFlow = () => {
 
             const sorted = Object.values(scores).sort((a, b) => b.score - a.score);
             setLeaderboard(sorted);
+            setSelectedTicker(prev => {
+                if (prev && sorted.some(item => item.ticker === prev)) return prev;
+                return sorted[0]?.ticker || '';
+            });
         } catch (err) {
             console.error('Failed to load leaderboard:', err);
+            setMarketFlowHistory([]);
         } finally {
             setLoadingLeaderboard(false);
         }
@@ -151,17 +170,75 @@ const MarketFlow = () => {
             // Use backend endpoint that returns all analytics for last 30 days
             const items = await getMarketAnalyticsLast30();
             const data = Array.isArray(items) ? items : (items?.data || []);
-            const uniqueIndustries = new Map();
+            setAnalyticsHistory(data);
+            const industryDays = new Map();
+            const industryGroups = new Map();
 
-            // Keep only the most recent entry for each industry
             data.forEach(item => {
-                if (!uniqueIndustries.has(item.industry)) {
-                    uniqueIndustries.set(item.industry, item);
+                if (!item.industry) return;
+
+                const bsi = Number(item.bsi);
+                const psi = Number(item.psi);
+                if (!Number.isFinite(bsi) || !Number.isFinite(psi)) return;
+
+                const dateKey = getAnalyticDateKey(item);
+                const dayKey = `${item.industry}:${dateKey}`;
+                const day = industryDays.get(dayKey) || {
+                    id: `day-${dayKey}`,
+                    industry: item.industry,
+                    date: item.date,
+                    bsiSum: 0,
+                    psiSum: 0,
+                    count: 0
+                };
+
+                day.bsiSum += bsi;
+                day.psiSum += psi;
+                day.count += 1;
+
+                if (!day.date || new Date(item.date) > new Date(day.date)) {
+                    day.date = item.date;
                 }
+
+                industryDays.set(dayKey, day);
             });
 
-            // Sort by BSI and PSI descending
-            const analyticsData = Array.from(uniqueIndustries.values()).sort((a, b) => {
+            Array.from(industryDays.values()).forEach(day => {
+                if (day.count <= 0) return;
+
+                const current = industryGroups.get(day.industry) || {
+                    id: `avg-${day.industry}`,
+                    industry: day.industry,
+                    bsiSum: 0,
+                    psiSum: 0,
+                    count: 0,
+                    latestDate: day.date
+                };
+
+                current.bsiSum += day.bsiSum / day.count;
+                current.psiSum += day.psiSum / day.count;
+                current.count += 1;
+
+                if (!current.latestDate || new Date(day.date) > new Date(current.latestDate)) {
+                    current.latestDate = day.date;
+                }
+
+                industryGroups.set(day.industry, current);
+            });
+
+            const analyticsData = Array.from(industryGroups.values())
+                .filter(item => item.count > 0)
+                .map(item => ({
+                    id: item.id,
+                    industry: item.industry,
+                    bsi: item.bsiSum / item.count,
+                    psi: item.psiSum / item.count,
+                    sampleDays: item.count,
+                    latestDate: item.latestDate
+                }));
+
+            // Sort by average BSI and average PSI descending
+            analyticsData.sort((a, b) => {
                 if (b.bsi !== a.bsi) return b.bsi - a.bsi;
                 return b.psi - a.psi;
             });
@@ -169,6 +246,7 @@ const MarketFlow = () => {
             setAnalytics(analyticsData);
         } catch (err) {
             console.error('Failed to load analytics:', err);
+            setAnalyticsHistory([]);
         } finally {
             setLoadingAnalytics(false);
         }
@@ -232,6 +310,119 @@ const MarketFlow = () => {
     };
 
     const getSymbolValue = (row) => row?.ticker || row?.symbol || row?.code || row?.Name || row?.name || '';
+
+    const selectedTickerDailyScores = useMemo(() => {
+        if (!selectedTicker) return [];
+
+        const dailyGroups = new Map();
+
+        marketFlowHistory.forEach(item => {
+            const ticker = item.ticker || item.symbol || item.tickerSymbol || item.code || '';
+            if (ticker !== selectedTicker) return;
+
+            const score = Number(item.score ?? item.s ?? 0);
+            if (!Number.isFinite(score)) return;
+
+            const dateKey = getAnalyticDateKey(item);
+            const group = dailyGroups.get(dateKey) || {
+                id: `ticker-${selectedTicker}-${dateKey}`,
+                ticker: selectedTicker,
+                date: item.date,
+                score: 0,
+                count: 0,
+                industries: new Set()
+            };
+
+            group.score += score;
+            group.count += 1;
+            if (item.industry) group.industries.add(item.industry);
+
+            if (!group.date || new Date(item.date) > new Date(group.date)) {
+                group.date = item.date;
+            }
+
+            dailyGroups.set(dateKey, group);
+        });
+
+        return Array.from(dailyGroups.values())
+            .map(item => ({
+                ...item,
+                industries: Array.from(item.industries)
+            }))
+            .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+    }, [marketFlowHistory, selectedTicker]);
+
+    const selectedTickerMonthlyScore = useMemo(() => (
+        selectedTickerDailyScores.reduce((sum, item) => sum + item.score, 0)
+    ), [selectedTickerDailyScores]);
+
+    const getScoreStatus = (score) => {
+        if (score > 0) return { label: 'Positive', className: 'bg-green-500/20 text-green-400 border-green-500/30' };
+        if (score < 0) return { label: 'Negative', className: 'bg-red-500/20 text-red-400 border-red-500/30' };
+        return { label: 'Neutral', className: 'bg-gray-500/20 text-gray-300 border-gray-500/30' };
+    };
+
+    const selectedIndustryAnalyticsHistory = useMemo(() => {
+        if (!selectedIndustry) return [];
+
+        const dailyGroups = new Map();
+
+        analyticsHistory
+            .filter(item => item.industry === selectedIndustry)
+            .forEach(item => {
+                const bsi = Number(item.bsi);
+                const psi = Number(item.psi);
+                if (!Number.isFinite(bsi) || !Number.isFinite(psi)) return;
+
+                const dateKey = getAnalyticDateKey(item);
+                const group = dailyGroups.get(dateKey) || {
+                    id: `daily-${selectedIndustry}-${dateKey}`,
+                    industry: selectedIndustry,
+                    date: item.date,
+                    bsiSum: 0,
+                    psiSum: 0,
+                    count: 0
+                };
+
+                group.bsiSum += bsi;
+                group.psiSum += psi;
+                group.count += 1;
+
+                if (!group.date || new Date(item.date) > new Date(group.date)) {
+                    group.date = item.date;
+                }
+
+                dailyGroups.set(dateKey, group);
+            });
+
+        return Array.from(dailyGroups.values())
+            .filter(item => item.count > 0)
+            .map(item => ({
+                id: item.id,
+                industry: item.industry,
+                date: item.date,
+                bsi: item.bsiSum / item.count,
+                psi: item.psiSum / item.count,
+                sampleCount: item.count
+            }))
+            .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+    }, [analyticsHistory, selectedIndustry]);
+
+    const getBsiStatus = (bsi) => {
+        if (bsi >= 0.7) return { label: 'Strong', className: 'bg-green-500/20 text-green-400 border-green-500/30' };
+        if (bsi >= 0.5) return { label: 'Healthy', className: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
+        if (bsi >= 0.3) return { label: 'Weak', className: 'bg-orange-500/20 text-orange-400 border-orange-500/30' };
+        return { label: 'Bearish', className: 'bg-red-500/20 text-red-400 border-red-500/30' };
+    };
+
+    const formatAnalyticDate = (date) => {
+        if (!date) return '-';
+        return new Date(date).toLocaleDateString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        });
+    };
 
     const handleSave = async () => {
         const allEntries = [...rowsInc, ...rowsDesc];
@@ -401,9 +592,7 @@ const MarketFlow = () => {
                     </h1>
                     <p className="text-sm text-gray-400 mt-1 flex items-center gap-2">
                         <span className="text-blue-400">
-                            {selectedIndustry
-                                ? (industries.find(i => i.code === selectedIndustry)?.name || `Industry ${selectedIndustry}`)
-                                : 'Select Industry'}
+                            {selectedIndustryName}
                         </span>
                         <span className="text-gray-600">|</span>
                         <span>Exchange ALL</span>
@@ -427,9 +616,7 @@ const MarketFlow = () => {
                             className="flex items-center gap-2 px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg hover:border-blue-500 transition text-gray-200 text-sm min-w-[240px] justify-between group"
                         >
                             <span className="truncate max-w-[200px]">
-                                {selectedIndustry
-                                    ? (industries.find(i => i.code === selectedIndustry)?.name || selectedIndustry)
-                                    : 'Select Industry'}
+                                {selectedIndustryName}
                             </span>
                             <ChevronDown size={14} className={`transition-transform duration-200 ${industryOpen ? 'rotate-180' : ''}`} />
                         </button>
@@ -535,29 +722,8 @@ const MarketFlow = () => {
                 </div>
             )}
 
-            {loading && !payload ? (
-                <div className="p-20 text-center text-gray-400 bg-gray-800/30 rounded-2xl border border-gray-700/50 backdrop-blur-sm">
-                    <Loader2 size={40} className="animate-spin mx-auto mb-4 text-blue-500 opacity-50" />
-                    <p className="text-lg font-medium">Fetching Market Insights...</p>
-                    <p className="text-sm opacity-50 mt-1">This may take a few seconds</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {renderTable('market-flow-inc-tbl', 'Increasing Flow (listInc)', rowsInc, columnsInc, 'text-green-400')}
-                    {renderTable('market-flow-desc-tbl', 'Decreasing Flow (listDesc)', rowsDesc, columnsDesc, 'text-red-400')}
-
-                    {!rowsInc.length && !rowsDesc.length && payload && (
-                        <div className="lg:col-span-2">
-                            <pre className="p-4 overflow-auto text-[10px] text-gray-400 max-h-[70vh] bg-gray-900/50 rounded-xl border border-gray-700 font-mono">
-                                {JSON.stringify(payload, null, 2)}
-                            </pre>
-                        </div>
-                    )}
-                </div>
-            )}
-
             {/* Dashboard Bottom Section: Leaderboard & Analytics */}
-            <div className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Monthly Leaderboard Column */}
                 <div className="space-y-6">
                     <div className="flex items-center justify-between">
@@ -594,7 +760,12 @@ const MarketFlow = () => {
                                     </thead>
                                     <tbody className="divide-y divide-gray-700/50">
                                         {leaderboard.map((item, index) => (
-                                            <tr key={item.ticker} className="hover:bg-gray-700/30 transition-colors group">
+                                            <tr
+                                                key={item.ticker}
+                                                onClick={() => setSelectedTicker(item.ticker)}
+                                                className={`cursor-pointer transition-colors group ${item.ticker === selectedTicker ? 'bg-blue-600/10' : 'hover:bg-gray-700/30'}`}
+                                                title="Click to view daily score detail"
+                                            >
                                                 <td className="p-4 text-center">
                                                     <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${index === 0 ? 'bg-yellow-500/20 text-yellow-500' :
                                                         index === 1 ? 'bg-gray-400/20 text-gray-400' :
@@ -604,7 +775,7 @@ const MarketFlow = () => {
                                                         {index + 1}
                                                     </span>
                                                 </td>
-                                                <td className="p-4 font-bold text-gray-100 group-hover:text-blue-400 transition-colors">
+                                                <td className={`p-4 font-bold transition-colors ${item.ticker === selectedTicker ? 'text-blue-300' : 'text-gray-100 group-hover:text-blue-400'}`}>
                                                     {item.ticker}
                                                 </td>
                                                 <td className="p-4 text-right">
@@ -623,6 +794,7 @@ const MarketFlow = () => {
                             </div>
                         )}
                     </div>
+
                 </div>
 
                 {/* Market Analytics Column */}
@@ -633,8 +805,8 @@ const MarketFlow = () => {
                                 Market Analytics (BSI & PSI)
                             </h2>
                             <div className="text-[10px] text-gray-400 mt-1 space-y-0.5 font-mono uppercase tracking-wider h-[40px]">
-                                <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng</p>
-                                <p>PSI = ∑positive_impact − ∑negative_impact</p>
+                                <p>Average of latest 30 days</p>
+                                <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng; PSI = ∑positive_impact − ∑negative_impact</p>
                             </div>
                         </div>
                         <button
@@ -672,7 +844,8 @@ const MarketFlow = () => {
                                                 title="Click to select this industry"
                                             >
                                                 <td className={`p-4 font-medium text-xs ${item.industry === selectedIndustry ? 'text-blue-300' : 'text-gray-300'}`}>
-                                                    {industries.find(i => i.code === item.industry)?.name || item.industry}
+                                                    <div>{industries.find(i => i.code === item.industry)?.name || item.industry}</div>
+                                                    <div className="mt-1 font-mono text-[10px] text-gray-500">{item.sampleDays || 0} days avg</div>
                                                 </td>
                                                 <td className="p-4 text-center">
                                                     <div className="flex flex-col items-center gap-1">
@@ -714,8 +887,187 @@ const MarketFlow = () => {
                             </div>
                         )}
                     </div>
+
                 </div>
             </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
+                    <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40 flex items-start justify-between gap-3">
+                        <div>
+                            <h3 className="font-bold text-gray-100">Monthly Score Daily Detail</h3>
+                            <p className="mt-1 text-xs text-gray-400">
+                                {selectedTicker ? `${selectedTicker} - diễn giải Monthly Score theo từng ngày trong 30 ngày gần nhất.` : 'Click một ticker để xem chi tiết theo ngày.'}
+                            </p>
+                        </div>
+                        <div className="text-right">
+                            <span className={`block font-mono text-sm font-bold ${selectedTickerMonthlyScore >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {selectedTickerMonthlyScore > 0 ? '+' : ''}{selectedTickerMonthlyScore.toLocaleString()}
+                            </span>
+                            <span className="text-[10px] text-gray-500">{selectedTickerDailyScores.length} days</span>
+                        </div>
+                    </div>
+
+                    {loadingLeaderboard && selectedTickerDailyScores.length === 0 ? (
+                        <div className="p-10 text-center text-gray-500">
+                            <Loader2 size={22} className="animate-spin mx-auto mb-2 opacity-50" />
+                            Loading daily score details...
+                        </div>
+                    ) : selectedTickerDailyScores.length > 0 ? (
+                        <div className="max-h-[360px] overflow-auto">
+                            <table className="w-full text-left text-sm border-collapse">
+                                <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
+                                    <tr>
+                                        <th className="p-3 font-bold text-xs uppercase">Date</th>
+                                        <th className="p-3 text-right font-bold text-xs uppercase">Daily Score</th>
+                                        <th className="p-3 text-center font-bold text-xs uppercase">Records</th>
+                                        <th className="p-3 font-bold text-xs uppercase">Interpretation</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-700/50">
+                                    {selectedTickerDailyScores.map((item) => {
+                                        const status = getScoreStatus(item.score);
+                                        return (
+                                            <tr key={item.id} className="hover:bg-gray-700/30 transition-colors">
+                                                <td className="p-3 font-mono text-xs text-gray-300 whitespace-nowrap">
+                                                    {formatAnalyticDate(item.date)}
+                                                </td>
+                                                <td className="p-3 text-right font-mono text-xs font-bold">
+                                                    <span className={item.score >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                                        {item.score > 0 ? '+' : ''}{item.score.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3 text-center font-mono text-xs text-gray-400">
+                                                    {item.count}
+                                                </td>
+                                                <td className="p-3">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className={`w-fit rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${status.className}`}>
+                                                            {status.label}
+                                                        </span>
+                                                        <span className="text-xs text-gray-400">
+                                                            {item.score > 0
+                                                                ? 'Ticker đóng góp tích cực vào dòng tiền ngày này.'
+                                                                : item.score < 0
+                                                                    ? 'Ticker đóng góp tiêu cực vào dòng tiền ngày này.'
+                                                                    : 'Ticker gần như trung tính trong ngày này.'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="p-10 text-center text-sm text-gray-500">
+                            Chưa có dữ liệu score theo ngày cho ticker này.
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
+                    <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40 flex items-start justify-between gap-3">
+                        <div>
+                            <h3 className="font-bold text-gray-100">BSI & PSI Daily Detail</h3>
+                            <p className="mt-1 text-xs text-gray-400">
+                                {selectedIndustryName} - diễn giải các chỉ số theo từng ngày trong 30 ngày gần nhất.
+                            </p>
+                        </div>
+                        <span className="rounded-full border border-gray-600 px-2 py-1 text-[10px] font-mono text-gray-400">
+                            {selectedIndustryAnalyticsHistory.length} days
+                        </span>
+                    </div>
+
+                    {loadingAnalytics && selectedIndustryAnalyticsHistory.length === 0 ? (
+                        <div className="p-10 text-center text-gray-500">
+                            <Loader2 size={22} className="animate-spin mx-auto mb-2 opacity-50" />
+                            Loading daily details...
+                        </div>
+                    ) : selectedIndustryAnalyticsHistory.length > 0 ? (
+                        <div className="max-h-[360px] overflow-auto">
+                            <table className="w-full text-left text-sm border-collapse">
+                                <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
+                                    <tr>
+                                        <th className="p-3 font-bold text-xs uppercase">Date</th>
+                                        <th className="p-3 text-center font-bold text-xs uppercase">BSI</th>
+                                        <th className="p-3 text-right font-bold text-xs uppercase">PSI</th>
+                                        <th className="p-3 font-bold text-xs uppercase">Interpretation</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-700/50">
+                                    {selectedIndustryAnalyticsHistory.map((item) => {
+                                        const status = getBsiStatus(item.bsi);
+                                        return (
+                                            <tr key={item.id || item.documentId || `${item.industry}-${item.date}`} className="hover:bg-gray-700/30 transition-colors">
+                                                <td className="p-3 font-mono text-xs text-gray-300 whitespace-nowrap">
+                                                    {formatAnalyticDate(item.date)}
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        <span className={`font-bold font-mono text-xs ${item.bsi >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
+                                                            {(Number(item.bsi || 0) * 100).toFixed(1)}%
+                                                        </span>
+                                                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-700">
+                                                            <div
+                                                                className={`h-full ${item.bsi >= 0.5 ? 'bg-green-500' : 'bg-red-500'}`}
+                                                                style={{ width: `${Math.max(0, Math.min(100, Number(item.bsi || 0) * 100))}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-right font-mono text-xs font-bold">
+                                                    <span className={item.psi >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                                        {Number(item.psi || 0) > 0 ? '+' : ''}{Number(item.psi || 0).toLocaleString()}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className={`w-fit rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${status.className}`}>
+                                                            {status.label}
+                                                        </span>
+                                                        <span className="text-xs text-gray-400">
+                                                            {Number(item.psi || 0) >= 0
+                                                                ? 'Dòng tiền đóng góp ròng tích cực.'
+                                                                : 'Dòng tiền đóng góp ròng tiêu cực.'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="p-10 text-center text-sm text-gray-500">
+                            Chưa có dữ liệu BSI/PSI theo ngày cho industry này.
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {loading && !payload ? (
+                <div className="p-20 text-center text-gray-400 bg-gray-800/30 rounded-2xl border border-gray-700/50 backdrop-blur-sm">
+                    <Loader2 size={40} className="animate-spin mx-auto mb-4 text-blue-500 opacity-50" />
+                    <p className="text-lg font-medium">Fetching Market Insights...</p>
+                    <p className="text-sm opacity-50 mt-1">This may take a few seconds</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {renderTable('market-flow-inc-tbl', 'Increasing Flow (listInc)', rowsInc, columnsInc, 'text-green-400')}
+                    {renderTable('market-flow-desc-tbl', 'Decreasing Flow (listDesc)', rowsDesc, columnsDesc, 'text-red-400')}
+
+                    {!rowsInc.length && !rowsDesc.length && payload && (
+                        <div className="lg:col-span-2">
+                            <pre className="p-4 overflow-auto text-[10px] text-gray-400 max-h-[70vh] bg-gray-900/50 rounded-xl border border-gray-700 font-mono">
+                                {JSON.stringify(payload, null, 2)}
+                            </pre>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
