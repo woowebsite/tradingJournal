@@ -1,7 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Bell, Settings, Clock3, NotebookPen, Plus } from 'lucide-react';
+import { Search, Bell, Settings, Clock3, NotebookPen, Plus, Workflow } from 'lucide-react';
 import GlobalWatchlist from './GlobalWatchlist';
 
 const Topbar = ({ onNewTrade }) => {
@@ -9,7 +9,8 @@ const Topbar = ({ onNewTrade }) => {
 
     const topNavItems = [
         { label: 'Today', path: '/today-trades', icon: Clock3 },
-        { label: 'Plans', path: '/journal-plan', icon: NotebookPen }
+        { label: 'Plan', path: '/journal-plan', icon: NotebookPen },
+        { label: 'Workflow', path: '/journal-workflow', icon: Workflow }
     ];
 
     return (
@@ -23,7 +24,7 @@ const Topbar = ({ onNewTrade }) => {
                 />
             </div>
 
-            <nav className="hidden lg:flex items-center gap-2">
+            <nav className="hidden lg:flex items-center rounded-lg border border-gray-700 bg-gray-900 p-1 shadow-inner shadow-black/10">
                 {topNavItems.map(item => {
                     const active = location.pathname === item.path;
                     const Icon = item.icon;
@@ -33,7 +34,10 @@ const Topbar = ({ onNewTrade }) => {
                             key={item.path}
                             to={item.path}
                             className={clsx(
-                                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600 hover:bg-gray-800 hover:text-white'
+                                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+                                active
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                             )}
                         >
                             <Icon size={14} />
@@ -44,7 +48,7 @@ const Topbar = ({ onNewTrade }) => {
                 <button
                     type="button"
                     onClick={onNewTrade}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:border-gray-600 hover:bg-gray-800 hover:text-white cursor-pointer"
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:bg-gray-800 hover:text-white"
                 >
                     <Plus size={14} className="text-blue-400" />
                     New Trade

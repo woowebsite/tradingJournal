@@ -1,11 +1,22 @@
 import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { Edit } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
 import { resolveSetting } from '../utils/roadmapCalculations';
+import { fetchStrategies, updateStrategy } from '../features/strategySlice';
+import { fetchRules } from '../features/ruleSlice';
+import { fetchWebhooks } from '../features/webhookSlice';
+import { StrategyModal } from './ManageStrategies';
+import SettingsModal from '../components/SettingsModal';
 
 const Dashboard = () => {
-    const { selectedAccount } = useAccount();
+    const dispatch = useDispatch();
+    const { selectedAccount, setSelectedAccount } = useAccount();
+    const { items: strategies } = useSelector(state => state.strategies);
+    const { items: rules } = useSelector(state => state.rules);
+    const { items: webhooks } = useSelector(state => state.webhooks);
     const [stats, setStats] = useState({
         totalPnl: 0,
         winRate: 0,
@@ -14,7 +25,69 @@ const Dashboard = () => {
     });
     const [recentTrades, setRecentTrades] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [editingStrategy, setEditingStrategy] = useState(false);
+    const [editingSetting, setEditingSetting] = useState(false);
     const activeSetting = resolveSetting(selectedAccount);
+    const selectedAccountStrategyId = typeof selectedAccount?.strategy === 'object'
+        ? (selectedAccount.strategy.documentId || selectedAccount.strategy.id)
+        : selectedAccount?.strategy;
+    const activeStrategy = strategies.find(strategy =>
+        selectedAccountStrategyId &&
+        (strategy.documentId === selectedAccountStrategyId || strategy.id === selectedAccountStrategyId)
+    ) || selectedAccount?.strategy;
+    const activeStrategyName = activeStrategy
+        ? (typeof activeStrategy === 'object'
+            ? (activeStrategy.name || activeStrategy.Name || activeStrategy.title || activeStrategy.Title)
+            : activeStrategy)
+        : '';
+    const activeStrategyDescription = typeof activeStrategy === 'object'
+        ? (activeStrategy.description || activeStrategy.Description || '')
+        : '';
+
+    useEffect(() => {
+        dispatch(fetchStrategies());
+        dispatch(fetchRules());
+        dispatch(fetchWebhooks());
+    }, [dispatch]);
+
+    const handleUpdateStrategy = async (strategyData) => {
+        if (!activeStrategy || typeof activeStrategy !== 'object') return;
+        const id = activeStrategy.documentId || activeStrategy.id;
+        if (!id) return;
+
+        try {
+            await dispatch(updateStrategy({ id, data: strategyData })).unwrap();
+            await dispatch(fetchStrategies()).unwrap();
+            setEditingStrategy(false);
+        } catch (error) {
+            console.error('Failed to update strategy:', error);
+            alert(`Failed to update strategy: ${error?.error?.message || error?.message || error}`);
+        }
+    };
+
+    const handleUpdateSetting = async (settingData) => {
+        if (!activeSetting) return;
+        const id = activeSetting.documentId || activeSetting.id;
+        if (!id) return;
+
+        try {
+            const response = await api.put(`/settings/${id}`, { data: settingData });
+            const updatedSetting = response.data.data;
+
+            setSelectedAccount(prev => prev ? ({
+                ...prev,
+                setting: updatedSetting
+            }) : prev);
+            setEditingSetting(false);
+        } catch (error) {
+            console.error('Failed to update setting:', error.response?.data || error);
+            const message = error.response?.data?.error?.message
+                || error.response?.data?.message
+                || error.message
+                || 'Failed to update setting';
+            alert(message);
+        }
+    };
 
     useEffect(() => {
         const fetchDashboardData = async () => {
@@ -106,33 +179,102 @@ const Dashboard = () => {
 
     return (
         <div>
-            {/* Settings Summary Card */}
-            <div className="mb-8 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-sm relative overflow-hidden">
-                <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-6">
+            <StrategyModal
+                isOpen={editingStrategy}
+                onClose={() => setEditingStrategy(false)}
+                onSubmit={handleUpdateStrategy}
+                initialData={typeof activeStrategy === 'object' ? activeStrategy : null}
+                availableRules={rules}
+                availableWebhooks={webhooks}
+            />
+            <SettingsModal
+                isOpen={editingSetting}
+                onClose={() => setEditingSetting(false)}
+                onSubmit={handleUpdateSetting}
+                setting={activeSetting}
+            />
 
-                    <div className="flex-1 min-w-[200px]">
-                        <p className="text-gray-400 text-sm uppercase tracking-wider mb-1">Risk Setting</p>
-                        <h3 className="text-3xl font-bold text-white truncate" title={activeSetting?.Name || activeSetting?.name}>
-                            {activeSetting ? (activeSetting.Name || activeSetting.name) : 'No Active Setting'}
-                        </h3>
-                    </div>
-
-                    {activeSetting && (
-                        <div className="flex gap-8 text-sm md:text-base">
-                            <div className="text-center md:text-left">
-                                <p className="text-gray-400 mb-1">Risk / Trade</p>
-                                <p className="font-bold text-blue-400 text-lg">{activeSetting.riskPerTrade}%</p>
-                            </div>
-                            <div className="text-center md:text-left">
-                                <p className="text-gray-400 mb-1">Capital Risk</p>
-                                <p className="font-bold text-yellow-400 text-lg">{activeSetting.capitalRisk}%</p>
-                            </div>
-                            <div className="text-center md:text-left">
-                                <p className="text-gray-400 mb-1">Max Drawdown</p>
-                                <p className="font-bold text-red-400 text-lg">{activeSetting.maxDrawDown}%</p>
-                            </div>
+            {/* Settings Summary Cards */}
+            <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
+                <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => activeSetting && setEditingSetting(true)}
+                    onKeyDown={(event) => {
+                        if ((event.key === 'Enter' || event.key === ' ') && activeSetting) {
+                            event.preventDefault();
+                            setEditingSetting(true);
+                        }
+                    }}
+                    className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-sm relative overflow-hidden transition hover:border-blue-500/40 hover:bg-gray-800/80 cursor-pointer"
+                    title={activeSetting ? 'Edit setting' : 'No active setting'}
+                >
+                    <div className="flex flex-wrap md:flex-nowrap items-start justify-between gap-6">
+                        <div className="flex-1 min-w-[200px]">
+                            <p className="text-gray-400 text-sm uppercase tracking-wider mb-1">Risk Setting</p>
+                            <h3 className="text-3xl font-bold text-white truncate" title={activeSetting?.Name || activeSetting?.name}>
+                                {activeSetting ? (activeSetting.Name || activeSetting.name) : 'No Active Setting'}
+                            </h3>
                         </div>
-                    )}
+
+                        {activeSetting && (
+                            <div className="flex gap-8 text-sm md:text-base">
+                                <div className="text-center md:text-left">
+                                    <p className="text-gray-400 mb-1">Risk / Trade</p>
+                                    <p className="font-bold text-blue-400 text-lg">{activeSetting.riskPerTrade}%</p>
+                                </div>
+                                <div className="text-center md:text-left">
+                                    <p className="text-gray-400 mb-1">Capital Risk</p>
+                                    <p className="font-bold text-yellow-400 text-lg">{activeSetting.capitalRisk}%</p>
+                                </div>
+                                <div className="text-center md:text-left">
+                                    <p className="text-gray-400 mb-1">Max Drawdown</p>
+                                    <p className="font-bold text-red-400 text-lg">{activeSetting.maxDrawDown}%</p>
+                                </div>
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                setEditingSetting(true);
+                            }}
+                            disabled={!activeSetting}
+                            className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm font-medium text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <Edit size={15} />
+                            Edit
+                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-sm relative overflow-hidden">
+                    <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                            <p className="text-gray-400 text-sm uppercase tracking-wider mb-1">Strategy</p>
+                            <h3 className="text-2xl font-bold text-emerald-400 truncate" title={activeStrategyName || 'No Strategy Selected'}>
+                                {activeStrategyName || 'No Strategy'}
+                            </h3>
+                            {activeStrategyDescription ? (
+                                <p className="mt-2 max-h-10 overflow-hidden text-sm text-gray-400" title={activeStrategyDescription}>
+                                    {activeStrategyDescription}
+                                </p>
+                            ) : (
+                                <p className="mt-2 text-sm text-gray-500">
+                                    {activeStrategyName ? 'No description' : 'No strategy selected for this account.'}
+                                </p>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setEditingStrategy(true)}
+                            disabled={!activeStrategy || typeof activeStrategy !== 'object'}
+                            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <Edit size={15} />
+                            Edit
+                        </button>
+                    </div>
                 </div>
             </div>
 

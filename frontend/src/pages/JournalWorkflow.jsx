@@ -5,6 +5,7 @@ import { ArrowRight, Target } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { fetchStrategies } from '../features/strategySlice';
 import { fetchSignals } from '../features/signalSlice';
+import { fetchWebhookSignals } from '../features/webhookSignalSlice';
 import { fetchTrades } from '../features/tradeSlice';
 import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
@@ -15,22 +16,37 @@ const sameId = (a, b) => a != null && b != null && a.toString() === b.toString()
 const getRuleIds = (rules = []) => rules.map(getEntityId).filter(Boolean).map(id => id.toString());
 const formatDate = (date) => date ? new Date(date).toLocaleDateString() : '-';
 const getSignalPriceKey = (signal) => `${getEntityId(signal?.symbol) || 'symbol'}:${signal?.date || signal?.createdAt || 'date'}`;
+const getMarketName = (account) => account?.market?.Name || account?.market?.name || '';
+const isCryptoMarket = (account) => /crypto|binance/i.test(getMarketName(account));
+const getWebhookSymbolName = (signal) => {
+    const linkedName = signal?.linked_symbol?.Name || signal?.linked_symbol?.name;
+    if (linkedName) return linkedName;
+    const rawSymbol = signal?.symbol || '';
+    const parts = rawSymbol.split(':');
+    return parts.length > 1 ? parts[1] : rawSymbol;
+};
 
 const JournalWorkflow = () => {
     const dispatch = useDispatch();
     const { selectedAccount } = useAccount();
     const { items: strategies } = useSelector(state => state.strategies);
     const { items: signals } = useSelector(state => state.signals);
+    const { items: webhookSignals } = useSelector(state => state.webhookSignals);
     const { items: trades } = useSelector(state => state.trades);
     const [roadmaps, setRoadmaps] = useState([]);
     const [signalPrices, setSignalPrices] = useState({});
 
     const accountId = getEntityId(selectedAccount);
+    const useWebhookSignals = isCryptoMarket(selectedAccount);
 
     useEffect(() => {
         dispatch(fetchStrategies());
-        dispatch(fetchSignals());
-    }, [dispatch]);
+        if (useWebhookSignals) {
+            dispatch(fetchWebhookSignals());
+        } else {
+            dispatch(fetchSignals());
+        }
+    }, [dispatch, useWebhookSignals]);
 
     useEffect(() => {
         if (!accountId) {
@@ -93,6 +109,37 @@ const JournalWorkflow = () => {
     }, [activeStrategy]);
 
     const strategySignals = useMemo(() => {
+        if (useWebhookSignals) {
+            const activeWebhookId = getEntityId(activeStrategy?.webhook)?.toString();
+
+            return webhookSignals
+                .filter(signal => signal.signalStatus !== 'Reject')
+                .filter(signal => {
+                    if (!activeWebhookId) return true;
+                    return sameId(getEntityId(signal.webhook), activeWebhookId);
+                })
+                .map(signal => {
+                    const linkedSymbol = signal.linked_symbol || null;
+                    const symbolName = getWebhookSymbolName(signal);
+                    const symbol = linkedSymbol || {
+                        id: symbolName,
+                        documentId: symbolName,
+                        Name: symbolName,
+                        name: symbolName
+                    };
+
+                    return {
+                        ...signal,
+                        isWebhookSignal: true,
+                        symbol,
+                        date: signal.createdDate || signal.createdAt,
+                        name: signal.signal || signal.desc || 'Webhook signal',
+                        expired: signal.signalStatus === 'Reject',
+                        price: Number(signal.price)
+                    };
+                });
+        }
+
         if (strategyRuleIds.size === 0) return [];
 
         return signals.filter(signal => {
@@ -101,7 +148,7 @@ const JournalWorkflow = () => {
 
             return signal.rules?.some(rule => strategyRuleIds.has(getEntityId(rule)?.toString()));
         });
-    }, [accountId, signals, strategyRuleIds]);
+    }, [accountId, activeStrategy?.webhook, signals, strategyRuleIds, useWebhookSignals, webhookSignals]);
 
     const strategyTrades = useMemo(() => {
         if (!activeStrategy) return [];
@@ -137,6 +184,7 @@ const JournalWorkflow = () => {
                 return signalSymbolId && !openTradeSymbolIds.has(signalSymbolId);
             })
             .filter(signal => {
+                if (signal.isWebhookSignal) return true;
                 if (entryRuleIds.size === 0) return true;
                 return signal.rules?.some(rule => entryRuleIds.has(getEntityId(rule)?.toString()));
             })
@@ -163,6 +211,14 @@ const JournalWorkflow = () => {
             const nextPrices = {};
 
             await Promise.all(suggestedSignals.map(async (signal) => {
+                if (signal.isWebhookSignal) {
+                    const signalPrice = Number(signal.price);
+                    if (Number.isFinite(signalPrice)) {
+                        nextPrices[getSignalPriceKey(signal)] = signalPrice;
+                    }
+                    return;
+                }
+
                 const symbolId = getEntityId(signal.symbol);
                 const signalDate = signal.date;
                 if (!symbolId || !signalDate) return;
@@ -218,7 +274,7 @@ const JournalWorkflow = () => {
                             <h2 className="text-lg font-bold text-white">Roadmap Signal Suggestions</h2>
                         </div>
                         <p className="mt-1 text-sm text-gray-400">
-                            Suggested from scanned Entry signals. SL/TP use roadmap risk {roadmapRiskPercent.toFixed(2)}% and RR {roadmapRewardMultiple.toFixed(2)}.
+                            Suggested from {useWebhookSignals ? 'WebhookSignal' : 'scanned Entry signals'}. SL/TP use roadmap risk {roadmapRiskPercent.toFixed(2)}% and RR {roadmapRewardMultiple.toFixed(2)}.
                         </p>
                     </div>
                     <Link to="/trade-station" className="inline-flex items-center gap-2 text-sm text-blue-300 hover:text-blue-200">
@@ -232,7 +288,7 @@ const JournalWorkflow = () => {
                     </div>
                 ) : suggestedSignals.length === 0 ? (
                     <div className="rounded-lg border border-gray-700 bg-gray-900/40 p-4 text-sm text-gray-400">
-                        No suitable scanned signals right now. The roadmap may be full, signals may be expired, or open trades already exist for matching symbols.
+                        No suitable {useWebhookSignals ? 'webhook signals' : 'scanned signals'} right now. The roadmap may be full, signals may be expired, or open trades already exist for matching symbols.
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -267,7 +323,7 @@ const JournalWorkflow = () => {
                                         <tr key={signal.documentId || signal.id}>
                                             <td className="px-3 py-3">
                                                 <div className="font-mono font-semibold text-white">{symbolName}</div>
-                                                <div className="text-xs text-gray-500">{signal.name || 'Strategy signal'}</div>
+                                                <div className="text-xs text-gray-500">{signal.name || (signal.isWebhookSignal ? 'Webhook signal' : 'Strategy signal')}</div>
                                             </td>
                                             <td className="px-3 py-3 text-gray-300">{formatDate(signal.date)}</td>
                                             <td className="px-3 py-3 text-right font-mono text-gray-200">

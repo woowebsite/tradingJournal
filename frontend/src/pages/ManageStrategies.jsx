@@ -16,7 +16,7 @@ const RULE_GROUPS = [
 
 const getRuleId = (rule) => rule?.documentId || rule?.id;
 
-const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules, availableWebhooks }) => {
+export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules, availableWebhooks }) => {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
@@ -100,7 +100,7 @@ const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules,
     };
 
     const handleSubmit = (e) => {
-        e.preventDefault();
+        e?.preventDefault?.();
         const ruleIds = RULE_GROUPS.flatMap(group => formData[group.key]);
 
         onSubmit({
