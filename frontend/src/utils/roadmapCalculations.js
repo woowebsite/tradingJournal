@@ -13,6 +13,14 @@ export const getRelationId = (relation) => {
     return relation;
 };
 
+export const getStrategyId = (strategy) => {
+    if (!strategy) return null;
+    if (typeof strategy === 'object') {
+        return strategy.documentId || strategy.id || null;
+    }
+    return strategy;
+};
+
 export const resolveSetting = (account, settings = []) => {
     if (!account) return null;
 

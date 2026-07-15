@@ -17,6 +17,7 @@ import { Search, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
+import { getStrategyId } from '../utils/roadmapCalculations';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
@@ -217,17 +218,14 @@ const TradeStation = () => {
     }, [selectedSymbol?.Name]);
 
     // Active Strategy Look-up
-    const activeStrategyId = (() => {
-        if (!selectedAccount || !selectedAccount.strategy) return null;
-        if (typeof selectedAccount.strategy === 'object') {
-            return selectedAccount.strategy.documentId || selectedAccount.strategy.id;
-        }
-        return selectedAccount.strategy;
-    })();
+    const activeStrategyId = getStrategyId(selectedAccount?.strategy);
 
     const activeStrategy = (() => {
         if (!activeStrategyId) return null;
-        return strategies.find(s => (s.documentId == activeStrategyId || s.id == activeStrategyId));
+        return strategies.find(s => {
+            const strategyId = getStrategyId(s);
+            return strategyId === activeStrategyId || s.documentId === activeStrategyId || s.id === activeStrategyId;
+        });
     })();
 
     const strategySignals = activeStrategy

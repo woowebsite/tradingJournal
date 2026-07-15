@@ -26,6 +26,24 @@ const getWebhookSymbolName = (signal) => {
     return parts.length > 1 ? parts[1] : rawSymbol;
 };
 
+const getSignalDirection = (signal) => {
+    if (signal?.isWebhookSignal) {
+        const direction = signal?.signal?.toUpperCase();
+        if (['LONG', 'BUY'].includes(direction)) return 'Long';
+        if (['SHORT', 'SELL'].includes(direction)) return 'Short';
+    }
+
+    const tradeDirection = signal?.trade?.type || signal?.trade?.Type || signal?.type;
+    if (tradeDirection === 'Long' || tradeDirection === 'Short') return tradeDirection;
+
+    return '-';
+};
+
+const canOpenSignal = (signal) => {
+    if (signal?.signalStatus === 'Unread') return true;
+    return Boolean(signal?.trade);
+};
+
 const JournalWorkflow = () => {
     const dispatch = useDispatch();
     const { selectedAccount } = useAccount();
@@ -296,6 +314,7 @@ const JournalWorkflow = () => {
                             <thead className="text-xs uppercase text-gray-500">
                                 <tr>
                                     <th className="px-3 py-2">Signal</th>
+                                    <th className="px-3 py-2">Long / Short</th>
                                     <th className="px-3 py-2">Date</th>
                                     <th className="px-3 py-2 text-right">Entry</th>
                                     <th className="px-3 py-2 text-right">SL</th>
@@ -307,6 +326,8 @@ const JournalWorkflow = () => {
                                 {suggestedSignals.map(signal => {
                                     const symbolName = signal.symbol?.Name || signal.symbol?.name || '-';
                                     const entryPrice = signalPrices[getSignalPriceKey(signal)];
+                                    const signalDirection = getSignalDirection(signal);
+                                    const canOpen = canOpenSignal(signal);
                                     const hasEntryPrice = Number.isFinite(entryPrice);
                                     const stoplossPrice = hasEntryPrice
                                         ? entryPrice * (1 - (roadmapRiskPercent / 100))
@@ -325,6 +346,17 @@ const JournalWorkflow = () => {
                                                 <div className="font-mono font-semibold text-white">{symbolName}</div>
                                                 <div className="text-xs text-gray-500">{signal.name || (signal.isWebhookSignal ? 'Webhook signal' : 'Strategy signal')}</div>
                                             </td>
+                                            <td className="px-3 py-3">
+                                                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                                                    signalDirection === 'Long'
+                                                        ? 'bg-green-500/15 text-green-300'
+                                                        : signalDirection === 'Short'
+                                                            ? 'bg-red-500/15 text-red-300'
+                                                            : 'bg-gray-700 text-gray-300'
+                                                }`}>
+                                                    {signalDirection}
+                                                </span>
+                                            </td>
                                             <td className="px-3 py-3 text-gray-300">{formatDate(signal.date)}</td>
                                             <td className="px-3 py-3 text-right font-mono text-gray-200">
                                                 {hasEntryPrice ? formatNumber(entryPrice, selectedAccount?.moneyFormat || '#,###.##') : '-'}
@@ -336,12 +368,16 @@ const JournalWorkflow = () => {
                                                 {Number.isFinite(takeProfitPrice) ? formatNumber(takeProfitPrice, selectedAccount?.moneyFormat || '#,###.##') : '-'}
                                             </td>
                                             <td className="px-3 py-3 text-right">
-                                                <Link
-                                                    to={`/trade-station?${tradeStationParams.toString()}`}
-                                                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
-                                                >
-                                                    Open <ArrowRight size={13} />
-                                                </Link>
+                                                {canOpen ? (
+                                                    <Link
+                                                        to={`/trade-station?${tradeStationParams.toString()}`}
+                                                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                                                    >
+                                                        Open <ArrowRight size={13} />
+                                                    </Link>
+                                                ) : (
+                                                    <span className="text-xs text-gray-500">-</span>
+                                                )}
                                             </td>
                                         </tr>
                                     );

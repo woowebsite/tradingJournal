@@ -4,7 +4,7 @@ import { Edit } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
-import { resolveSetting } from '../utils/roadmapCalculations';
+import { getStrategyId, resolveSetting } from '../utils/roadmapCalculations';
 import { fetchStrategies, updateStrategy } from '../features/strategySlice';
 import { fetchRules } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
@@ -28,19 +28,17 @@ const Dashboard = () => {
     const [editingStrategy, setEditingStrategy] = useState(false);
     const [editingSetting, setEditingSetting] = useState(false);
     const activeSetting = resolveSetting(selectedAccount);
-    const selectedAccountStrategyId = typeof selectedAccount?.strategy === 'object'
-        ? (selectedAccount.strategy.documentId || selectedAccount.strategy.id)
-        : selectedAccount?.strategy;
-    const activeStrategy = strategies.find(strategy =>
-        selectedAccountStrategyId &&
-        (strategy.documentId === selectedAccountStrategyId || strategy.id === selectedAccountStrategyId)
-    ) || selectedAccount?.strategy;
+    const selectedAccountStrategyId = getStrategyId(selectedAccount?.strategy);
+    const activeStrategy = strategies.find(strategy => {
+        const strategyId = getStrategyId(strategy);
+        return selectedAccountStrategyId && (strategyId === selectedAccountStrategyId || strategy.documentId === selectedAccountStrategyId || strategy.id === selectedAccountStrategyId);
+    }) || (typeof selectedAccount?.strategy === 'object' ? selectedAccount.strategy : null);
     const activeStrategyName = activeStrategy
         ? (typeof activeStrategy === 'object'
             ? (activeStrategy.name || activeStrategy.Name || activeStrategy.title || activeStrategy.Title)
             : activeStrategy)
         : '';
-    const activeStrategyDescription = typeof activeStrategy === 'object'
+    const activeStrategyDescription = activeStrategy && typeof activeStrategy === 'object'
         ? (activeStrategy.description || activeStrategy.Description || '')
         : '';
 
@@ -183,7 +181,7 @@ const Dashboard = () => {
                 isOpen={editingStrategy}
                 onClose={() => setEditingStrategy(false)}
                 onSubmit={handleUpdateStrategy}
-                initialData={typeof activeStrategy === 'object' ? activeStrategy : null}
+                initialData={activeStrategy && typeof activeStrategy === 'object' ? activeStrategy : null}
                 availableRules={rules}
                 availableWebhooks={webhooks}
             />
