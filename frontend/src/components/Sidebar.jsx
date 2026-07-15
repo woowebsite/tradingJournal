@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp, ChevronRight, Webhook, CheckSquare } from 'lucide-react';
+import { LayoutDashboard, ReceiptText, NotebookPen, Settings, ChevronDown, Wallet, LineChart, Activity, BrainCircuit, BarChart2, List, Tag, TrendingUp, ChevronRight, Webhook, CheckSquare, Newspaper } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAccount } from '../context/AccountContext';
 import clsx from 'clsx';
@@ -10,12 +10,13 @@ const Sidebar = () => {
 
     const menuGroups = [
         {
-            label: 'Menu',
-            items: [
-                { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-                {
-                    icon: BarChart2, label: 'Trade Station', path: '/trade-station',
-                    subItems: [
+                label: 'Menu',
+                items: [
+                    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+                    { icon: Newspaper, label: 'News Analysis', path: '/news-analysis' },
+                    {
+                        icon: BarChart2, label: 'Trade Station', path: '/trade-station',
+                        subItems: [
                         { label: 'Today', path: '/today-trades' },
                     ]
                 },
