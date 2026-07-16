@@ -28,19 +28,22 @@ const Dashboard = () => {
     const [editingStrategy, setEditingStrategy] = useState(false);
     const [editingSetting, setEditingSetting] = useState(false);
     const activeSetting = resolveSetting(selectedAccount);
-    const selectedAccountStrategyId = typeof selectedAccount?.strategy === 'object'
+    const selectedAccountStrategyId = selectedAccount?.strategy && typeof selectedAccount.strategy === 'object'
         ? (selectedAccount.strategy.documentId || selectedAccount.strategy.id)
         : selectedAccount?.strategy;
     const activeStrategy = strategies.find(strategy =>
         selectedAccountStrategyId &&
-        (strategy.documentId === selectedAccountStrategyId || strategy.id === selectedAccountStrategyId)
+        (
+            String(strategy.documentId) === String(selectedAccountStrategyId) ||
+            String(strategy.id) === String(selectedAccountStrategyId)
+        )
     ) || selectedAccount?.strategy;
     const activeStrategyName = activeStrategy
         ? (typeof activeStrategy === 'object'
             ? (activeStrategy.name || activeStrategy.Name || activeStrategy.title || activeStrategy.Title)
             : activeStrategy)
         : '';
-    const activeStrategyDescription = typeof activeStrategy === 'object'
+    const activeStrategyDescription = activeStrategy && typeof activeStrategy === 'object'
         ? (activeStrategy.description || activeStrategy.Description || '')
         : '';
 
