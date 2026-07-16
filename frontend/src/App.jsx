@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
+import NewsAnalysis from './pages/NewsAnalysis';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
 import Backtest from './pages/Backtest';
@@ -37,6 +38,7 @@ function App() {
         <Routes>
           <Route path="/" element={<MainLayout />}>
             <Route index element={<Dashboard />} />
+            <Route path="news-analysis" element={<NewsAnalysis />} />
             <Route path="accounts" element={<Accounts />} />
             <Route path="accounts/:id" element={<AccountDetail />} />
             <Route path="trade-station" element={<TradeStation />} />

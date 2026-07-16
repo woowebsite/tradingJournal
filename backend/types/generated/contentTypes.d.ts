@@ -599,6 +599,71 @@ export interface ApiMarketMarket extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiNewsAnalysisNewsAnalysis
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'news_analyses';
+  info: {
+    displayName: 'News Analysis';
+    pluralName: 'news-analyses';
+    singularName: 'news-analysis';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    articleUrl: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    dayKey: Schema.Attribute.String & Schema.Attribute.Required;
+    excerpt: Schema.Attribute.Text;
+    fetchedAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::news-analysis.news-analysis'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sourceName: Schema.Attribute.String;
+    sourceUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiNewsUrlNewsUrl extends Struct.CollectionTypeSchema {
+  collectionName: 'news_urls';
+  info: {
+    displayName: 'NewsUrl';
+    pluralName: 'news-urls';
+    singularName: 'news-url';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::news-url.news-url'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    type: Schema.Attribute.Enumeration<['source', 'ignore']> &
+      Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    url: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface ApiPlanPlan extends Struct.CollectionTypeSchema {
   collectionName: 'plans';
   info: {
@@ -1801,6 +1866,8 @@ declare module '@strapi/strapi' {
       'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;
+      'api::news-analysis.news-analysis': ApiNewsAnalysisNewsAnalysis;
+      'api::news-url.news-url': ApiNewsUrlNewsUrl;
       'api::plan.plan': ApiPlanPlan;
       'api::roadmap.roadmap': ApiRoadmapRoadmap;
       'api::rule.rule': ApiRuleRule;

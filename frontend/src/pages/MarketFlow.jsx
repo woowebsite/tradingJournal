@@ -722,16 +722,15 @@ const MarketFlow = () => {
                 </div>
             )}
 
-            {/* Dashboard Bottom Section: Leaderboard & Analytics */}
+            {/* Row 1: Monthly Leaderboard + Monthly Score Daily Detail */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Monthly Leaderboard Column */}
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between">
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
+                    <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40 flex items-center justify-between gap-3">
                         <div>
                             <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
                                 Monthly Leaderboard
                             </h2>
-                            <p className="text-xs text-gray-400 mt-1 h-[40px]">Ranking tickers by cumulative score for the current month</p>
+                            <p className="text-xs text-gray-400 mt-1">Ranking tickers by cumulative score for the current month</p>
                         </div>
                         <button
                             onClick={loadLeaderboard}
@@ -742,7 +741,7 @@ const MarketFlow = () => {
                         </button>
                     </div>
 
-                    <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl h-[500px] flex flex-col">
+                    <div className="h-[500px] flex flex-col">
                         {loadingLeaderboard && leaderboard.length === 0 ? (
                             <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
                                 <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
@@ -794,104 +793,8 @@ const MarketFlow = () => {
                             </div>
                         )}
                     </div>
-
                 </div>
 
-                {/* Market Analytics Column */}
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
-                                Market Analytics (BSI & PSI)
-                            </h2>
-                            <div className="text-[10px] text-gray-400 mt-1 space-y-0.5 font-mono uppercase tracking-wider h-[40px]">
-                                <p>Average of latest 30 days</p>
-                                <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng; PSI = ∑positive_impact − ∑negative_impact</p>
-                            </div>
-                        </div>
-                        <button
-                            onClick={loadAnalytics}
-                            className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors"
-                            title="Refresh Analytics"
-                        >
-                            <RefreshCw size={16} className={loadingAnalytics ? 'animate-spin' : ''} />
-                        </button>
-                    </div>
-
-                    <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl h-[500px] flex flex-col">
-                        {loadingAnalytics && analytics.length === 0 ? (
-                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
-                                <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
-                                Loading analytics...
-                            </div>
-                        ) : analytics.length > 0 ? (
-                            <div className="overflow-auto flex-1">
-                                <table className="w-full text-left text-sm border-collapse">
-                                    <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
-                                        <tr>
-                                            <th className="p-4 font-bold text-xs uppercase">Industry</th>
-                                            <th className="p-4 text-center font-bold text-xs uppercase">BSI</th>
-                                            <th className="p-4 text-center font-bold text-xs uppercase">PSI</th>
-                                            <th className="p-4 font-bold text-xs uppercase">Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-700/50">
-                                        {analytics.map((item) => (
-                                            <tr
-                                                key={item.id}
-                                                onClick={() => setSelectedIndustry(item.industry)}
-                                                className={`transition-colors group cursor-pointer ${item.industry === selectedIndustry ? 'bg-blue-600/10' : 'hover:bg-gray-700/30'}`}
-                                                title="Click to select this industry"
-                                            >
-                                                <td className={`p-4 font-medium text-xs ${item.industry === selectedIndustry ? 'text-blue-300' : 'text-gray-300'}`}>
-                                                    <div>{industries.find(i => i.code === item.industry)?.name || item.industry}</div>
-                                                    <div className="mt-1 font-mono text-[10px] text-gray-500">{item.sampleDays || 0} days avg</div>
-                                                </td>
-                                                <td className="p-4 text-center">
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        <span className={`font-bold font-mono text-xs ${item.bsi >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
-                                                            {(item.bsi * 100).toFixed(1)}%
-                                                        </span>
-                                                        <div className="w-12 h-1 bg-gray-700 rounded-full overflow-hidden">
-                                                            <div
-                                                                className={`h-full transition-all ${item.bsi >= 0.5 ? 'bg-green-500' : 'bg-red-500'}`}
-                                                                style={{ width: `${item.bsi * 100}%` }}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="p-4 text-center font-mono font-bold text-xs">
-                                                    <span className={item.psi >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                                        {item.psi > 0 ? '+' : ''}{item.psi.toLocaleString()}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4">
-                                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${item.bsi >= 0.7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                        item.bsi >= 0.5 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                                                            item.bsi >= 0.3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                                                                'bg-red-500/20 text-red-400 border border-red-500/30'
-                                                        }`}>
-                                                        {item.bsi >= 0.7 ? 'Strong' :
-                                                            item.bsi >= 0.5 ? 'Healthy' :
-                                                                item.bsi >= 0.3 ? 'Weak' : 'Bearish'}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
-                                No analytics data available yet.
-                            </div>
-                        )}
-                    </div>
-
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
                     <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40 flex items-start justify-between gap-3">
                         <div>
@@ -965,6 +868,100 @@ const MarketFlow = () => {
                             Chưa có dữ liệu score theo ngày cho ticker này.
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Row 2: Market Analytics + BSI & PSI Daily Detail */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
+                    <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                                Market Analytics (BSI & PSI)
+                            </h2>
+                            <div className="text-[10px] text-gray-400 mt-1 space-y-0.5 font-mono uppercase tracking-wider">
+                                <p>Average of latest 30 days</p>
+                                <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng; PSI = ∑positive_impact − ∑negative_impact</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={loadAnalytics}
+                            className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors"
+                            title="Refresh Analytics"
+                        >
+                            <RefreshCw size={16} className={loadingAnalytics ? 'animate-spin' : ''} />
+                        </button>
+                    </div>
+
+                    <div className="h-[500px] flex flex-col">
+                        {loadingAnalytics && analytics.length === 0 ? (
+                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
+                                <Loader2 size={24} className="animate-spin mx-auto mb-2 opacity-50" />
+                                Loading analytics...
+                            </div>
+                        ) : analytics.length > 0 ? (
+                            <div className="overflow-auto flex-1">
+                                <table className="w-full text-left text-sm border-collapse">
+                                    <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
+                                        <tr>
+                                            <th className="p-4 font-bold text-xs uppercase">Industry</th>
+                                            <th className="p-4 text-center font-bold text-xs uppercase">BSI</th>
+                                            <th className="p-4 text-center font-bold text-xs uppercase">PSI</th>
+                                            <th className="p-4 font-bold text-xs uppercase">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/50">
+                                        {analytics.map((item) => (
+                                            <tr
+                                                key={item.id}
+                                                onClick={() => setSelectedIndustry(item.industry)}
+                                                className={`transition-colors group cursor-pointer ${item.industry === selectedIndustry ? 'bg-blue-600/10' : 'hover:bg-gray-700/30'}`}
+                                                title="Click to select this industry"
+                                            >
+                                                <td className={`p-4 font-medium text-xs ${item.industry === selectedIndustry ? 'text-blue-300' : 'text-gray-300'}`}>
+                                                    <div>{industries.find(i => i.code === item.industry)?.name || item.industry}</div>
+                                                    <div className="mt-1 font-mono text-[10px] text-gray-500">{item.sampleDays || 0} days avg</div>
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        <span className={`font-bold font-mono text-xs ${item.bsi >= 0.5 ? 'text-green-400' : 'text-red-400'}`}>
+                                                            {(item.bsi * 100).toFixed(1)}%
+                                                        </span>
+                                                        <div className="w-12 h-1 bg-gray-700 rounded-full overflow-hidden">
+                                                            <div
+                                                                className={`h-full transition-all ${item.bsi >= 0.5 ? 'bg-green-500' : 'bg-red-500'}`}
+                                                                style={{ width: `${item.bsi * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 text-center font-mono font-bold text-xs">
+                                                    <span className={item.psi >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                                        {item.psi > 0 ? '+' : ''}{item.psi.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${item.bsi >= 0.7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                                        item.bsi >= 0.5 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                                                            item.bsi >= 0.3 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                                                                'bg-red-500/20 text-red-400 border border-red-500/30'
+                                                        }`}>
+                                                        {item.bsi >= 0.7 ? 'Strong' :
+                                                            item.bsi >= 0.5 ? 'Healthy' :
+                                                                item.bsi >= 0.3 ? 'Weak' : 'Bearish'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-gray-500 flex-1 flex flex-col justify-center">
+                                No analytics data available yet.
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">

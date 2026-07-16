@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "news_analyses",
+  "info": {
+    "singularName": "news-analysis",
+    "pluralName": "news-analyses",
+    "displayName": "News Analysis"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "sourceUrl": {
+      "type": "string",
+      "required": true
+    },
+    "articleUrl": {
+      "type": "string"
+    },
+    "sourceName": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "excerpt": {
+      "type": "text"
+    },
+    "publishedAt": {
+      "type": "datetime"
+    },
+    "fetchedAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "dayKey": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

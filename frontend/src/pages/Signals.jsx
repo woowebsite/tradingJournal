@@ -6,6 +6,7 @@ import { fetchSignals, deleteSignal, scanSignals } from '../features/signalSlice
 import { fetchRules } from '../features/ruleSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { useAccount } from '../context/AccountContext';
+import { getStrategyId } from '../utils/roadmapCalculations';
 
 const Signals = () => {
     const dispatch = useDispatch();
@@ -74,18 +75,14 @@ const Signals = () => {
     };
 
     // Safe extraction of Strategy ID
-    const activeStrategyId = (() => {
-        if (!selectedAccount || !selectedAccount.strategy) return null;
-        if (typeof selectedAccount.strategy === 'object') {
-            return selectedAccount.strategy.documentId || selectedAccount.strategy.id;
-        }
-        return selectedAccount.strategy; // Fallback if it's just an ID
-    })();
+    const activeStrategyId = getStrategyId(selectedAccount?.strategy);
 
     const activeStrategy = (() => {
         if (!activeStrategyId) return null;
-        // console.log('Looking for strategy:', activeStrategyId, 'in', strategies.length, 'strategies'); 
-        return strategies.find(s => (s.documentId == activeStrategyId || s.id == activeStrategyId));
+        return strategies.find(s => {
+            const strategyId = getStrategyId(s);
+            return strategyId === activeStrategyId || s.documentId === activeStrategyId || s.id === activeStrategyId;
+        });
     })();
 
     const availableRules = (() => {
