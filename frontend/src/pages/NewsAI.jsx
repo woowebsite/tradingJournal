@@ -8,14 +8,13 @@ import {
 } from 'lucide-react';
 import { analyzeNewsWithAI, getNewsAIHistory } from '../services/newsAI';
 
-const defaultPrompt = `Phan tich cac tin tuc thi truong chung khoan Viet Nam duoi goc nhin trader.
-Tra ve JSON gom: sentiment, impactLevel, affectedSymbols, summary, tradingView, risks.`;
+const defaultPrompt = `Dựa vào thông tin từ các tiêu đề và trích đoạn tin tức đã chọn, hãy phân tích và tóm tắt những điểm quan trọng, xu hướng, và tác động tiềm năng đến thị trường tài chính. Hãy cung cấp một bản tóm tắt chi tiết, bao gồm các yếu tố kinh tế, chính trị, và xã hội có thể ảnh hưởng đến các quyết định đầu tư.`;
 
 const getItemId = (item) => item?.documentId || item?.id || '';
 const AI_PROVIDERS = [
     { label: 'Z.AI', value: 'z.ai', defaultModel: 'glm-4.5' },
     { label: 'OpenAI', value: 'openai', defaultModel: 'gpt-4o-mini' },
-    { label: 'Gemini', value: 'gemini', defaultModel: 'gemini-3.5-flash-lite' },
+    { label: 'Gemini', value: 'gemini', defaultModel: 'gemini-3.1-flash-lite' },
 ];
 
 const stringifyObjectAsText = (value) => {
@@ -172,8 +171,8 @@ const renderMarkdown = (markdown) => {
 const NewsAI = () => {
     const [items, setItems] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [provider, setProvider] = useState('z.ai');
-    const [model, setModel] = useState('glm-4.5');
+    const [provider, setProvider] = useState('gemini');
+    const [model, setModel] = useState('gemini-3.1-flash-lite');
     const [prompt, setPrompt] = useState(defaultPrompt);
     const [loading, setLoading] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
@@ -202,6 +201,16 @@ const NewsAI = () => {
             return (!dayFilter || item.dayKey === dayFilter) && (!sourceFilter || source === sourceFilter);
         })
     ), [dayFilter, items, sourceFilter]);
+
+    const checkAllVisibleItems = () => {
+        const visibleIds = filteredItems.map((item) => getItemId(item)).filter(Boolean);
+        setSelectedIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    };
+
+    const uncheckAllVisibleItems = () => {
+        const visibleIds = new Set(filteredItems.map((item) => getItemId(item)).filter(Boolean));
+        setSelectedIds((prev) => prev.filter((id) => !visibleIds.has(id)));
+    };
 
     const analysisDisplay = useMemo(() => {
         if (!analysisResult) return null;
@@ -354,14 +363,32 @@ const NewsAI = () => {
                                 <h3 className="text-lg font-semibold text-white">News Analysis Database</h3>
                                 <p className="mt-1 text-xs uppercase tracking-[0.2em] text-gray-500">Select rows to send to z.ai</p>
                             </div>
-                            <button
-                                type="button"
-                                onClick={loadItems}
-                                className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700"
-                            >
-                                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                                Reload
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={checkAllVisibleItems}
+                                    disabled={filteredItems.length === 0}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    Check All
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={uncheckAllVisibleItems}
+                                    disabled={filteredItems.length === 0}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    Uncheck All
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={loadItems}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700"
+                                >
+                                    <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                                    Reload
+                                </button>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -439,10 +466,20 @@ const NewsAI = () => {
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <div className="font-medium text-white">{item.sourceName || '-'}</div>
-                                                    <div className="mt-1 max-w-[220px] truncate text-xs text-gray-500">{item.sourceUrl}</div>
                                                 </td>
                                                 <td className="px-5 py-4">
-                                                    <div className="max-w-[560px] text-gray-200">{item.title}</div>
+                                                    {item.title ? (
+                                                        <a
+                                                            href={item.articleUrl || item.sourceUrl || '#'}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="max-w-[560px] text-gray-200 transition hover:text-emerald-300 hover:underline"
+                                                        >
+                                                            {item.title}
+                                                        </a>
+                                                    ) : (
+                                                        <div className="max-w-[560px] text-gray-200">-</div>
+                                                    )}
                                                     {item.excerpt ? (
                                                         <div className="mt-1 max-w-[560px] text-xs text-gray-500">{item.excerpt}</div>
                                                     ) : null}

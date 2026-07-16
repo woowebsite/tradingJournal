@@ -27,6 +27,89 @@ const normalizeText = (value = '') => decodeHtml(value).replace(/\s+/g, ' ').tri
 
 const stripTags = (html = '') => normalizeText(html.replace(/<[^>]*>/g, ' '));
 
+const normalizeTextPreserveLineBreaks = (value = '') =>
+  decodeHtml(value)
+    .replace(/\r/g, '\n')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+const truncateText = (value = '', maxLength = 6000) => {
+  const text = normalizeTextPreserveLineBreaks(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength).trimEnd()}...`;
+};
+
+const stripHtmlToText = (html = '') => {
+  const normalized = normalizeTextPreserveLineBreaks(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|section|article|main|header|footer|li|h[1-6]|tr|td|th|blockquote)>/gi, '\n')
+      .replace(/<[^>]*>/g, ' '),
+  );
+
+  return normalized
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+};
+
+const extractReadableArticleText = (html = '') => {
+  const cleanedHtml = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
+
+  const sections = [
+    cleanedHtml.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] || '',
+    cleanedHtml.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || '',
+    cleanedHtml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || '',
+    cleanedHtml,
+  ].filter(Boolean);
+
+  let bestText = '';
+  for (const section of sections) {
+    const text = stripHtmlToText(section);
+    if (text.length > bestText.length) {
+      bestText = text;
+    }
+  }
+
+  return truncateText(bestText, 7000);
+};
+
+const fetchArticleText = async (url: string) => {
+  const response = await axios.get(url, {
+    responseType: 'text',
+    timeout: 20000,
+    headers: {
+      'User-Agent': USER_AGENT,
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+    validateStatus: () => true,
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    return {
+      status: 'error',
+      error: `HTTP ${response.status}`,
+      text: '',
+    };
+  }
+
+  const html = typeof response.data === 'string' ? response.data : String(response.data || '');
+  return {
+    status: 'ok',
+    error: '',
+    text: extractReadableArticleText(html),
+  };
+};
+
 const escapeRegExp = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const getMetaContent = (html: string, key: string) => {
@@ -370,6 +453,20 @@ const normalizeAIProvider = (value = '') => {
   return 'z.ai';
 };
 
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+
+const normalizeGeminiModel = (value = '') => {
+  const normalized = normalizeText(value);
+  if (!normalized) return DEFAULT_GEMINI_MODEL;
+
+  const aliases: Record<string, string> = {
+    'gemini-3.5-flash-lite': DEFAULT_GEMINI_MODEL,
+    'gemini-3.5-flash-lite-preview': DEFAULT_GEMINI_MODEL,
+  };
+
+  return aliases[normalized.toLowerCase()] || normalized;
+};
+
 const resolveAIProviderConfig = (provider: string, requestedModel = '') => {
   if (provider === 'openai') {
     return {
@@ -383,11 +480,12 @@ const resolveAIProviderConfig = (provider: string, requestedModel = '') => {
   }
 
   if (provider === 'gemini') {
+    const envModel = normalizeGeminiModel(String(process.env.GEMINI_MODEL || ''));
     return {
       provider: 'gemini',
       baseUrl: normalizeZaiBaseUrl(String(process.env.GEMINI_API || 'https://generativelanguage.googleapis.com/v1beta').trim()),
       apiKey: String(process.env.GEMINI_API_KEY || '').trim(),
-      model: requestedModel || String(process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim(),
+      model: normalizeGeminiModel(requestedModel || envModel),
       missingApiMessage: 'Missing server env GEMINI_API.',
       missingKeyMessage: 'Missing server env GEMINI_API_KEY.',
     };
@@ -408,9 +506,12 @@ const buildNewsAnalysisPrompt = (prompt: string, newsItems: Array<Record<string,
     .map((item, index) => {
       const lines = [
         `${index + 1}. ${item.title}`,
+        item.articleUrl ? `Article URL: ${item.articleUrl}` : '',
         item.excerpt ? `Excerpt: ${item.excerpt}` : '',
+        item.fullText ? `Fetched page content:\n${item.fullText}` : '',
         item.sourceName || item.sourceUrl ? `Source: ${item.sourceName || item.sourceUrl}` : '',
         item.dayKey ? `Day: ${item.dayKey}` : '',
+        item.fetchStatus === 'error' ? `Fetch note: ${item.fetchError || 'Could not fetch page content.'}` : '',
       ].filter(Boolean);
 
       return lines.join('\n');
@@ -418,6 +519,45 @@ const buildNewsAnalysisPrompt = (prompt: string, newsItems: Array<Record<string,
     .join('\n\n');
 
   return `${prompt}\n\nNews items:\n${newsText}`;
+};
+
+const enrichNewsItemsWithFetchedContent = async (newsItems: Array<Record<string, any>>) => {
+  const enrichedItems = await Promise.all(
+    newsItems.map(async (item) => {
+      const articleUrl = normalizeUrl(String(item.articleUrl || item.sourceUrl || ''));
+      if (!articleUrl) {
+        return {
+          ...item,
+          fullText: truncateText(item.excerpt || item.title || '', 1200),
+          fetchStatus: 'missing_url',
+          fetchError: 'Missing article URL.',
+        };
+      }
+
+      try {
+        const result = await fetchArticleText(articleUrl);
+        const fallbackText = truncateText([item.title, item.excerpt].filter(Boolean).join('\n'), 1200);
+        return {
+          ...item,
+          articleUrl,
+          fullText: result.text || fallbackText,
+          fetchStatus: result.status,
+          fetchError: result.error,
+        };
+      } catch (error: any) {
+        const fallbackText = truncateText([item.title, item.excerpt].filter(Boolean).join('\n'), 1200);
+        return {
+          ...item,
+          articleUrl,
+          fullText: fallbackText,
+          fetchStatus: 'error',
+          fetchError: error?.message || 'Failed to fetch article page.',
+        };
+      }
+    }),
+  );
+
+  return enrichedItems;
 };
 
 const buildOpenAICompatiblePayload = (model: string, prompt: string, newsItems: Array<Record<string, any>>) => ({
@@ -800,14 +940,28 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
       ctx.throw(404, 'No selected news rows were found.');
     }
 
+    const newsItemsByKey = new Map<string, Record<string, any>>();
+    for (const item of newsItems) {
+      const documentId = item?.documentId ? String(item.documentId) : '';
+      const numericId = item?.id ? String(item.id) : '';
+      if (documentId) newsItemsByKey.set(documentId, item);
+      if (numericId) newsItemsByKey.set(numericId, item);
+    }
+
+    const orderedNewsItems = newsIds
+      .map((id) => newsItemsByKey.get(id))
+      .filter(Boolean) as Array<Record<string, any>>;
+
+    const newsItemsWithContent = await enrichNewsItemsWithFetchedContent(orderedNewsItems.length ? orderedNewsItems : newsItems);
+
     const isGemini = providerConfig.provider === 'gemini';
     const response = await axios.post(
       isGemini
         ? `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
         : `${baseUrl}/chat/completions`,
       isGemini
-        ? buildGeminiPayload(prompt, newsItems)
-        : buildOpenAICompatiblePayload(model, prompt, newsItems),
+        ? buildGeminiPayload(prompt, newsItemsWithContent)
+        : buildOpenAICompatiblePayload(model, prompt, newsItemsWithContent),
       {
         timeout: 60000,
         headers: isGemini
@@ -834,7 +988,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         provider: providerConfig.provider,
         model,
         baseUrl,
-        selectedCount: newsItems.length,
+        selectedCount: newsItemsWithContent.length,
         analysis: response.data,
       },
     };

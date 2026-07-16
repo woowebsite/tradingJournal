@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader2, RefreshCw, Save, Trash2, Newspaper } from 'lucide-react';
+import { Loader2, RefreshCw, Save, Trash2, Newspaper } from 'lucide-react';
 import { getNewsAnalysisLast30, refreshNewsAnalysis } from '../services/newsAnalysis';
 import { getNewsUrls, saveNewsUrls } from '../services/newsUrl';
 
@@ -8,17 +8,6 @@ const parseUrlList = (value) =>
         .split(/[\r\n,]+/g)
         .map((item) => item.trim())
         .filter(Boolean);
-
-const formatDateTime = (value) => {
-    if (!value) return '-';
-    return new Date(value).toLocaleString('vi-VN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-};
 
 const NewsAnalysis = () => {
     const [urlText, setUrlText] = useState('');
@@ -189,7 +178,7 @@ const NewsAnalysis = () => {
                     <textarea
                         value={urlText}
                         onChange={(e) => setUrlText(e.target.value)}
-                        placeholder={`https://vietstock.vn/{year}/{month}\nhttps://nguoiquansat.vn/*.html`}
+                        placeholder={`https://vietstock.vn/{year}/{month}/*.htm\nhttps://nguoiquansat.vn/*.html`}
                         className="mt-4 min-h-[240px] w-full rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm text-gray-100 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                     />
 
@@ -318,7 +307,7 @@ const NewsAnalysis = () => {
                     <div>
                         <h3 className="text-lg font-semibold text-white">Saved headlines</h3>
                         <p className="mt-1 text-xs uppercase tracking-[0.2em] text-gray-500">
-                            Last 30 days, grouped by collected day
+                            Last 30 days
                         </p>
                     </div>
                     <button
@@ -340,55 +329,47 @@ const NewsAnalysis = () => {
                         No saved news headlines yet. Paste URLs and press Refresh to start collecting.
                     </div>
                 ) : (
-                    <div className="overflow-hidden">
-                        <div className="max-h-[640px] overflow-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead className="sticky top-0 z-10 bg-gray-900/90 text-xs uppercase tracking-[0.2em] text-gray-400 backdrop-blur">
-                                    <tr>
-                                        <th className="px-5 py-3">Collected</th>
-                                        <th className="px-5 py-3">Source</th>
-                                        <th className="px-5 py-3">Title</th>
-                                        <th className="px-5 py-3">Link</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700/70">
-                                    {groupedByDay.flatMap(([day, dayItems]) => (
-                                        dayItems.map((item, index) => (
-                                            <tr key={item.id || item.documentId || `${day}-${index}`} className="hover:bg-gray-700/30">
-                                                <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-gray-400">
-                                                    {formatDateTime(item.fetchedAt)}
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    <div className="font-medium text-white">{item.sourceName || item.sourceUrl}</div>
-                                                    <div className="mt-1 text-xs text-gray-500">{item.sourceUrl}</div>
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    <div className="max-w-[560px] text-gray-200">{item.title}</div>
-                                                    {item.excerpt ? (
-                                                        <div className="mt-1 max-w-[560px] text-xs text-gray-500">{item.excerpt}</div>
-                                                    ) : null}
-                                                </td>
-                                                <td className="px-5 py-4">
-                                                    {item.articleUrl ? (
-                                                        <a
-                                                            href={item.articleUrl}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="inline-flex items-center gap-1 text-blue-400 transition hover:text-blue-300"
-                                                        >
-                                                            Open
-                                                            <ExternalLink size={14} />
-                                                        </a>
-                                                    ) : (
-                                                        <span className="text-gray-500">-</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                    <div className="max-h-[640px] overflow-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="sticky top-0 z-10 bg-gray-900/90 text-xs uppercase tracking-[0.2em] text-gray-400 backdrop-blur">
+                                <tr>
+                                    <th className="px-5 py-3">Day Key</th>
+                                    <th className="px-5 py-3">Source</th>
+                                    <th className="px-5 py-3">Title</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700/70">
+                                {groupedByDay.flatMap(([day, dayItems]) => (
+                                    dayItems.map((item, index) => (
+                                        <tr key={item.id || item.documentId || `${day}-${index}`} className="hover:bg-gray-700/30">
+                                            <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-gray-400">
+                                                {item.dayKey || day || '-'}
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                <div className="font-medium text-white">{item.sourceName || '-'}</div>
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                {item.title ? (
+                                                    <a
+                                                        href={item.articleUrl || item.sourceUrl || '#'}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="max-w-[560px] text-gray-200 transition hover:text-blue-300 hover:underline"
+                                                    >
+                                                        {item.title}
+                                                    </a>
+                                                ) : (
+                                                    <div className="max-w-[560px] text-gray-200">-</div>
+                                                )}
+                                                {item.excerpt ? (
+                                                    <div className="mt-1 max-w-[560px] text-xs text-gray-500">{item.excerpt}</div>
+                                                ) : null}
+                                            </td>
+                                        </tr>
+                                    ))
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>
