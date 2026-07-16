@@ -16,5 +16,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/news-analyses/ai/analyze',
+      handler: 'news-analysis.analyze',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

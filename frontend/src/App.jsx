@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
+import NewsAI from './pages/NewsAI';
 import NewsAnalysis from './pages/NewsAnalysis';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
@@ -38,6 +39,7 @@ function App() {
         <Routes>
           <Route path="/" element={<MainLayout />}>
             <Route index element={<Dashboard />} />
+            <Route path="news-ai" element={<NewsAI />} />
             <Route path="news-analysis" element={<NewsAnalysis />} />
             <Route path="accounts" element={<Accounts />} />
             <Route path="accounts/:id" element={<AccountDetail />} />

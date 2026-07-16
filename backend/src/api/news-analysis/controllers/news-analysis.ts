@@ -108,7 +108,7 @@ const tokenToRegex = (token = '') => {
 
 const segmentToRegex = (segment = '') => {
   let output = '';
-  for (let index = 0; index < segment.length; ) {
+  for (let index = 0; index < segment.length;) {
     const char = segment[index];
     if (char === '*') {
       if (segment[index + 1] === '*') {
@@ -361,6 +361,99 @@ const sameUtcDay = (left?: string | Date, right?: string | Date) => {
   return leftKey === rightKey;
 };
 
+const normalizeZaiBaseUrl = (value = '') => value.replace(/\/+$/, '');
+
+const normalizeAIProvider = (value = '') => {
+  const normalized = value.toLowerCase().replace(/[\s_-]+/g, '');
+  if (normalized === 'gemini' || normalized === 'googleai' || normalized === 'google') return 'gemini';
+  if (normalized === 'openai') return 'openai';
+  return 'z.ai';
+};
+
+const resolveAIProviderConfig = (provider: string, requestedModel = '') => {
+  if (provider === 'openai') {
+    return {
+      provider: 'openai',
+      baseUrl: normalizeZaiBaseUrl(String(process.env.OPEN_AI_API || '').trim()),
+      apiKey: String(process.env.OPEN_AI_KEY || '').trim(),
+      model: requestedModel || String(process.env.OPEN_AI_MODEL || 'gpt-4o-mini').trim(),
+      missingApiMessage: 'Missing server env OPEN_AI_API.',
+      missingKeyMessage: 'Missing server env OPEN_AI_KEY.',
+    };
+  }
+
+  if (provider === 'gemini') {
+    return {
+      provider: 'gemini',
+      baseUrl: normalizeZaiBaseUrl(String(process.env.GEMINI_API || 'https://generativelanguage.googleapis.com/v1beta').trim()),
+      apiKey: String(process.env.GEMINI_API_KEY || '').trim(),
+      model: requestedModel || String(process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim(),
+      missingApiMessage: 'Missing server env GEMINI_API.',
+      missingKeyMessage: 'Missing server env GEMINI_API_KEY.',
+    };
+  }
+
+  return {
+    provider: 'z.ai',
+    baseUrl: normalizeZaiBaseUrl(String(process.env.ZAI_API || process.env.ZAI || process.env.ZAI_BASE_URL || '').trim()),
+    apiKey: String(process.env.ZAI_API_KEY || '').trim(),
+    model: requestedModel || String(process.env.ZAI_MODEL || 'glm-4.5').trim(),
+    missingApiMessage: 'Missing server env ZAI_API.',
+    missingKeyMessage: 'Missing server env ZAI_API_KEY.',
+  };
+};
+
+const buildNewsAnalysisPrompt = (prompt: string, newsItems: Array<Record<string, any>>) => {
+  const newsText = newsItems
+    .map((item, index) => {
+      const lines = [
+        `${index + 1}. ${item.title}`,
+        item.excerpt ? `Excerpt: ${item.excerpt}` : '',
+        item.sourceName || item.sourceUrl ? `Source: ${item.sourceName || item.sourceUrl}` : '',
+        item.dayKey ? `Day: ${item.dayKey}` : '',
+      ].filter(Boolean);
+
+      return lines.join('\n');
+    })
+    .join('\n\n');
+
+  return `${prompt}\n\nNews items:\n${newsText}`;
+};
+
+const buildOpenAICompatiblePayload = (model: string, prompt: string, newsItems: Array<Record<string, any>>) => ({
+  model,
+  messages: [
+    {
+      role: 'system',
+      content: 'You are a financial news analyst. Return concise, actionable analysis for traders.',
+    },
+    {
+      role: 'user',
+      content: buildNewsAnalysisPrompt(prompt, newsItems),
+    },
+  ],
+  temperature: 0.2,
+});
+
+const buildGeminiPayload = (prompt: string, newsItems: Array<Record<string, any>>) => ({
+  contents: [
+    {
+      role: 'user',
+      parts: [
+        {
+          text: [
+            'You are a financial news analyst. Return concise, actionable analysis for traders.',
+            buildNewsAnalysisPrompt(prompt, newsItems),
+          ].join('\n\n'),
+        },
+      ],
+    },
+  ],
+  generationConfig: {
+    temperature: 0.2,
+  },
+});
+
 const parseRssFeed = (html: string, sourceUrl: string, fetchedAt: Date) => {
   const items: Array<Record<string, any>> = [];
   const dayKey = fetchedAt.toISOString().slice(0, 10);
@@ -460,8 +553,8 @@ const parseArticlePage = (html: string, sourceUrl: string, fetchedAt: Date) => {
       excerpt:
         normalizeText(
           getMetaContent(cleanedHtml, 'og:description') ||
-            getMetaContent(cleanedHtml, 'twitter:description') ||
-            getFirstTagText(cleanedHtml, 'p'),
+          getMetaContent(cleanedHtml, 'twitter:description') ||
+          getFirstTagText(cleanedHtml, 'p'),
         ) || '',
       publishedAt: resolvedPublishedAt?.toISOString() || null,
       fetchedAt: fetchedAt.toISOString(),
@@ -670,5 +763,80 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     });
 
     ctx.body = { data: items };
+  },
+
+  async analyze(ctx) {
+    const body = ctx.request.body || {};
+    const rawNewsIds = Array.isArray(body.newsIds) ? body.newsIds : [];
+    const newsIds = rawNewsIds.map((id: unknown) => String(id)).filter(Boolean);
+    const prompt = normalizeText(String(body.prompt || 'Analyze these news items for market impact.'));
+    const provider = normalizeAIProvider(String(body.provider || 'z.ai'));
+    const providerConfig = resolveAIProviderConfig(provider, normalizeText(String(body.model || '')));
+    const { baseUrl, apiKey, model } = providerConfig;
+
+    if (!newsIds.length) {
+      ctx.throw(400, 'Please select at least one news item to analyze.');
+    }
+
+    if (!apiKey) {
+      ctx.throw(500, providerConfig.missingKeyMessage);
+    }
+
+    if (!baseUrl) {
+      ctx.throw(500, providerConfig.missingApiMessage);
+    }
+
+    const newsItems = await strapi.db.query(NEWS_ANALYSIS_UID).findMany({
+      where: {
+        $or: [
+          { documentId: { $in: newsIds } },
+          { id: { $in: newsIds.filter((id) => /^\d+$/.test(id)).map((id) => Number(id)) } },
+        ],
+      },
+      orderBy: { fetchedAt: 'desc' },
+    });
+
+    if (!newsItems.length) {
+      ctx.throw(404, 'No selected news rows were found.');
+    }
+
+    const isGemini = providerConfig.provider === 'gemini';
+    const response = await axios.post(
+      isGemini
+        ? `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+        : `${baseUrl}/chat/completions`,
+      isGemini
+        ? buildGeminiPayload(prompt, newsItems)
+        : buildOpenAICompatiblePayload(model, prompt, newsItems),
+      {
+        timeout: 60000,
+        headers: isGemini
+          ? {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          }
+          : {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        validateStatus: () => true,
+      },
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      strapi.log.error(`${providerConfig.provider} analysis failed: HTTP ${response.status}`);
+      ctx.throw(response.status, response.data?.error?.message || response.data?.message || `${providerConfig.provider} analysis failed.`);
+    }
+
+    ctx.body = {
+      data: {
+        provider: providerConfig.provider,
+        model,
+        baseUrl,
+        selectedCount: newsItems.length,
+        analysis: response.data,
+      },
+    };
   },
 }));

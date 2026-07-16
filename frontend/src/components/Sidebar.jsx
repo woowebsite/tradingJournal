@@ -10,13 +10,19 @@ const Sidebar = () => {
 
     const menuGroups = [
         {
-                label: 'Menu',
-                items: [
-                    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-                    { icon: Newspaper, label: 'News Analysis', path: '/news-analysis' },
-                    {
-                        icon: BarChart2, label: 'Trade Station', path: '/trade-station',
-                        subItems: [
+            label: 'Menu',
+            items: [
+                { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+                {
+                    icon: Newspaper, label: 'News', path: '/news',
+                    subItems: [
+                        { label: 'News AI', path: '/news-ai' },
+                        { label: 'News Analysis', path: '/news-analysis' },
+                    ]
+                },
+                {
+                    icon: BarChart2, label: 'Trade Station', path: '/trade-station',
+                    subItems: [
                         { label: 'Today', path: '/today-trades' },
                     ]
                 },
@@ -86,7 +92,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market', '/signals', '/manage-strategies']);
+    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market', '/signals', '/manage-strategies', '/news']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>
