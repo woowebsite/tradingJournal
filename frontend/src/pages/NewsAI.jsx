@@ -4,13 +4,54 @@ import {
     CheckCircle2,
     Loader2,
     RefreshCw,
+    Save,
     Sparkles,
 } from 'lucide-react';
-import { analyzeNewsWithAI, getNewsAIHistory } from '../services/newsAI';
+import { analyzeNewsWithAI, getNewsAIHistory, saveNewsAIResult } from '../services/newsAI';
 
-const defaultPrompt = `Dựa vào thông tin từ các tiêu đề và trích đoạn tin tức đã chọn, hãy phân tích và tóm tắt những điểm quan trọng, xu hướng, và tác động tiềm năng đến thị trường tài chính. Hãy cung cấp một bản tóm tắt chi tiết, bao gồm các yếu tố kinh tế, chính trị, và xã hội có thể ảnh hưởng đến các quyết định đầu tư.`;
+const defaultPrompt = `Hãy phân tích kỹ các bài báo đã chọn và đưa ra nhận định chi tiết, không trả lời quá ngắn.
+
+Yêu cầu đầu ra:
+1. Tóm tắt ngắn gọn từng bài báo theo ý chính.
+2. Chỉ ra các sự kiện, số liệu, phát biểu hoặc dữ kiện quan trọng có thể ảnh hưởng đến thị trường.
+3. Phân tích tác động tiềm năng lên các nhóm tài sản như cổ phiếu, chỉ số, ngoại hối, hàng hóa hoặc crypto nếu có liên quan.
+4. Nêu mức độ ảnh hưởng: ngắn hạn, trung hạn hay dài hạn.
+5. Chỉ ra các kịch bản có thể xảy ra: tích cực, tiêu cực và trung tính.
+6. Đưa ra quan điểm hành động cho trader/investor, ví dụ: nên theo dõi gì, rủi ro nào cần tránh, và tín hiệu nào cần xác nhận thêm.
+7. Nếu dữ liệu chưa đủ rõ, hãy nói rõ giả định đang dùng thay vì kết luận quá chắc chắn.
+
+Phong cách trả lời:
+- Viết bằng tiếng Việt rõ ràng, có cấu trúc.
+- Dùng heading, bullet points và bảng nếu phù hợp.
+- Ưu tiên phân tích sâu hơn là tóm tắt ngắn.
+- Không lặp lại tiêu đề bài viết một cách máy móc.
+- Nếu có nhiều bài, hãy tổng hợp điểm chung và điểm khác nhau giữa chúng.
+
+Kết luận cuối cùng nên có:
+- Mức độ đáng chú ý của tin tức.
+- Tác động chính lên thị trường.
+- 1 đến 3 ý quan sát hoặc thiết lập giao dịch đáng theo dõi.`;
 
 const getItemId = (item) => item?.documentId || item?.id || '';
+const getLatestDayKey = (items) => {
+    const dayKeys = Array.from(new Set(items.map((item) => item?.dayKey).filter(Boolean)));
+    return dayKeys.sort((a, b) => b.localeCompare(a))[0] || new Date().toISOString().slice(0, 10);
+};
+
+const buildSelectedLinksPayload = (items) => (
+    items.map((item) => ({
+        title: item?.title || '',
+        sourceName: item?.sourceName || '',
+        sourceUrl: item?.sourceUrl || '',
+        articleUrl: item?.articleUrl || '',
+        excerpt: item?.excerpt || '',
+        dayKey: item?.dayKey || '',
+        fetchedAt: item?.fetchedAt || '',
+        documentId: item?.documentId || '',
+        id: item?.id || '',
+    }))
+);
+
 const AI_PROVIDERS = [
     { label: 'Z.AI', value: 'z.ai', defaultModel: 'glm-4.5' },
     { label: 'OpenAI', value: 'openai', defaultModel: 'gpt-4o-mini' },
@@ -176,6 +217,7 @@ const NewsAI = () => {
     const [prompt, setPrompt] = useState(defaultPrompt);
     const [loading, setLoading] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [analysisResult, setAnalysisResult] = useState(null);
@@ -279,6 +321,52 @@ const NewsAI = () => {
             );
         } finally {
             setAnalyzing(false);
+        }
+    };
+
+    const handleSave = async () => {
+        if (!selectedItems.length) {
+            setError('Please select at least one news item to save.');
+            return;
+        }
+
+        const analysisText = analysisDisplay?.text || '';
+        if (!analysisText) {
+            setError('Please run Analysis before saving to NewsAI.');
+            return;
+        }
+
+        setSaving(true);
+        setError('');
+        setNotice('');
+
+        try {
+            const day = getLatestDayKey(selectedItems);
+            const links = buildSelectedLinksPayload(selectedItems);
+            const title = `News AI ${day}`;
+
+            await saveNewsAIResult({
+                title,
+                content: analysisText,
+                links,
+                day,
+                provider: analysisDisplay?.provider || provider,
+                model: analysisDisplay?.model || model,
+                prompt,
+                selectedCount: selectedItems.length,
+                selectedDays: Array.from(new Set(selectedItems.map((item) => item?.dayKey).filter(Boolean))),
+            });
+
+            setNotice('Saved to NewsAI.');
+        } catch (err) {
+            setError(
+                err?.response?.data?.error?.message ||
+                err?.response?.data?.message ||
+                err?.message ||
+                'Failed to save NewsAI result.',
+            );
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -507,13 +595,22 @@ const NewsAI = () => {
                             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
                                 <CheckCircle2 size={14} />
                                 Ready
-                            </div>
-                        )}
-                        <button
-                            type="button"
-                            onClick={handleAnalyze}
-                            disabled={analyzing || selectedIds.length === 0}
-                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                onClick={handleSave}
+                                disabled={saving || analyzing || selectedIds.length === 0 || !analysisDisplay?.text}
+                                className="inline-flex items-center gap-2 rounded-lg border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                Save
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleAnalyze}
+                                disabled={analyzing || selectedIds.length === 0}
+                                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                             Analysis

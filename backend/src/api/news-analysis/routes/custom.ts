@@ -24,5 +24,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/news-analyses/ai/save',
+      handler: 'news-analysis.saveAnalysis',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

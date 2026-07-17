@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "news_ai",
+  "info": {
+    "singularName": "news-summary",
+    "pluralName": "news-summaries",
+    "displayName": "News Summary"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "content": {
+      "type": "text",
+      "required": true
+    },
+    "links": {
+      "type": "json",
+      "required": true
+    },
+    "day": {
+      "type": "string",
+      "required": true
+    },
+    "provider": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "selectedCount": {
+      "type": "integer"
+    },
+    "selectedDays": {
+      "type": "json"
+    }
+  }
+}

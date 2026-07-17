@@ -3,6 +3,7 @@ import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
 import NewsAI from './pages/NewsAI';
 import NewsAnalysis from './pages/NewsAnalysis';
+import NewsSummary from './pages/NewsSummary';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
 import Backtest from './pages/Backtest';
@@ -41,6 +42,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="news-ai" element={<NewsAI />} />
             <Route path="news-analysis" element={<NewsAnalysis />} />
+            <Route path="news-summary" element={<NewsSummary />} />
             <Route path="accounts" element={<Accounts />} />
             <Route path="accounts/:id" element={<AccountDetail />} />
             <Route path="trade-station" element={<TradeStation />} />

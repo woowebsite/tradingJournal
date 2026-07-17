@@ -18,6 +18,7 @@ const Sidebar = () => {
                     subItems: [
                         { label: 'News AI', path: '/news-ai' },
                         { label: 'News Analysis', path: '/news-analysis' },
+                        { label: 'News Summary', path: '/news-summary' },
                     ]
                 },
                 {

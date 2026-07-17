@@ -634,6 +634,41 @@ export interface ApiNewsAnalysisNewsAnalysis
   };
 }
 
+export interface ApiNewsSummaryNewsSummary extends Struct.CollectionTypeSchema {
+  collectionName: 'news_ai';
+  info: {
+    displayName: 'News Summary';
+    pluralName: 'news-summaries';
+    singularName: 'news-summary';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    content: Schema.Attribute.Text & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    day: Schema.Attribute.String & Schema.Attribute.Required;
+    links: Schema.Attribute.JSON & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::news-summary.news-summary'
+    > &
+      Schema.Attribute.Private;
+    model: Schema.Attribute.String;
+    provider: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    selectedCount: Schema.Attribute.Integer;
+    selectedDays: Schema.Attribute.JSON;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiNewsUrlNewsUrl extends Struct.CollectionTypeSchema {
   collectionName: 'news_urls';
   info: {
@@ -1867,6 +1902,7 @@ declare module '@strapi/strapi' {
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;
       'api::news-analysis.news-analysis': ApiNewsAnalysisNewsAnalysis;
+      'api::news-summary.news-summary': ApiNewsSummaryNewsSummary;
       'api::news-url.news-url': ApiNewsUrlNewsUrl;
       'api::plan.plan': ApiPlanPlan;
       'api::roadmap.roadmap': ApiRoadmapRoadmap;

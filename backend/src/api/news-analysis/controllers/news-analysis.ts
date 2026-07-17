@@ -10,6 +10,7 @@ const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const MAX_ITEMS_PER_SOURCE = 25;
 const NEWS_ANALYSIS_UID = 'api::news-analysis.news-analysis' as any;
+const NEWS_SUMMARY_UID = 'api::news-summary.news-summary' as any;
 
 const decodeHtml = (value = '') => {
   return value
@@ -174,6 +175,11 @@ const tokenToRegex = (token = '') => {
     case 'second':
       return '\\d{2}';
     case 'id':
+      return '\\d+';
+    case 'number':
+    case 'digits':
+    case 'digit':
+    case 'numeric':
       return '\\d+';
     case 'slug':
     case 'path':
@@ -903,6 +909,104 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     });
 
     ctx.body = { data: items };
+  },
+
+  async saveAnalysis(ctx) {
+    const body = ctx.request.body || {};
+    const rawLinks = Array.isArray(body.links) ? body.links : [];
+    const content = normalizeTextPreserveLineBreaks(String(body.content || ''));
+
+    if (!content) {
+      ctx.throw(400, 'Analysis content is required.');
+    }
+
+    const links = rawLinks
+      .map((item: any) => {
+        if (typeof item === 'string') {
+          const articleUrl = normalizeUrl(item);
+          return articleUrl
+            ? {
+                title: '',
+                sourceName: '',
+                sourceUrl: articleUrl,
+                articleUrl,
+                excerpt: '',
+                dayKey: '',
+                fetchedAt: '',
+                documentId: '',
+                id: '',
+              }
+            : null;
+        }
+
+        if (!item || typeof item !== 'object') return null;
+
+        const articleUrl = normalizeUrl(String(item.articleUrl || item.sourceUrl || ''));
+        const sourceUrl = normalizeUrl(String(item.sourceUrl || item.articleUrl || ''));
+        const title = normalizeText(String(item.title || ''));
+        const sourceName = normalizeText(String(item.sourceName || ''));
+        const excerpt = normalizeText(String(item.excerpt || ''));
+        const dayKey = normalizeText(String(item.dayKey || ''));
+        const fetchedAt = String(item.fetchedAt || '').trim();
+        const documentId = String(item.documentId || '').trim();
+        const id = String(item.id || '').trim();
+
+        const normalized = {
+          title,
+          sourceName,
+          sourceUrl,
+          articleUrl,
+          excerpt,
+          dayKey,
+          fetchedAt,
+          documentId,
+          id,
+        };
+
+        return articleUrl || sourceUrl || title ? normalized : null;
+      })
+      .filter(Boolean);
+
+    if (!links.length) {
+      ctx.throw(400, 'At least one selected news item is required.');
+    }
+
+    const selectedDays = uniqueStrings(
+      links
+        .map((item: Record<string, any>) => String(item.dayKey || '').trim())
+        .filter(Boolean),
+    );
+    const day = normalizeText(
+      String(body.day || selectedDays[0] || new Date().toISOString().slice(0, 10)),
+    );
+    const title = normalizeText(
+      String(body.title || links[0]?.title || `News AI ${day}`),
+    );
+    const provider = normalizeText(String(body.provider || ''));
+    const model = normalizeText(String(body.model || ''));
+    const prompt = normalizeTextPreserveLineBreaks(String(body.prompt || ''));
+    const selectedCount = Number.isFinite(Number(body.selectedCount))
+      ? Number(body.selectedCount)
+      : links.length;
+
+    const saved = await (strapi as any).documents(NEWS_SUMMARY_UID).create({
+      data: {
+        title,
+        content,
+        links,
+        day,
+        provider,
+        model,
+        prompt,
+        selectedCount,
+        selectedDays,
+      },
+      status: 'published',
+    });
+
+    ctx.body = {
+      data: saved,
+    };
   },
 
   async analyze(ctx) {
