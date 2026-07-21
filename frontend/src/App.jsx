@@ -19,6 +19,7 @@ import ManageWebhooks from './pages/ManageWebhooks';
 import ManageWebhookSignals from './pages/ManageWebhookSignals';
 import TradeStation from './pages/TradeStation';
 import TodayTrades from './pages/TodayTrades';
+import Portfolio from './pages/Portfolio';
 import MarketFlow from './pages/MarketFlow';
 import Derivation from './pages/Derivation';
 import AccountDetail from './pages/AccountDetail';
@@ -48,6 +49,7 @@ function App() {
             <Route path="trade-station" element={<TradeStation />} />
             <Route path="derivation" element={<Derivation />} />
             <Route path="today-trades" element={<TodayTrades />} />
+            <Route path="portfolio" element={<Portfolio />} />
             <Route path="market-flow" element={<MarketFlow />} />
             <Route path="trades" element={<Trades />} />
             <Route path="backtest" element={<Backtest />} />

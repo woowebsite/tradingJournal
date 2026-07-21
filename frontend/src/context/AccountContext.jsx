@@ -13,6 +13,7 @@ export const AccountProvider = ({ children }) => {
     const dispatch = useDispatch();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState(null);
+    const [selectedWatchlist, setSelectedWatchlist] = useState(null);
     const [loading, setLoading] = useState(true);
     const { items: symbols } = useSelector(state => state.symbols);
     const { items: watchlists } = useSelector(state => state.watchlists);
@@ -82,8 +83,38 @@ export const AccountProvider = ({ children }) => {
         });
     }, [watchlists, selectedAccount]);
 
+    const accountWatchlists = useMemo(() => {
+        if (!watchlists || !selectedAccount) return [];
+        const currentAccountId = selectedAccount.documentId || selectedAccount.id;
+        return watchlists.filter(watchlist =>
+            (watchlist.account?.documentId || watchlist.account?.id) === currentAccountId
+        );
+    }, [watchlists, selectedAccount]);
+
+    useEffect(() => {
+        const selectedId = selectedWatchlist?.documentId || selectedWatchlist?.id;
+        const stillAvailable = accountWatchlists.find(watchlist =>
+            (watchlist.documentId || watchlist.id) === selectedId
+        );
+        if (stillAvailable) {
+            if (stillAvailable !== selectedWatchlist) setSelectedWatchlist(stillAvailable);
+            return;
+        }
+        setSelectedWatchlist(accountWatchlists.find(watchlist => watchlist.isDefault) || accountWatchlists[0] || null);
+    }, [accountWatchlists, selectedWatchlist]);
+
     return (
-        <AccountContext.Provider value={{ accounts, selectedAccount, setSelectedAccount, loading, accountSymbols, defaultWatchlist }}>
+        <AccountContext.Provider value={{
+            accounts,
+            selectedAccount,
+            setSelectedAccount,
+            loading,
+            accountSymbols,
+            defaultWatchlist,
+            accountWatchlists,
+            selectedWatchlist,
+            setSelectedWatchlist,
+        }}>
             {children}
         </AccountContext.Provider>
     );

@@ -139,7 +139,7 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null }) => {
         candlestickSeries.setData(candleData);
 
         // MA20 Series
-        const ma20Data = calculateSMA(candleData, 5);
+        const ma20Data = calculateSMA(candleData, 200);
         const ma20Series = chart.addSeries(LineSeries, {
             color: '#f59e0b', // amber-500
             lineWidth: 1,

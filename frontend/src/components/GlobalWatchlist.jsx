@@ -1,20 +1,23 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, RefreshCw, TrendingUp, TrendingDown, List as ListIcon } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { TrendingUp, TrendingDown, List as ListIcon } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchHistories, loadExternalHistory } from '../features/marketSlice';
 import { fetchSymbols } from '../features/symbolSlice';
 import { useNavigate } from 'react-router-dom';
+import WatchlistSelector from './WatchlistSelector';
 
 const GlobalWatchlist = () => {
     const dispatch = useDispatch();
     const { symbols } = useSelector(state => state.market);
-    const { items: watchlists } = useSelector(state => state.watchlists);
-    const { selectedAccount, accountSymbols } = useAccount();
+    const {
+        selectedAccount,
+        accountSymbols,
+        selectedWatchlist,
+    } = useAccount();
     const [searchTerm, setSearchTerm] = useState('');
     const [isOpen, setIsOpen] = useState(false);
-    const [selectedWatchlist, setSelectedWatchlist] = useState(null);
     const [searchParams] = useSearchParams();
     const [isWatchlistLoading, setIsWatchlistLoading] = useState(false);
     const [selectedSymbolId, setSelectedSymbolId] = useState(null);
@@ -38,27 +41,6 @@ const GlobalWatchlist = () => {
             }
         }
     }, [symbolParam, symbols]);
-
-    // Fetch account's watchlists
-    const accountWatchlists = useMemo(() => {
-        if (!watchlists || !selectedAccount) return [];
-
-        const accId = selectedAccount?.documentId || selectedAccount?.id;
-        return watchlists.filter(wl => {
-            const wlAccId = wl.account?.documentId || wl.account?.id;
-            return wlAccId === accId;
-        });
-    }, [watchlists, selectedAccount]);
-
-    // Initialize and sync selectedWatchlist
-    useEffect(() => {
-        if (selectedAccount) {
-            const defWl = accountWatchlists.find(wl => wl.isDefault);
-            setSelectedWatchlist(defWl || accountWatchlists[0] || null);
-        } else {
-            setSelectedWatchlist(null);
-        }
-    }, [selectedAccount, accountWatchlists]);
 
     const filteredSymbols = (() => {
         if (searchTerm) {
@@ -142,32 +124,11 @@ const GlobalWatchlist = () => {
             {isOpen && (
                 <div className="absolute right-0 top-full mt-4 w-80 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl flex flex-col z-50 max-h-[70vh] overflow-hidden">
                     <div className="p-3 border-b border-gray-700 bg-gray-800/95 backdrop-blur-sm">
-                        <div className="flex justify-between items-center mb-2">
-                            <select
-                                value={selectedWatchlist?.documentId || selectedWatchlist?.id || ''}
-                                onChange={(e) => {
-                                    const wlId = e.target.value;
-                                    const wl = accountWatchlists.find(w => (w.documentId || w.id) == wlId);
-                                    if (wl) setSelectedWatchlist(wl);
-                                }}
-                                className="bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 hover:bg-gray-600 transition"
-                            >
-                                {accountWatchlists.length === 0 && <option value="">No Watchlists</option>}
-                                {accountWatchlists.map(wl => (
-                                    <option key={wl.documentId || wl.id} value={wl.documentId || wl.id}>
-                                        {wl.name}
-                                    </option>
-                                ))}
-                            </select>
-                            <button
-                                onClick={handleWatchlistRefresh}
-                                disabled={isWatchlistLoading || (isWatchlistLoading && !isWatchlistLoading)}
-                                className={`text-gray-400 hover:text-blue-400 transition ${isWatchlistLoading ? 'animate-spin text-blue-400' : ''}`}
-                                title="Refresh Data"
-                            >
-                                <RefreshCw size={14} className={isWatchlistLoading ? 'animate-spin' : ''} />
-                            </button>
-                        </div>
+                        <WatchlistSelector
+                            onRefresh={handleWatchlistRefresh}
+                            refreshing={isWatchlistLoading}
+                            className="justify-between"
+                        />
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar bg-gray-900/40">
