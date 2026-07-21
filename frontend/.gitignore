@@ -23,5 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
+frontend/.env.fe
+frontend/tcbs-cookie.json
 .env.fe
 tcbs-cookie.json
