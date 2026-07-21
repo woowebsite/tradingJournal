@@ -292,7 +292,8 @@ const TradeStation = () => {
                         selectedRuleIds,
                         scanSymbols,
                         accountId,
-                        strategyId: activeStrategyId
+                        strategyId: activeStrategyId,
+                        syncDemoTrades: false
                     })).unwrap();
                 }
 
@@ -346,7 +347,7 @@ const TradeStation = () => {
                             </div>
 
                             {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
-                            
+
                             <div className="ml-auto flex items-end justify-end gap-2">
                                 {selectedSymbol && (
                                     <button

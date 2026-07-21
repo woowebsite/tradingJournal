@@ -18,6 +18,8 @@ const Signals = () => {
 
     const [selectedRule, setSelectedRule] = useState('');
     const [selectedSymbol, setSelectedSymbol] = useState('');
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         dispatch(fetchSignals());
@@ -55,8 +57,15 @@ const Signals = () => {
     };
 
     const handleDelete = async (id) => {
+        if (!id) return;
         if (window.confirm('Are you sure you want to delete this signal?')) {
-            dispatch(deleteSignal(id));
+            try {
+                await dispatch(deleteSignal(id)).unwrap();
+                setSelectedIds(prev => prev.filter(item => item !== id));
+            } catch (err) {
+                console.error('Failed to delete signal:', err);
+                alert(`Failed to delete signal: ${err?.message || err}`);
+            }
         }
     };
 
@@ -86,8 +95,14 @@ const Signals = () => {
     })();
 
     const availableRules = (() => {
-        if (!activeStrategy || !activeStrategy.rules) return [];
-        const stratRuleIds = activeStrategy.rules.map(r => (r.documentId || r.id).toString());
+        if (!activeStrategy) return [];
+        const stratRuleIds = [
+            ...(activeStrategy.rules || []),
+            ...(activeStrategy.entryRules || []),
+            ...(activeStrategy.takeProfitRules || []),
+            ...(activeStrategy.stoplossRules || []),
+            ...(activeStrategy.exitRules || [])
+        ].map(r => (r.documentId || r.id).toString());
         return rules.filter(r => stratRuleIds.includes((r.documentId || r.id).toString()));
     })();
 
@@ -99,9 +114,15 @@ const Signals = () => {
         let list = signals;
 
         // 1. Filter by Strategy Rules
-        // Robust strategy: Collect ALL valid identifiers (id and documentId) from the strategy's rules
+        // Collect ALL valid identifiers (id and documentId) from all strategy rule categories
         const strategyRuleIdentifiers = new Set();
-        activeStrategy.rules.forEach(r => {
+        [
+            ...(activeStrategy.rules || []),
+            ...(activeStrategy.entryRules || []),
+            ...(activeStrategy.takeProfitRules || []),
+            ...(activeStrategy.stoplossRules || []),
+            ...(activeStrategy.exitRules || [])
+        ].forEach(r => {
             if (r.id) strategyRuleIdentifiers.add(r.id.toString());
             if (r.documentId) strategyRuleIdentifiers.add(r.documentId.toString());
         });
@@ -185,6 +206,56 @@ const Signals = () => {
             return symbolId?.toString() === selectedSymbol;
         })
         : baseFilteredSignals;
+
+    // Checkbox & Selection Helpers
+    const isAllSelected = filteredSignals.length > 0 && filteredSignals.every(signal => {
+        const id = signal.documentId || signal.id;
+        return selectedIds.includes(id);
+    });
+
+    const handleSelectAll = (e) => {
+        if (e.target.checked) {
+            const allFilteredIds = filteredSignals.map(signal => signal.documentId || signal.id);
+            const nextSelected = Array.from(new Set([...selectedIds, ...allFilteredIds]));
+            setSelectedIds(nextSelected);
+        } else {
+            const filteredIdSet = new Set(filteredSignals.map(signal => signal.documentId || signal.id));
+            setSelectedIds(selectedIds.filter(id => !filteredIdSet.has(id)));
+        }
+    };
+
+    const handleSelectOne = (id) => {
+        setSelectedIds(prev =>
+            prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+        );
+    };
+
+    const handleDeleteSelected = async () => {
+        if (selectedIds.length === 0) return;
+        if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected signal(s)?`)) {
+            setIsDeleting(true);
+            try {
+                const results = await Promise.allSettled(
+                    selectedIds.map(id => dispatch(deleteSignal(id)).unwrap())
+                );
+                const succeeded = results.filter(r => r.status === 'fulfilled').length;
+                const failed = results.filter(r => r.status === 'rejected').length;
+
+                setSelectedIds([]);
+
+                if (failed === 0) {
+                    alert(`Successfully deleted ${succeeded} signal(s).`);
+                } else {
+                    alert(`Deleted ${succeeded} signal(s), but ${failed} failed.`);
+                }
+            } catch (err) {
+                console.error('Failed batch delete signals:', err);
+                alert(`Error during batch delete: ${err?.message || err}`);
+            } finally {
+                setIsDeleting(false);
+            }
+        }
+    };
 
     const rulePurposeConfig = {
         entryRules: { label: 'Entry', className: 'bg-blue-500/20 text-blue-400' },
@@ -282,20 +353,42 @@ const Signals = () => {
                         </select>
                     </div>
 
-                    <button
-                        onClick={handleLoadSignals}
-                        disabled={loading}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-blue-600/20"
-                    >
-                        <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-                        <span>Scan Signals</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {selectedIds.length > 0 && (
+                            <button
+                                onClick={handleDeleteSelected}
+                                disabled={isDeleting || loading}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 text-white rounded-lg transition shadow-lg shadow-red-600/20"
+                            >
+                                <Trash2 size={18} className={isDeleting ? "animate-spin" : ""} />
+                                <span>Delete Selected ({selectedIds.length})</span>
+                            </button>
+                        )}
+
+                        <button
+                            onClick={handleLoadSignals}
+                            disabled={loading || isDeleting}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-blue-600/20"
+                        >
+                            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+                            <span>Scan Signals</span>
+                        </button>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead className="bg-gray-900/50 text-gray-400 text-sm uppercase">
                             <tr>
+                                <th className="p-4 w-12 text-center">
+                                    <input
+                                        type="checkbox"
+                                        checked={isAllSelected}
+                                        onChange={handleSelectAll}
+                                        className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                        disabled={filteredSignals.length === 0 || loading || isDeleting}
+                                    />
+                                </th>
                                 <th className="p-4">Date</th>
                                 <th className="p-4">Name</th>
                                 <th className="p-4">Rules</th>
@@ -306,11 +399,11 @@ const Signals = () => {
                         <tbody className="divide-y divide-gray-700/50">
                             {loading ? (
                                 <tr>
-                                    <td colSpan="5" className="p-8 text-center text-gray-500">Loading signals...</td>
+                                    <td colSpan="6" className="p-8 text-center text-gray-500">Loading signals...</td>
                                 </tr>
                             ) : filteredSignals.length === 0 ? (
                                 <tr>
-                                    <td colSpan="5" className="p-8 text-center text-gray-500">
+                                    <td colSpan="6" className="p-8 text-center text-gray-500">
                                         <div className="flex flex-col items-center gap-2">
                                             <AlertCircle size={32} className="text-gray-600" />
                                             <p>
@@ -327,53 +420,65 @@ const Signals = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredSignals.map((signal) => (
-                                    <tr key={signal.id || signal.documentId} className={`hover:bg-gray-700/30 transition ${isToday(signal.date) ? 'bg-blue-600/10 border-1 border-blue-500' : ''}`}>
-                                        <td className="p-4 text-gray-300 font-medium">
-                                            {formatDate(signal.date)}
-                                        </td>
-                                        <td className="p-4 text-white">
-                                            <Link
-                                                to={`/trade-station?symbol=${signal.symbol?.Name || ''}`}
-                                                className="hover:text-blue-400 hover:underline block font-bold"
-                                            >   {signal.symbol?.Name}
-                                            </Link>
-                                            <span className="text-gray-400 text-sm">
-                                                {signal.name}
-                                            </span>
-                                        </td>
-                                        <td className="p-4">
-                                            {signal.rules?.length > 0 ? (
-                                                <div className="flex flex-wrap gap-2">
-                                                    {signal.rules.map(rule => (
-                                                        <div key={rule.id || rule.documentId} className="flex flex-col items-start gap-1">
-                                                            <RulePurposeBadge rule={rule} />
-                                                            <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">
-                                                            {rule.Name}
-                                                            </span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-500 text-sm">-</span>
-                                            )}
-                                        </td>
-                                        <td className="p-4">
-                                            <span className={`px - 2 py - 1 rounded text - xs font - bold ${signal.expired ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'} `}>
-                                                {signal.expired ? 'Expired' : 'Active'}
-                                            </span>
-                                        </td>
-                                        <td className="p-4 text-right">
-                                            <button
-                                                onClick={() => handleDelete(signal.documentId || signal.id)}
-                                                className="p-2 text-gray-500 hover:text-red-400 transition"
-                                                title="Delete Signal"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
+                                filteredSignals.map((signal) => {
+                                    const signalId = signal.documentId || signal.id;
+                                    const isSelected = selectedIds.includes(signalId);
+                                    return (
+                                        <tr key={signalId} className={`hover:bg-gray-700/30 transition ${isSelected ? 'bg-blue-900/20' : isToday(signal.date) ? 'bg-blue-600/10 border-1 border-blue-500' : ''}`}>
+                                            <td className="p-4 w-12 text-center" onClick={(e) => e.stopPropagation()}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => handleSelectOne(signalId)}
+                                                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                />
+                                            </td>
+                                            <td className="p-4 text-gray-300 font-medium">
+                                                {formatDate(signal.date)}
+                                            </td>
+                                            <td className="p-4 text-white">
+                                                <Link
+                                                    to={`/trade-station?symbol=${signal.symbol?.Name || ''}`}
+                                                    className="hover:text-blue-400 hover:underline block font-bold"
+                                                >   {signal.symbol?.Name}
+                                                </Link>
+                                                <span className="text-gray-400 text-sm">
+                                                    {signal.name}
+                                                </span>
+                                            </td>
+                                            <td className="p-4">
+                                                {signal.rules?.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {signal.rules.map(rule => (
+                                                            <div key={rule.id || rule.documentId} className="flex flex-col items-start gap-1">
+                                                                <RulePurposeBadge rule={rule} />
+                                                                <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs">
+                                                                    {rule.Name}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-500 text-sm">-</span>
+                                                )}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${signal.expired ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
+                                                    {signal.expired ? 'Expired' : 'Active'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                <button
+                                                    onClick={() => handleDelete(signalId)}
+                                                    className="p-2 text-gray-500 hover:text-red-400 transition"
+                                                    title="Delete Signal"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>

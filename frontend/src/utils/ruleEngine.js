@@ -169,7 +169,9 @@ const executeFunction = (funcNode, history, index) => {
             }
         }
 
-        if (count === 0) return null;
+        // A "highest N candles" value is undefined until the complete window exists.
+        // Using a partial window can create false signals near the oldest loaded candle.
+        if (count < period) return null;
         return maxVal;
     }
 
@@ -217,7 +219,7 @@ const executeFunction = (funcNode, history, index) => {
             }
         }
 
-        if (count === 0) return null;
+        if (count < period) return null;
         return minVal;
     }
 
@@ -469,8 +471,10 @@ const executeFunction = (funcNode, history, index) => {
         const targetIdx = index + offset;
         if (targetIdx >= history.length) return null;
 
-        // Minimum lookback to stabilize ATR is period * 3 + 20
-        const lookback = Math.min(history.length - 1, targetIdx + period * 3 + 20);
+        // Start at the oldest loaded candle, matching the chart calculation exactly.
+        // Supertrend is recursive, so an arbitrary rolling initialization point can
+        // produce a different band/direction from the one displayed on the chart.
+        const lookback = history.length - 1;
         if (lookback - targetIdx < period) return null;
 
         // Slice and reverse to get ASC (oldest first)

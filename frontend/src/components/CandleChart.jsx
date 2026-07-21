@@ -240,7 +240,7 @@ const CandleChart = ({ data, symbol, signals = [] }) => {
                         symbol: 'pin',
                         symbolSize: 40,
                         label: {
-                            show: true,
+                            show: false,
                             formatter: '{c}',
                             fontSize: 10,
                             color: '#fff'

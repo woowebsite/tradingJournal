@@ -4,6 +4,35 @@ import { getCryptoHistory } from '../services/binance';
 
 import { getStockHistory, getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
+const HISTORY_PAGE_SIZE = 100;
+const MAX_HISTORY_CANDLES = 500;
+
+export const fetchPagedSymbolHistories = async (filterSymbolId) => {
+    const histories = [];
+    const maxPages = Math.ceil(MAX_HISTORY_CANDLES / HISTORY_PAGE_SIZE);
+
+    for (let page = 1; page <= maxPages; page++) {
+        let url = `/symbol-histories?populate=symbol&sort=date:desc&pagination[page]=${page}&pagination[pageSize]=${HISTORY_PAGE_SIZE}`;
+        if (filterSymbolId) {
+            url += `&filters[symbol][documentId][$eq]=${encodeURIComponent(filterSymbolId)}`;
+        }
+
+        const res = await api.get(url);
+        const pageItems = res.data?.data || [];
+        histories.push(...pageItems);
+
+        const pagination = res.data?.meta?.pagination;
+        const isLastPage = pagination?.pageCount
+            ? page >= pagination.pageCount
+            : pageItems.length < HISTORY_PAGE_SIZE;
+        if (isLastPage || histories.length >= MAX_HISTORY_CANDLES) break;
+    }
+
+    return histories
+        .slice(0, MAX_HISTORY_CANDLES)
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+};
+
 // Async Thunks
 export const fetchSymbols = createAsyncThunk(
     'market/fetchSymbols',
@@ -31,12 +60,7 @@ export const fetchHistories = createAsyncThunk(
     'market/fetchHistories',
     async (filterSymbolId, { rejectWithValue }) => {
         try {
-            let url = '/symbol-histories?populate=symbol&sort=date:desc&pagination[pageSize]=1000';
-            if (filterSymbolId) {
-                url += `&filters[symbol][documentId][$eq]=${filterSymbolId}`;
-            }
-            const res = await api.get(url);
-            return res.data.data || [];
+            return await fetchPagedSymbolHistories(filterSymbolId);
         } catch (error) {
             console.error(error);
             return rejectWithValue(error.response?.data || error.message);

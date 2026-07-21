@@ -4,6 +4,36 @@ import { evaluateRule } from '../utils/ruleEngine';
 import { createBlocksFromText } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 
+const HISTORY_PAGE_SIZE = 100;
+const MAX_HISTORY_CANDLES = 365;
+
+const getHistoryDate = (candle) => candle?.date || candle?.attributes?.date;
+
+export const fetchHistoryForSignalScan = async (symbolId) => {
+    const history = [];
+    const maxPages = Math.ceil(MAX_HISTORY_CANDLES / HISTORY_PAGE_SIZE);
+
+    for (let page = 1; page <= maxPages; page++) {
+        const historyRes = await api.get(
+            `/symbol-histories?filters[symbol][documentId][$eq]=${encodeURIComponent(symbolId)}` +
+            `&pagination[page]=${page}&pagination[pageSize]=${HISTORY_PAGE_SIZE}&sort=date:desc`
+        );
+        const pageItems = historyRes.data?.data || [];
+        history.push(...pageItems);
+
+        const pagination = historyRes.data?.meta?.pagination;
+        const isLastPage = pagination?.pageCount
+            ? page >= pagination.pageCount
+            : pageItems.length < HISTORY_PAGE_SIZE;
+
+        if (isLastPage || history.length >= MAX_HISTORY_CANDLES) break;
+    }
+
+    return history
+        .slice(0, MAX_HISTORY_CANDLES)
+        .sort((a, b) => new Date(getHistoryDate(b)).getTime() - new Date(getHistoryDate(a)).getTime());
+};
+
 export const fetchSignals = createAsyncThunk(
     'signals/fetchSignals',
     async (_, { rejectWithValue }) => {
@@ -253,9 +283,9 @@ export const scanSignals = createAsyncThunk(
             const scanPromises = symbols.map(async (symbol) => {
                 try {
                     const symId = symbol.documentId || symbol.id;
-                    // Fetch recent history (DESC)
-                    const historyRes = await api.get(`/symbol-histories?filters[symbol][documentId][$eq]=${symId}&pagination[limit]=50&sort=date:desc`);
-                    const history = historyRes.data.data;
+                    // Strapi caps each response at 100 records. Fetch enough pages to warm up
+                    // recursive indicators such as EMA, MACD, RSI and Supertrend reliably.
+                    const history = await fetchHistoryForSignalScan(symId);
 
                     if (!history || history.length === 0) return;
 
@@ -373,7 +403,12 @@ const signalSlice = createSlice({
                 state.error = action.payload;
             })
             .addCase(deleteSignal.fulfilled, (state, action) => {
-                state.items = state.items.filter(item => (item.id || item.documentId) !== action.payload);
+                const targetId = String(action.payload);
+                state.items = state.items.filter(item => {
+                    const docId = item.documentId ? String(item.documentId) : null;
+                    const numId = item.id ? String(item.id) : null;
+                    return docId !== targetId && numId !== targetId;
+                });
             });
     }
 });

@@ -28,6 +28,16 @@ const INDICATORS = {
         defaults: { period: 10, multiplier: 3 },
         outputs: ['supertrend', 'direction']
     },
+    'highest': {
+        params: ['period'],
+        defaults: { period: 14 },
+        outputs: ['highest']
+    },
+    'lowest': {
+        params: ['period'],
+        defaults: { period: 14 },
+        outputs: ['lowest']
+    },
     'close': { params: [], defaults: {}, outputs: ['price'] },
     'open': { params: [], defaults: {}, outputs: ['price'] },
     'high': { params: [], defaults: {}, outputs: ['price'] },
@@ -51,7 +61,7 @@ const OperandInput = ({ value, onChange, label }) => {
             newData.params = { ...config.defaults };
             // Default field to close if not specified (for overlaid indicators)
             if (!['close', 'open', 'high', 'low', 'volume'].includes(val)) {
-                newData.params.field = 'close';
+                newData.params.field = val === 'highest' ? 'high' : (val === 'lowest' ? 'low' : 'close');
             }
             // Default output
             if (config.outputs.length > 0) newData.params.output = config.outputs[0];

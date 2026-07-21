@@ -103,4 +103,25 @@ describe('RuleBuilder', () => {
         const arg = handleChange.mock.calls[0][0];
         expect(arg.rules[0].left.value).toBe(20);
     });
+
+    it('supports highest and lowest indicators', () => {
+        const initialValue = {
+            condition: 'AND',
+            rules: [{
+                left: { type: 'function', name: 'macd', params: { fast: 12, slow: 26, signal: 9 } },
+                operator: '>',
+                right: { type: 'number', value: 5 }
+            }]
+        };
+        const handleChange = vi.fn();
+        render(<RuleBuilder value={initialValue} onChange={handleChange} />);
+
+        const indicatorSelect = screen.getAllByRole('combobox')[1];
+        fireEvent.change(indicatorSelect, { target: { value: 'highest' } });
+
+        expect(handleChange).toHaveBeenCalled();
+        const arg = handleChange.mock.calls[0][0];
+        expect(arg.rules[0].left.name).toBe('highest');
+        expect(arg.rules[0].left.params.field).toBe('high');
+    });
 });
