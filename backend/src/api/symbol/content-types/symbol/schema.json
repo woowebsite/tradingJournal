@@ -77,6 +77,12 @@
       "target": "api::stock-ratio.stock-ratio",
       "mappedBy": "symbol"
     },
+    "technicalAnalysis": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::symbol-technical-analysis.symbol-technical-analysis",
+      "mappedBy": "symbol"
+    },
     "sector": {
       "type": "string"
     },

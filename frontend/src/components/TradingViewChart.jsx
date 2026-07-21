@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { calculateSMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
+import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimoku';
 
 const getRuleId = (rule) => rule?.documentId || rule?.id || '';
 
-const TradingViewChart = ({ data, symbol, signals = [], strategy = null }) => {
+const TradingViewChart = ({ data, symbol, signals = [], strategy = null, template = 'Supertrend' }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
     const [hoverTooltip, setHoverTooltip] = useState(null);
@@ -150,17 +151,25 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null }) => {
         // MA20 Series
         const ma20Data = calculateSMA(candleData, 200);
         const ma20Series = chart.addSeries(LineSeries, {
-            color: '#f59e0b', // amber-500
-            lineWidth: 1,
+            color: 'white', // amber-500
+            lineWidth: 2,
             crosshairMarkerVisible: false,
             priceLineVisible: false,
             lastValueVisible: false,
         });
         ma20Series.setData(ma20Data);
 
-        // Supertrend Series
-        const supertrendData = calculateSupertrend(10, 3, sortedData);
-        drawSupertrend(chart, LineSeries, supertrendData);
+        if (template === 'Ichimoku') {
+            // Ichimoku Cloud (9, 26, 52, displacement 26)
+            const ichimokuData = calculateIchimoku(candleData, {
+                conversionPeriod: 26,
+                basePeriod: 78,
+            });
+            drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
+        } else {
+            const supertrendData = calculateSupertrend(10, 3, sortedData);
+            drawSupertrend(chart, LineSeries, supertrendData);
+        }
 
         // Volume Series 
         const volumeSeries = volumeChart.addSeries(HistogramSeries, {
@@ -307,7 +316,7 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null }) => {
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate]);
+    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">

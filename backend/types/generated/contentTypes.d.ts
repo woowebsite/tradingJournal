@@ -1057,6 +1057,41 @@ export interface ApiSymbolHistorySymbolHistory
   };
 }
 
+export interface ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'symbol_technical_analyses';
+  info: {
+    displayName: 'SymbolTechnicalAnalysis';
+    pluralName: 'symbol-technical-analyses';
+    singularName: 'symbol-technical-analysis';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    calculatedAt: Schema.Attribute.DateTime;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    k26: Schema.Attribute.Decimal;
+    k78: Schema.Attribute.Decimal;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::symbol-technical-analysis.symbol-technical-analysis'
+    > &
+      Schema.Attribute.Private;
+    ma200: Schema.Attribute.Decimal;
+    publishedAt: Schema.Attribute.DateTime;
+    supertrend: Schema.Attribute.Decimal;
+    supertrendDirection: Schema.Attribute.Integer;
+    symbol: Schema.Attribute.Relation<'oneToOne', 'api::symbol.symbol'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
   collectionName: 'symbols';
   info: {
@@ -1110,6 +1145,10 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     symbol_histories: Schema.Attribute.Relation<
       'oneToMany',
       'api::symbol-history.symbol-history'
+    >;
+    technicalAnalysis: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::symbol-technical-analysis.symbol-technical-analysis'
     >;
     ticker: Schema.Attribute.String;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
@@ -1998,6 +2037,7 @@ declare module '@strapi/strapi' {
       'api::stock-ratio.stock-ratio': ApiStockRatioStockRatio;
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
+      'api::symbol-technical-analysis.symbol-technical-analysis': ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis;
       'api::symbol.symbol': ApiSymbolSymbol;
       'api::tcbs-recommen.tcbs-recommen': ApiTcbsRecommenTcbsRecommen;
       'api::tcbs-strategy-detail.tcbs-strategy-detail': ApiTcbsStrategyDetailTcbsStrategyDetail;

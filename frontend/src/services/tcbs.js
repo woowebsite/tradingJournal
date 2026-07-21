@@ -274,6 +274,26 @@ const upsertStockRatio = async (symbolId, ratio) => {
     return response.data.data;
 };
 
+export const upsertSymbolTechnicalAnalysis = async (symbolId, analysis) => {
+    const existing = await api.get('/symbol-technical-analyses', {
+        params: {
+            'filters[symbol][documentId][$eq]': symbolId,
+            'pagination[pageSize]': 1,
+        },
+    });
+    const existingAnalysis = existing.data?.data?.[0];
+    const analysisId = existingAnalysis?.documentId || existingAnalysis?.id;
+    const payload = { data: { ...analysis, symbol: symbolId } };
+
+    if (analysisId) {
+        const response = await api.put(`/symbol-technical-analyses/${analysisId}`, payload);
+        return response.data.data;
+    }
+
+    const response = await api.post('/symbol-technical-analyses', payload);
+    return response.data.data;
+};
+
 export const updateMarketInfo = async (ticker, symbolId) => {
     try {
         const [overview, ratio] = await Promise.all([

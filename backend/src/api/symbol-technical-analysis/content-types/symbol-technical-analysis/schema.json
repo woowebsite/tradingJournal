@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "symbol_technical_analyses",
+  "info": {
+    "singularName": "symbol-technical-analysis",
+    "pluralName": "symbol-technical-analyses",
+    "displayName": "SymbolTechnicalAnalysis"
+  },
+  "options": { "draftAndPublish": true },
+  "pluginOptions": {},
+  "attributes": {
+    "supertrend": { "type": "decimal" },
+    "supertrendDirection": { "type": "integer" },
+    "k26": { "type": "decimal" },
+    "k78": { "type": "decimal" },
+    "ma200": { "type": "decimal" },
+    "calculatedAt": { "type": "datetime" },
+    "symbol": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "technicalAnalysis"
+    }
+  }
+}

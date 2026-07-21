@@ -16,6 +16,10 @@ import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import { Search, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
+import { upsertSymbolTechnicalAnalysis } from '../services/tcbs';
+import { calculateSMA } from '../indicators/movingAverages';
+import { calculateSupertrend } from '../indicators/supertrend';
+import { calculateIchimoku } from '../indicators/ichimoku/ichimoku';
 import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
 import { getStrategyId } from '../utils/roadmapCalculations';
 
@@ -33,6 +37,7 @@ const TradeStation = () => {
     const [showCreateSymbolModal, setShowCreateSymbolModal] = useState(false);
     const [creatingSymbol, setCreatingSymbol] = useState(false);
     const [addingToWatchlist, setAddingToWatchlist] = useState(false);
+    const [chartTemplate, setChartTemplate] = useState('Supertrend');
     const lastAutoRefreshedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
     const { selectedAccount, defaultWatchlist } = useAccount();
@@ -112,6 +117,46 @@ const TradeStation = () => {
             .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
             .catch(err => console.error(`Failed to sync metadata and stock ratio: ${err}`));
     }, [dispatch, selectedSymbol?.Name, selectedSymbolId]);
+
+    useEffect(() => {
+        if (!selectedSymbolId || !histories || histories.length === 0) return;
+
+        const sortedHistory = [...histories]
+            .sort((a, b) => new Date(a.date) - new Date(b.date))
+            .reduce((unique, candle) => {
+                const date = String(candle.date || '').split('T')[0];
+                if (date && unique[unique.length - 1]?.date !== date) {
+                    unique.push({ ...candle, date });
+                }
+                return unique;
+            }, []);
+        const candles = sortedHistory.map(candle => ({
+            time: candle.date,
+            open: Number(candle.open),
+            high: Number(candle.high),
+            low: Number(candle.low),
+            close: Number(candle.close),
+        }));
+        const supertrend = calculateSupertrend(10, 3, candles).at(-1);
+        const ichimoku = calculateIchimoku(candles, {
+            conversionPeriod: 26,
+            basePeriod: 78,
+            spanBPeriod: 156,
+            displacement: 78,
+        });
+        const ma200 = calculateSMA(candles, 200).at(-1);
+
+        upsertSymbolTechnicalAnalysis(selectedSymbolId, {
+            supertrend: supertrend?.value ?? null,
+            supertrendDirection: supertrend?.direction ?? null,
+            k26: ichimoku.conversion.at(-1)?.value ?? null,
+            k78: ichimoku.base.at(-1)?.value ?? null,
+            ma200: ma200?.value ?? null,
+            calculatedAt: new Date().toISOString(),
+        }).catch(error => {
+            console.error(`Failed to save technical analysis for ${selectedSymbol.Name}:`, error);
+        });
+    }, [histories, selectedSymbol?.Name, selectedSymbolId]);
 
     const refreshSelectedAccountTrades = useCallback(() => {
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
@@ -356,6 +401,18 @@ const TradeStation = () => {
                             {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
 
                             <div className="ml-auto flex items-end justify-end gap-2">
+                                <label className="inline-flex items-center gap-2 text-sm text-gray-400">
+                                    <span>Template</span>
+                                    <select
+                                        aria-label="Chart template"
+                                        value={chartTemplate}
+                                        onChange={event => setChartTemplate(event.target.value)}
+                                        className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    >
+                                        <option value="Supertrend">Supertrend</option>
+                                        <option value="Ichimoku">Ichimoku</option>
+                                    </select>
+                                </label>
                                 {selectedSymbol && (
                                     <button
                                         type="button"
@@ -383,7 +440,7 @@ const TradeStation = () => {
                             </div>
                         </div>
                         <div className="flex-1 min-h-0">
-                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} />
+                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} />
                         </div>
                     </div>
 
