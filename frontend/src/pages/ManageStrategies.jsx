@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Plus, Edit, Trash2, Save, X, Search } from 'lucide-react';
 import { fetchStrategies, createStrategy, updateStrategy, deleteStrategy } from '../features/strategySlice';
-import { fetchRules } from '../features/ruleSlice';
+import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 
 /* eslint-disable react-hooks/set-state-in-effect */
@@ -40,6 +40,12 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
 
                 return sourceRules.map(getRuleId).filter(Boolean);
             };
+            const rulePercents = {};
+            [...(initialData.entryRules || []), ...(initialData.takeProfitRules || []), ...(initialData.stoplossRules || [])]
+                .forEach(rule => {
+                    const ruleId = getRuleId(rule);
+                    if (ruleId) rulePercents[ruleId] = rule.percent ?? '';
+                });
 
             setFormData({
                 name: initialData.name || '',
@@ -49,7 +55,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 entryRules: getInitialRules('entryRules'),
                 takeProfitRules: getInitialRules('takeProfitRules'),
                 stoplossRules: getInitialRules('stoplossRules'),
-                exitRules: getInitialRules('exitRules')
+                exitRules: getInitialRules('exitRules'),
+                rulePercents
             });
         } else {
             setFormData({
@@ -60,7 +67,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 entryRules: [],
                 takeProfitRules: [],
                 stoplossRules: [],
-                exitRules: []
+                exitRules: [],
+                rulePercents: {}
             });
         }
         setOpenRuleGroup(null);
@@ -87,7 +95,13 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
 
     const handleAddRule = (fieldName, ruleId) => {
         if (!formData[fieldName].includes(ruleId)) {
-            setFormData(prev => ({ ...prev, [fieldName]: [...prev[fieldName], ruleId] }));
+            setFormData(prev => ({
+                ...prev,
+                [fieldName]: [...prev[fieldName], ruleId],
+                rulePercents: fieldName === 'exitRules'
+                    ? prev.rulePercents
+                    : { ...prev.rulePercents, [ruleId]: '' }
+            }));
         }
         setOpenRuleGroup(null);
     };
@@ -95,7 +109,15 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
     const handleRemoveRule = (fieldName, ruleId) => {
         setFormData(prev => ({
             ...prev,
-            [fieldName]: prev[fieldName].filter(id => id !== ruleId)
+            [fieldName]: prev[fieldName].filter(id => id !== ruleId),
+            rulePercents: { ...prev.rulePercents, [ruleId]: undefined }
+        }));
+    };
+
+    const handleRulePercentChange = (ruleId, value) => {
+        setFormData(prev => ({
+            ...prev,
+            rulePercents: { ...prev.rulePercents, [ruleId]: value }
         }));
     };
 
@@ -110,7 +132,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
             entryRules: formData.type === 'Rules' ? formData.entryRules : [],
             takeProfitRules: formData.type === 'Rules' ? formData.takeProfitRules : [],
             stoplossRules: formData.type === 'Rules' ? formData.stoplossRules : [],
-            exitRules: formData.type === 'Rules' ? formData.exitRules : []
+            exitRules: formData.type === 'Rules' ? formData.exitRules : [],
+            rulePercents: formData.rulePercents
         });
     };
 
@@ -134,6 +157,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
         const selectedRules = availableRules.filter(rule =>
             selectedIds.includes(rule.id) || selectedIds.includes(rule.documentId)
         );
+        const supportsPercent = ['entryRules', 'takeProfitRules', 'stoplossRules'].includes(group.key);
         const rulesToSelect = availableRules.filter(rule => {
             const name = rule.Name || '';
             const description = rule.Description || '';
@@ -171,6 +195,23 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                                     <tr key={getRuleId(rule)}>
                                         <td className="p-3 text-white">{rule.Name}</td>
                                         <td className="p-3"><TypeBadge type={rule.Type} /></td>
+                                        {supportsPercent && (
+                                            <td className="p-3 w-32">
+                                                <label className="flex items-center gap-1 text-xs text-gray-400">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.01"
+                                                        value={formData.rulePercents?.[getRuleId(rule)] ?? ''}
+                                                        onChange={event => handleRulePercentChange(getRuleId(rule), event.target.value)}
+                                                        className="w-20 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-right text-white focus:border-blue-500 focus:outline-none"
+                                                        placeholder="0"
+                                                    />
+                                                    <span>%</span>
+                                                </label>
+                                            </td>
+                                        )}
                                         <td className="p-3 text-right">
                                             <button
                                                 type="button"
@@ -377,11 +418,23 @@ const ManageStrategies = () => {
 
     const handleModalSubmit = async (data) => {
         try {
+            const { rulePercents = {}, ...strategyData } = data;
             if (editingStrategy) {
                 const id = editingStrategy.documentId || editingStrategy.id;
-                await dispatch(updateStrategy({ id, data })).unwrap();
+                await dispatch(updateStrategy({ id, data: strategyData })).unwrap();
             } else {
-                await dispatch(createStrategy(data)).unwrap();
+                await dispatch(createStrategy(strategyData)).unwrap();
+            }
+
+            await Promise.all(Object.entries(rulePercents)
+                .filter(([, percent]) => percent !== '' && percent !== undefined && percent !== null)
+                .map(([ruleId, percent]) => dispatch(updateRule({
+                    id: ruleId,
+                    data: { percent: Number(percent) }
+                })).unwrap()));
+
+            if (Object.keys(rulePercents).length > 0) {
+                dispatch(fetchRules());
             }
             setIsModalOpen(false);
             dispatch(fetchStrategies()); // Refetch to ensure everything is up to date (optional, but safer for relations)

@@ -812,6 +812,14 @@ export interface ApiRuleRule extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::rule.rule'> &
       Schema.Attribute.Private;
     Name: Schema.Attribute.String;
+    percent: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 100;
+          min: 0;
+        },
+        number
+      >;
     publishedAt: Schema.Attribute.DateTime;
     Rule: Schema.Attribute.JSON;
     signals: Schema.Attribute.Relation<'manyToMany', 'api::signal.signal'>;

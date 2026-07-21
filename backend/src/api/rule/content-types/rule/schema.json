@@ -30,6 +30,11 @@
         "Disable"
       ]
     },
+    "percent": {
+      "type": "decimal",
+      "min": 0,
+      "max": 100
+    },
     "strategies": {
       "type": "relation",
       "relation": "manyToMany",

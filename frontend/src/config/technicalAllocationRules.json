@@ -1,0 +1,18 @@
+{
+  "Ichimoku": {
+    "label": "Ichimoku",
+    "rules": [
+      { "key": "priceAboveK26", "label": "Giá > K26", "percent": 30 },
+      { "key": "k26AboveK78", "label": "K26 > K78", "percent": 30 },
+      { "key": "priceAboveMA200", "label": "Above MA200", "percent": 40 }
+    ]
+  },
+  "Supertrend": {
+    "label": "Supertrend",
+    "rules": [
+      { "key": "priceAboveSupertrend", "label": "Giá > Supertrend", "percent": 30 },
+      { "key": "supertrendUptrend", "label": "Supertrend Uptrend", "percent": 30 },
+      { "key": "priceAboveMA200", "label": "Above MA200", "percent": 40 }
+    ]
+  }
+}

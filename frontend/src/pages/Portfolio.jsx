@@ -6,10 +6,12 @@ import WatchlistSelector from '../components/WatchlistSelector';
 import { fetchPagedSymbolHistories } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { getStockHistory } from '../services/tcbs';
-import { buildMarketCapWeightedIndex, buildMarketCapWeights, normalizeChartHistory } from '../utils/watchlistIndex';
+import { buildMarketCapWeightedIndex, normalizeChartHistory } from '../utils/watchlistIndex';
+import allocationRules from '../config/technicalAllocationRules.json';
 import { fetchSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { getStrategyId } from '../utils/roadmapCalculations';
+import api from '../services/api';
 
 const getSymbolId = symbol => symbol?.documentId || symbol?.id;
 const BENCHMARK_LABELS = { VN30: 'VN30', VNINDEX: 'VNIndex', 100: '100' };
@@ -50,6 +52,7 @@ const Portfolio = () => {
     const [watchlistLoading, setWatchlistLoading] = useState(false);
     const [benchmarkLoading, setBenchmarkLoading] = useState(false);
     const [error, setError] = useState('');
+    const [technicalAnalyses, setTechnicalAnalyses] = useState({});
 
     useEffect(() => {
         dispatch(fetchSignals());
@@ -92,6 +95,44 @@ const Portfolio = () => {
     }, [loadWatchlistChart]);
 
     useEffect(() => {
+        let cancelled = false;
+        const loadTechnicalAnalyses = async () => {
+            const symbols = selectedWatchlist?.symbols || [];
+            if (symbols.length === 0) {
+                setTechnicalAnalyses({});
+                return;
+            }
+
+            const entries = await Promise.all(symbols.map(async symbol => {
+                const documentId = symbol?.documentId;
+                const numericId = symbol?.id;
+                if (!documentId && !numericId) return null;
+
+                try {
+                    const filterKey = documentId ? 'documentId' : 'id';
+                    const filterValue = documentId || numericId;
+                    const response = await api.get('/symbol-technical-analyses', {
+                        params: {
+                            [`filters[symbol][${filterKey}][$eq]`]: filterValue,
+                            'pagination[pageSize]': 1,
+                        },
+                    });
+                    const analysis = response.data?.data?.[0];
+                    return analysis ? [String(documentId || numericId), analysis] : null;
+                } catch (loadError) {
+                    console.warn(`Technical analysis unavailable for ${symbol.Name || numericId}:`, loadError);
+                    return null;
+                }
+            }));
+
+            if (!cancelled) setTechnicalAnalyses(Object.fromEntries(entries.filter(Boolean)));
+        };
+
+        loadTechnicalAnalyses();
+        return () => { cancelled = true; };
+    }, [selectedWatchlist]);
+
+    useEffect(() => {
         loadBenchmarkChart();
     }, [loadBenchmarkChart]);
 
@@ -101,7 +142,7 @@ const Portfolio = () => {
     }, [loadBenchmarkChart, loadWatchlistChart]);
 
     const ratioGroups = useMemo(
-        () => (selectedWatchlist?.symbols || []).map(symbol => symbol?.stockRatio || null),
+        () => (selectedWatchlist?.symbols || []).map(symbol => symbol?.stockRatio?.data || symbol?.stockRatio || null),
         [selectedWatchlist]
     );
     const watchlistIndex = useMemo(
@@ -116,37 +157,62 @@ const Portfolio = () => {
     const entrySymbolIds = useMemo(() => {
         const entryRuleIds = new Set((selectedStrategy?.entryRules || [])
             .map(rule => String(rule?.documentId || rule?.id)));
+        const entryRuleNames = new Set((selectedStrategy?.entryRules || [])
+            .map(rule => String(rule?.Name || rule?.name || '').trim().toLowerCase())
+            .filter(Boolean));
         const accountId = String(selectedAccount?.documentId || selectedAccount?.id || '');
-        const latestBySymbol = new Map();
+        const entrySymbols = new Set();
 
         (signals || []).forEach(signal => {
             const signalAccountId = signal.account?.documentId || signal.account?.id;
             if (signalAccountId && String(signalAccountId) !== accountId) return;
             const symbolId = signal.symbol?.documentId || signal.symbol?.id;
             if (!symbolId || signal.expired === true) return;
-            const current = latestBySymbol.get(String(symbolId));
-            if (!current || new Date(signal.date) > new Date(current.date)) {
-                latestBySymbol.set(String(symbolId), signal);
-            }
+            const hasEntryRule = (signal.rules || []).some(rule => (
+                entryRuleIds.has(String(rule?.documentId || rule?.id))
+                || entryRuleNames.has(String(rule?.Name || rule?.name || '').trim().toLowerCase())
+            ));
+            if (!hasEntryRule) return;
+            if (signal.symbol?.documentId) entrySymbols.add(String(signal.symbol.documentId));
+            if (signal.symbol?.id) entrySymbols.add(String(signal.symbol.id));
+            entrySymbols.add(String(symbolId));
+            if (signal.symbol?.Name) entrySymbols.add(String(signal.symbol.Name).trim().toUpperCase());
         });
 
-        return new Set([...latestBySymbol.entries()]
-            .filter(([, signal]) => (signal.rules || []).some(rule => entryRuleIds.has(String(rule?.documentId || rule?.id))))
-            .map(([symbolId]) => symbolId));
+        return entrySymbols;
     }, [selectedAccount, selectedStrategy, signals]);
     const holdingRows = useMemo(() => {
         const symbols = selectedWatchlist?.symbols || [];
-        const weights = buildMarketCapWeights(ratioGroups);
-        const eligibleWeights = weights.map((item, index) => {
-            const symbolId = String(getSymbolId(symbols[index]) || '');
-            return entrySymbolIds.has(symbolId) ? item.weight : 0;
-        });
-        const totalWeight = eligibleWeights.reduce((sum, weight) => sum + weight, 0);
+        const rules = Object.values(allocationRules).flatMap(config => config.rules || []);
 
         return symbols.map((symbol, index) => {
-            const ratio = symbol?.stockRatio || {};
+            const ratio = symbol?.stockRatio?.data || symbol?.stockRatio || {};
+            const analysis = technicalAnalyses[String(getSymbolId(symbol))] || {};
             const latestClose = Number(watchlistHistories[index]?.[0]?.close);
-            const weight = weights[index]?.weight || 1;
+            const symbolKey = String(getSymbolId(symbol) || '');
+            const symbolName = String(symbol?.Name || '').trim().toUpperCase();
+            const hasEntrySignal = entrySymbolIds.has(symbolKey) || entrySymbolIds.has(symbolName);
+            const ruleResults = {
+                priceAboveK26: latestClose > Number(analysis.k26),
+                k26AboveK78: Number(analysis.k26) > Number(analysis.k78),
+                priceAboveMA200: latestClose > Number(analysis.ma200),
+                priceAboveSupertrend: latestClose > Number(analysis.supertrend),
+                supertrendUptrend: Number(analysis.supertrendDirection) > 0,
+            };
+            const allocation = rules.reduce(
+                (sum, rule) => sum + (ruleResults[rule.key] ? Number(rule.percent) : 0),
+                0
+            );
+            const templateAllocations = Object.fromEntries(
+                Object.entries(allocationRules).map(([template, config]) => [
+                    template,
+                    Math.min(100, (config.rules || []).reduce(
+                        (sum, rule) => sum + (ruleResults[rule.key] ? Number(rule.percent) : 0),
+                        0,
+                    )),
+                ]),
+            );
+
             return {
                 id: getSymbolId(symbol) || symbol?.Name || index,
                 ticker: symbol?.Name || ratio.ticker || '-',
@@ -155,15 +221,18 @@ const Portfolio = () => {
                 capitalize: Number(ratio.capitalize),
                 outstandingShare: Number(ratio.outstandingShare),
                 tradeVolume: Number(ratio.tradeVolume),
-                hasEntrySignal: entrySymbolIds.has(String(getSymbolId(symbol) || '')),
-                suggestedWeight: totalWeight > 0 && entrySymbolIds.has(String(getSymbolId(symbol) || ''))
-                    ? weight / totalWeight * 100
-                    : 0,
-                fallbackWeight: weights[index]?.fallbackWeight,
+                hasEntrySignal,
+                suggestedWeight: Math.min(100, allocation),
+                ruleResults,
+                templateAllocations,
             };
         });
-    }, [entrySymbolIds, ratioGroups, selectedWatchlist, watchlistHistories]);
+    }, [entrySymbolIds, selectedWatchlist, technicalAnalyses, watchlistHistories]);
     const constituentCount = selectedWatchlist?.symbols?.length || 0;
+    const technicalRules = useMemo(
+        () => Object.entries(allocationRules),
+        [],
+    );
 
     return (
         <div className="space-y-4">
@@ -219,9 +288,11 @@ const Portfolio = () => {
 
             <section className="overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-lg">
                 <header className="border-b border-gray-700 bg-gray-900/50 px-4 py-3">
-                    <h2 className="text-lg font-bold text-white">Suggested Holdings</h2>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h2 className="text-lg font-bold text-white">Suggested Holdings</h2>
+                    </div>
                     <p className="mt-0.5 text-xs text-gray-400">
-                        Chỉ mã có tín hiệu Entry mới được phân bổ; tỷ trọng trong nhóm Entry dựa theo vốn hóa.
+                        Mỗi mã được tính độc lập theo template kỹ thuật; Entry chỉ là thông tin tham khảo. Rule nằm trong technicalAllocationRules.json.
                     </p>
                 </header>
                 <div className="overflow-x-auto">
@@ -231,11 +302,9 @@ const Portfolio = () => {
                                 <th className="px-4 py-3">Ticker</th>
                                 <th className="px-4 py-3">Company</th>
                                 <th className="px-4 py-3 text-right">Latest close</th>
-                                <th className="px-4 py-3 text-right">Capitalization</th>
-                                <th className="px-4 py-3 text-right">Outstanding shares</th>
-                                <th className="px-4 py-3 text-right">Trade volume</th>
-                                <th className="px-4 py-3 text-right">Suggested weight</th>
-                                <th className="px-4 py-3">Signal</th>
+                                {technicalRules.map(([template, config]) => (
+                                    <th key={template} className="px-4 py-3 text-center">{config.label || template}</th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700/70">
@@ -244,19 +313,22 @@ const Portfolio = () => {
                                     <td className="whitespace-nowrap px-4 py-3 font-bold text-white">{row.ticker}</td>
                                     <td className="min-w-[220px] px-4 py-3 text-gray-300">{row.company}</td>
                                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">{formatMetric(row.latestClose)}</td>
-                                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">{formatMetric(row.capitalize)}</td>
-                                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">{formatMetric(row.outstandingShare)}</td>
-                                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">{formatMetric(row.tradeVolume, 0)}</td>
-                                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-bold text-blue-300">{formatMetric(row.suggestedWeight)}%</td>
-                                    <td className="whitespace-nowrap px-4 py-3">
-                                        <span className={row.hasEntrySignal ? 'text-emerald-300' : 'text-gray-500'}>
-                                            {row.hasEntrySignal ? 'Entry' : 'No Entry'}
-                                        </span>
-                                    </td>
+                                    {technicalRules.map(([template, config]) => (
+                                        <td key={template} className="px-4 py-3">
+                                            <div className="mb-1 text-center font-mono font-bold text-blue-300">{formatMetric(row.templateAllocations[template])}%</div>
+                                            <div className="flex flex-wrap justify-center gap-1">
+                                                {(config.rules || []).map(rule => (
+                                                    <span key={rule.key} className={`rounded px-1.5 py-0.5 text-[11px] ${row.ruleResults[rule.key] ? 'bg-emerald-500/15 text-emerald-300' : 'bg-gray-700 text-gray-500'}`}>
+                                                        {rule.label}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </td>
+                                    ))}
                                 </tr>
                             )) : (
                                 <tr>
-                                    <td colSpan="8" className="px-4 py-8 text-center text-gray-500">Selected Watchlist chưa có cổ phiếu.</td>
+                                    <td colSpan={technicalRules.length + 3} className="px-4 py-8 text-center text-gray-500">Selected Watchlist chưa có cổ phiếu.</td>
                                 </tr>
                             )}
                         </tbody>
