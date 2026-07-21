@@ -91,27 +91,32 @@ const getRatioWeight = (ratio) => {
     return capitalize;
 };
 
+export const buildMarketCapWeights = (ratioGroups = []) => {
+    const rawWeights = ratioGroups.map(getRatioWeight);
+    const knownWeights = rawWeights.filter(weight => Number.isFinite(weight) && weight > 0);
+    const fallbackWeight = knownWeights.length > 0
+        ? knownWeights.reduce((sum, weight) => sum + weight, 0) / knownWeights.length
+        : 1;
+
+    return rawWeights.map((weight, index) => ({
+        index,
+        weight: weight || fallbackWeight,
+        hasValidRatio: Number.isFinite(weight) && weight > 0,
+        fallbackWeight: !(Number.isFinite(weight) && weight > 0),
+    }));
+};
+
 export const buildMarketCapWeightedIndex = (historyGroups, ratioGroups, referenceHistory = [], baseValue = 100) => {
+    const weights = buildMarketCapWeights(ratioGroups);
     const groups = (historyGroups || []).map((group, index) => {
         const history = [...(group || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
         return history.length > 0 && Number(history[0].close) > 0
-            ? { history, weight: getRatioWeight(ratioGroups?.[index]) }
+            ? { history, weight: weights[index]?.weight || 1 }
             : null;
     }).filter(Boolean);
 
     if (groups.length === 0) return [];
-
-    const knownWeights = groups
-        .map(group => group.weight)
-        .filter(weight => Number.isFinite(weight) && weight > 0);
-    const fallbackWeight = knownWeights.length > 0
-        ? knownWeights.reduce((sum, weight) => sum + weight, 0) / knownWeights.length
-        : 1;
-    const validGroups = groups.map(group => ({
-        ...group,
-        // Keep symbols without StockRatio in the index using a neutral fallback weight.
-        weight: group.weight || fallbackWeight,
-    }));
+    const validGroups = groups;
 
     const commonDates = validGroups
         .map(({ history }) => new Set(history.map(candle => toDay(candle.date))))
