@@ -101,6 +101,18 @@ const TradeStation = () => {
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
 
+    useEffect(() => {
+        if (!selectedSymbolId || !selectedSymbol?.Name) return;
+
+        dispatch(syncSymbolMetadata({
+            ticker: selectedSymbol.Name,
+            symbolId: selectedSymbolId,
+        }))
+            .unwrap()
+            .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
+            .catch(err => console.error(`Failed to sync metadata and stock ratio: ${err}`));
+    }, [dispatch, selectedSymbol?.Name, selectedSymbolId]);
+
     const refreshSelectedAccountTrades = useCallback(() => {
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
         if (!accountId) return Promise.resolve();
@@ -305,11 +317,6 @@ const TradeStation = () => {
             })
             .catch(err => console.error(`Failed to refresh history: ${err}`));
 
-        // Also sync metadata (Exchange & Sector)
-        dispatch(syncSymbolMetadata({ ticker, symbolId: selectedSymbolId }))
-            .unwrap()
-            .then(() => console.log(`Metadata synced for ${ticker}`))
-            .catch(err => console.error(`Failed to sync metadata: ${err}`));
     }, [activeStrategy, activeStrategyId, dispatch, selectedAccount, selectedSymbol, selectedSymbolId]);
 
     useEffect(() => {

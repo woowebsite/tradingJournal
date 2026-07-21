@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEqualWeightIndex, normalizeChartHistory } from './watchlistIndex';
+import { buildEqualWeightIndex, buildMarketCapWeightedIndex, normalizeChartHistory } from './watchlistIndex';
 
 describe('buildEqualWeightIndex', () => {
     it('normalizes constituents to 100 and averages their OHLC values', () => {
@@ -31,6 +31,23 @@ describe('buildEqualWeightIndex', () => {
     });
 });
 
+describe('buildEqualWeightIndex reference scale', () => {
+    it('uses the reference index close as the watchlist index base', () => {
+        const result = buildEqualWeightIndex([
+            [
+                { date: '2026-01-01', open: 10, high: 11, low: 9, close: 10 },
+                { date: '2026-01-02', open: 11, high: 13, low: 10, close: 12 },
+            ],
+        ], [
+            { date: '2026-01-01', close: 1000 },
+            { date: '2026-01-02', close: 1100 },
+        ]);
+
+        expect(result[0].close).toBeCloseTo(1000);
+        expect(result[1].close).toBeCloseTo(1200);
+    });
+});
+
 describe('normalizeChartHistory', () => {
     it('maps TCBS tradingDate bars to TradingViewChart candles', () => {
         const result = normalizeChartHistory([{
@@ -47,5 +64,44 @@ describe('normalizeChartHistory', () => {
             close: 1955.4,
             volume: 123456,
         })]);
+    });
+});
+
+describe('buildMarketCapWeightedIndex', () => {
+    it('weights valid constituents by capitalization and skips incomplete ratios', () => {
+        const result = buildMarketCapWeightedIndex([
+            [
+                { date: '2026-01-01', open: 100, high: 100, low: 100, close: 100 },
+                { date: '2026-01-02', open: 110, high: 110, low: 110, close: 110 },
+            ],
+            [
+                { date: '2026-01-01', open: 100, high: 100, low: 100, close: 100 },
+                { date: '2026-01-02', open: 120, high: 120, low: 120, close: 120 },
+            ],
+        ], [
+            { capitalize: 300, outstandingShare: 100, tradeVolume: 1000 },
+            { capitalize: 100, outstandingShare: 100, tradeVolume: 1000 },
+        ], [
+            { date: '2026-01-01', close: 1000 },
+            { date: '2026-01-02', close: 1100 },
+        ]);
+
+        expect(result[0].close).toBeCloseTo(1000);
+        expect(result[1].close).toBeCloseTo(1125);
+
+        const fallback = buildMarketCapWeightedIndex(result.length ? [[
+            { date: '2026-01-01', open: 100, high: 100, low: 100, close: 100 },
+        ]] : [], [{ capitalize: 0 }]);
+        expect(fallback).toHaveLength(1);
+        expect(fallback[0].close).toBeCloseTo(100);
+
+        const mixed = buildMarketCapWeightedIndex([
+            [{ date: '2026-01-01', open: 100, high: 100, low: 100, close: 100 }],
+            [{ date: '2026-01-01', open: 100, high: 100, low: 100, close: 100 }],
+        ], [
+            { capitalize: 300, outstandingShare: 100, tradeVolume: 1000 },
+            null,
+        ]);
+        expect(mixed[0].close).toBeCloseTo(100);
     });
 });

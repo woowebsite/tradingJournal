@@ -923,6 +923,65 @@ export interface ApiSignalSignal extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiStockRatioStockRatio extends Struct.CollectionTypeSchema {
+  collectionName: 'stock_ratios';
+  info: {
+    displayName: 'StockRatio';
+    pluralName: 'stock-ratios';
+    singularName: 'stock-ratio';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    ageOfInventory: Schema.Attribute.Decimal;
+    ageOfReceivable: Schema.Attribute.Decimal;
+    asset: Schema.Attribute.Decimal;
+    badDebtPercentage: Schema.Attribute.Decimal;
+    betaIndex: Schema.Attribute.Decimal;
+    bookValuePerShare: Schema.Attribute.Decimal;
+    capitalize: Schema.Attribute.Decimal;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    creditGrowth: Schema.Attribute.Decimal;
+    customerCredit: Schema.Attribute.Decimal;
+    dividend: Schema.Attribute.Decimal;
+    earningPerShare: Schema.Attribute.Decimal;
+    ebitOnInterest: Schema.Attribute.Decimal;
+    equity: Schema.Attribute.Decimal;
+    liability: Schema.Attribute.Decimal;
+    loanOnDeposit: Schema.Attribute.Decimal;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::stock-ratio.stock-ratio'
+    > &
+      Schema.Attribute.Private;
+    netProfit: Schema.Attribute.Decimal;
+    nonInterestOnToi: Schema.Attribute.Decimal;
+    operationProfit: Schema.Attribute.Decimal;
+    payableOnEbitda: Schema.Attribute.Decimal;
+    payableOnEquity: Schema.Attribute.Decimal;
+    priceToBook: Schema.Attribute.Decimal;
+    priceToEarning: Schema.Attribute.Decimal;
+    profitGrowthAvarage: Schema.Attribute.Decimal;
+    profitMargin: Schema.Attribute.Decimal;
+    provisionOnBadDebt: Schema.Attribute.Decimal;
+    publishedAt: Schema.Attribute.DateTime;
+    revenue: Schema.Attribute.Decimal;
+    roe: Schema.Attribute.Decimal;
+    shortOnLongTermPayable: Schema.Attribute.Decimal;
+    symbol: Schema.Attribute.Relation<'oneToOne', 'api::symbol.symbol'>;
+    ticker: Schema.Attribute.String;
+    tradeVolume: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    valueBeforeEbitda: Schema.Attribute.Decimal;
+  };
+}
+
 export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
   collectionName: 'strategies';
   info: {
@@ -1010,11 +1069,24 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
   };
   attributes: {
     chart_url: Schema.Attribute.String;
+    companyType: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    deltaInMonth: Schema.Attribute.Decimal;
+    deltaInWeek: Schema.Attribute.Decimal;
+    deltaInYear: Schema.Attribute.Decimal;
     Description: Schema.Attribute.String;
+    establishedYear: Schema.Attribute.String;
     exchange: Schema.Attribute.String;
+    foreignPercent: Schema.Attribute.Decimal;
+    industry: Schema.Attribute.String;
+    industryEn: Schema.Attribute.String;
+    industryID: Schema.Attribute.Integer;
+    industryIdLevel2: Schema.Attribute.String;
+    industryIdLevel4: Schema.Attribute.String;
+    industryIDv2: Schema.Attribute.String;
+    issueShare: Schema.Attribute.Decimal;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1023,13 +1095,23 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     market: Schema.Attribute.Relation<'manyToOne', 'api::market.market'>;
     Name: Schema.Attribute.String & Schema.Attribute.Unique;
+    noEmployees: Schema.Attribute.Integer;
+    noShareholders: Schema.Attribute.Integer;
+    outstandingShare: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
     sector: Schema.Attribute.String;
+    shortName: Schema.Attribute.String;
     signals: Schema.Attribute.Relation<'oneToMany', 'api::signal.signal'>;
+    stockRating: Schema.Attribute.Decimal;
+    stockRatio: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::stock-ratio.stock-ratio'
+    >;
     symbol_histories: Schema.Attribute.Relation<
       'oneToMany',
       'api::symbol-history.symbol-history'
     >;
+    ticker: Schema.Attribute.String;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1038,6 +1120,7 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::watch-list.watch-list'
     >;
+    website: Schema.Attribute.String;
   };
 }
 
@@ -1912,6 +1995,7 @@ declare module '@strapi/strapi' {
       'api::scored.scored': ApiScoredScored;
       'api::setting.setting': ApiSettingSetting;
       'api::signal.signal': ApiSignalSignal;
+      'api::stock-ratio.stock-ratio': ApiStockRatioStockRatio;
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
       'api::symbol.symbol': ApiSymbolSymbol;

@@ -210,51 +210,86 @@ export const getTechnicalIndicators = async (ticker) => {
 };
 
 
-export const updateMarketInfo = async (ticker, symbolId) => {
-    var symbol = ticker.replace(":HOSE", "");
-    symbol = symbol.replace(":HNX", "");
-    symbol = symbol.replace(":UPCOM", "");
-    // https://apiextaws.tcbs.com.vn/stock-insight/v2/search?key=PDB&type=ALL
-    const url = `/api-tcbs/stock-insight/v2/search?key=${symbol}&type=ALL`;
-    const headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-    };
+export const getTickerOverview = async (ticker) => {
+    const normalizedTicker = String(ticker || '')
+        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+        .trim()
+        .toUpperCase();
+    const url = `/api-tcbs/tcanalysis/v1/ticker/${encodeURIComponent(normalizedTicker)}/overview`;
     const token = import.meta.env.VITE_TCBS_TOKEN;
-    if (token) {
-        if (/[^\x00-\x7F]/.test(token)) {
-            console.error("TCBS Token contains invalid characters.");
-            return [];
-        }
+    const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+
+    if (token && !/[^\x00-\x7F]/.test(token)) {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
+    const response = await fetch(url, { method: 'GET', headers });
+    if (!response.ok) {
+        throw new Error(`TCBS ticker overview error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data?.data || data || {};
+};
+
+export const getStockRatio = async (ticker) => {
+    const normalizedTicker = String(ticker || '')
+        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+        .trim()
+        .toUpperCase();
+    const url = `/api-tcbs/tcanalysis/v1/ticker/${encodeURIComponent(normalizedTicker)}/stockratio`;
+    const token = import.meta.env.VITE_TCBS_TOKEN;
+    const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+
+    if (token && !/[^\x00-\x7F]/.test(token)) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, { method: 'GET', headers });
+    if (!response.ok) {
+        throw new Error(`TCBS stock ratio error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data?.data || data || {};
+};
+
+const upsertStockRatio = async (symbolId, ratio) => {
+    const existing = await api.get('/stock-ratios', {
+        params: {
+            'filters[symbol][documentId][$eq]': symbolId,
+            'pagination[pageSize]': 1,
+        },
+    });
+    const existingRatio = existing.data?.data?.[0];
+    const ratioId = existingRatio?.documentId || existingRatio?.id;
+    const payload = { data: { ...ratio, symbol: symbolId } };
+
+    if (ratioId) {
+        const response = await api.put(`/stock-ratios/${ratioId}`, payload);
+        return response.data.data;
+    }
+
+    const response = await api.post('/stock-ratios', payload);
+    return response.data.data;
+};
+
+export const updateMarketInfo = async (ticker, symbolId) => {
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers
-        });
-
-        if (!response.ok) {
-            throw new Error(`TCBS API Error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const info = data.data.find(item => item.name === symbol);
-
-        if (!info) {
-            console.warn(`No metadata found for ${ticker} in TCBS`);
-            return null;
-        }
-
+        const [overview, ratio] = await Promise.all([
+            getTickerOverview(ticker),
+            getStockRatio(ticker),
+        ]);
         const payload = {
             data: {
-                exchange: info.exchange === "0" ? "HOSE" : info.exchange === "1" ? "HNX" : "UPCOM",
-                sector: info.industry // Map industry to sector
+                ...overview,
+                Name: overview.ticker || String(ticker).replace(/:(HOSE|HNX|UPCOM)$/i, ''),
+                sector: overview.industry,
             }
         };
 
         const res = await api.put(`/symbols/${symbolId}`, payload);
+        await upsertStockRatio(symbolId, ratio);
         return res.data.data;
     } catch (error) {
         console.error("Failed to update market info:", error);

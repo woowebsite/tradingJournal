@@ -64,8 +64,17 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null }) => {
     useEffect(() => {
         if (!data || data.length === 0) return;
 
-        // Sort data by date ascending (oldest first) as required by lightweight-charts
-        const sortedData = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
+        // lightweight-charts requires strictly ascending, unique times.
+        // Strapi pagination or multiple intraday records can produce duplicate days.
+        const sortedData = [...data]
+            .sort((a, b) => new Date(a.date) - new Date(b.date))
+            .reduce((unique, item) => {
+                const time = String(item.date || '').split('T')[0];
+                const previous = unique[unique.length - 1];
+                const previousTime = previous ? String(previous.date || '').split('T')[0] : '';
+                if (time && time !== previousTime) unique.push(item);
+                return unique;
+            }, []);
 
         // Format data for lightweight-charts
         const candleData = sortedData.map(item => ({

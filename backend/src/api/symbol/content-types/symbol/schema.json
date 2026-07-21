@@ -51,6 +51,32 @@
     "exchange": {
       "type": "string"
     },
+    "shortName": { "type": "string" },
+    "industryID": { "type": "integer" },
+    "industryIDv2": { "type": "string" },
+    "industryIdLevel2": { "type": "string" },
+    "industryIdLevel4": { "type": "string" },
+    "industry": { "type": "string" },
+    "industryEn": { "type": "string" },
+    "establishedYear": { "type": "string" },
+    "noEmployees": { "type": "integer" },
+    "noShareholders": { "type": "integer" },
+    "foreignPercent": { "type": "decimal" },
+    "website": { "type": "string" },
+    "stockRating": { "type": "decimal" },
+    "deltaInWeek": { "type": "decimal" },
+    "deltaInMonth": { "type": "decimal" },
+    "deltaInYear": { "type": "decimal" },
+    "outstandingShare": { "type": "decimal" },
+    "issueShare": { "type": "decimal" },
+    "companyType": { "type": "string" },
+    "ticker": { "type": "string" },
+    "stockRatio": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::stock-ratio.stock-ratio",
+      "mappedBy": "symbol"
+    },
     "sector": {
       "type": "string"
     },

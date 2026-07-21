@@ -5,7 +5,7 @@ import WatchlistSelector from '../components/WatchlistSelector';
 import { fetchPagedSymbolHistories } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { getStockHistory } from '../services/tcbs';
-import { buildEqualWeightIndex, normalizeChartHistory } from '../utils/watchlistIndex';
+import { buildMarketCapWeightedIndex, normalizeChartHistory } from '../utils/watchlistIndex';
 
 const getSymbolId = symbol => symbol?.documentId || symbol?.id;
 const BENCHMARK_LABELS = { VN30: 'VN30', VNINDEX: 'VNIndex', 100: '100' };
@@ -84,7 +84,14 @@ const Portfolio = () => {
         loadBenchmarkChart();
     }, [loadBenchmarkChart, loadWatchlistChart]);
 
-    const watchlistIndex = useMemo(() => buildEqualWeightIndex(watchlistHistories), [watchlistHistories]);
+    const ratioGroups = useMemo(
+        () => (selectedWatchlist?.symbols || []).map(symbol => symbol?.stockRatio || null),
+        [selectedWatchlist]
+    );
+    const watchlistIndex = useMemo(
+        () => buildMarketCapWeightedIndex(watchlistHistories, ratioGroups, benchmarkHistory),
+        [benchmarkHistory, ratioGroups, watchlistHistories]
+    );
     const constituentCount = selectedWatchlist?.symbols?.length || 0;
 
     return (
@@ -112,7 +119,7 @@ const Portfolio = () => {
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <ChartBox
                     title={`${selectedWatchlist?.name || 'Watchlist'} Index`}
-                    subtitle={`Equal-weight, normalized to 100 · ${constituentCount} constituents`}
+                    subtitle={`Market-cap weighted · missing StockRatio uses average weight · ${constituentCount} constituents`}
                     data={watchlistIndex}
                     loading={watchlistLoading}
                     emptyMessage="The selected Watchlist needs symbols with overlapping price history."
