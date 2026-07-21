@@ -38,6 +38,14 @@
     "dayKey": {
       "type": "string",
       "required": true
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": [
+        "Unread",
+        "Read"
+      ],
+      "default": "Unread"
     }
   }
 }

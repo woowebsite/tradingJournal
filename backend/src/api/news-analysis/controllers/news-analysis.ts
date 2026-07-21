@@ -456,10 +456,12 @@ const normalizeAIProvider = (value = '') => {
   const normalized = value.toLowerCase().replace(/[\s_-]+/g, '');
   if (normalized === 'gemini' || normalized === 'googleai' || normalized === 'google') return 'gemini';
   if (normalized === 'openai') return 'openai';
+  if (normalized === 'gemma' || normalized === 'gemma4' || normalized === 'ollama') return 'gemma';
   return 'z.ai';
 };
 
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const DEFAULT_GEMMA_MODEL = 'gemma4:e2b';
 
 const normalizeGeminiModel = (value = '') => {
   const normalized = normalizeText(value);
@@ -473,15 +475,28 @@ const normalizeGeminiModel = (value = '') => {
   return aliases[normalized.toLowerCase()] || normalized;
 };
 
+const normalizeGemmaModel = (value = '') => {
+  const normalized = normalizeText(value);
+  if (!normalized) return DEFAULT_GEMMA_MODEL;
+
+  const aliases: Record<string, string> = {
+    gemma4: DEFAULT_GEMMA_MODEL,
+    'gemma4:latest': DEFAULT_GEMMA_MODEL,
+  };
+
+  return aliases[normalized.toLowerCase()] || normalized;
+};
+
 const resolveAIProviderConfig = (provider: string, requestedModel = '') => {
   if (provider === 'openai') {
     return {
       provider: 'openai',
-      baseUrl: normalizeZaiBaseUrl(String(process.env.OPEN_AI_API || '').trim()),
+      endpoint: normalizeZaiBaseUrl(String(process.env.OPEN_AI_API || '').trim()),
       apiKey: String(process.env.OPEN_AI_KEY || '').trim(),
       model: requestedModel || String(process.env.OPEN_AI_MODEL || 'gpt-4o-mini').trim(),
       missingApiMessage: 'Missing server env OPEN_AI_API.',
       missingKeyMessage: 'Missing server env OPEN_AI_KEY.',
+      requiresKey: true,
     };
   }
 
@@ -489,21 +504,39 @@ const resolveAIProviderConfig = (provider: string, requestedModel = '') => {
     const envModel = normalizeGeminiModel(String(process.env.GEMINI_MODEL || ''));
     return {
       provider: 'gemini',
-      baseUrl: normalizeZaiBaseUrl(String(process.env.GEMINI_API || 'https://generativelanguage.googleapis.com/v1beta').trim()),
+      endpoint: normalizeZaiBaseUrl(String(process.env.GEMINI_API || 'https://generativelanguage.googleapis.com/v1beta').trim()),
       apiKey: String(process.env.GEMINI_API_KEY || '').trim(),
       model: normalizeGeminiModel(requestedModel || envModel),
       missingApiMessage: 'Missing server env GEMINI_API.',
       missingKeyMessage: 'Missing server env GEMINI_API_KEY.',
+      requiresKey: true,
+    };
+  }
+
+  if (provider === 'gemma') {
+    const envModel = normalizeGemmaModel(String(process.env.GEMMA_MODEL || ''));
+    const endpoint = normalizeZaiBaseUrl(
+      String(process.env.GEMMA_API || 'http://localhost:11434/api/generate').trim(),
+    ) || 'http://localhost:11434/api/generate';
+    return {
+      provider: 'gemma',
+      endpoint,
+      apiKey: '',
+      model: normalizeGemmaModel(requestedModel || envModel),
+      missingApiMessage: 'Missing server env GEMMA_API.',
+      missingKeyMessage: '',
+      requiresKey: false,
     };
   }
 
   return {
     provider: 'z.ai',
-    baseUrl: normalizeZaiBaseUrl(String(process.env.ZAI_API || process.env.ZAI || process.env.ZAI_BASE_URL || '').trim()),
+    endpoint: normalizeZaiBaseUrl(String(process.env.ZAI_API || process.env.ZAI || process.env.ZAI_BASE_URL || '').trim()),
     apiKey: String(process.env.ZAI_API_KEY || '').trim(),
     model: requestedModel || String(process.env.ZAI_MODEL || 'glm-4.5').trim(),
     missingApiMessage: 'Missing server env ZAI_API.',
     missingKeyMessage: 'Missing server env ZAI_API_KEY.',
+    requiresKey: true,
   };
 };
 
@@ -596,6 +629,16 @@ const buildGeminiPayload = (prompt: string, newsItems: Array<Record<string, any>
     },
   ],
   generationConfig: {
+    temperature: 0.2,
+  },
+});
+
+const buildGemmaPayload = (model: string, prompt: string, newsItems: Array<Record<string, any>>) => ({
+  model,
+  prompt: buildNewsAnalysisPrompt(prompt, newsItems),
+  system: 'You are a financial news analyst. Return concise, actionable analysis for traders.',
+  stream: false,
+  options: {
     temperature: 0.2,
   },
 });
@@ -784,7 +827,10 @@ const processArticleUrl = async (
     }
 
     const saved = await (strapi as any).documents(NEWS_ANALYSIS_UID).create({
-      data: item,
+      data: {
+        ...item,
+        status: 'Unread',
+      },
       status: 'published',
     });
     created += 1;
@@ -1016,17 +1062,17 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     const prompt = normalizeText(String(body.prompt || 'Analyze these news items for market impact.'));
     const provider = normalizeAIProvider(String(body.provider || 'z.ai'));
     const providerConfig = resolveAIProviderConfig(provider, normalizeText(String(body.model || '')));
-    const { baseUrl, apiKey, model } = providerConfig;
+    const { endpoint, apiKey, model } = providerConfig;
 
     if (!newsIds.length) {
       ctx.throw(400, 'Please select at least one news item to analyze.');
     }
 
-    if (!apiKey) {
+    if (providerConfig.requiresKey && !apiKey) {
       ctx.throw(500, providerConfig.missingKeyMessage);
     }
 
-    if (!baseUrl) {
+    if (!endpoint) {
       ctx.throw(500, providerConfig.missingApiMessage);
     }
 
@@ -1059,39 +1105,64 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     const newsItemsWithContent = await enrichNewsItemsWithFetchedContent(orderedNewsItems.length ? orderedNewsItems : newsItems);
 
     const isGemini = providerConfig.provider === 'gemini';
+    const isGemma = providerConfig.provider === 'gemma';
     const response = await axios.post(
       isGemini
-        ? `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
-        : `${baseUrl}/chat/completions`,
+        ? `${endpoint}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+        : isGemma
+          ? endpoint
+          : `${endpoint}/chat/completions`,
       isGemini
         ? buildGeminiPayload(prompt, newsItemsWithContent)
-        : buildOpenAICompatiblePayload(model, prompt, newsItemsWithContent),
+        : isGemma
+          ? buildGemmaPayload(model, prompt, newsItemsWithContent)
+          : buildOpenAICompatiblePayload(model, prompt, newsItemsWithContent),
       {
         timeout: 60000,
         headers: isGemini
           ? {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-          }
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            }
+          : isGemma
+            ? {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+              }
           : {
-            Authorization: `Bearer ${apiKey}`,
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
+              Authorization: `Bearer ${apiKey}`,
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
         validateStatus: () => true,
       },
     );
 
     if (response.status < 200 || response.status >= 300) {
       strapi.log.error(`${providerConfig.provider} analysis failed: HTTP ${response.status}`);
-      ctx.throw(response.status, response.data?.error?.message || response.data?.message || `${providerConfig.provider} analysis failed.`);
+      ctx.throw(
+        response.status,
+        response.data?.error?.message ||
+          response.data?.error ||
+          response.data?.message ||
+          `${providerConfig.provider} analysis failed.`,
+      );
     }
+
+    await Promise.all(
+      newsItems.map((item) =>
+        strapi.db.query(NEWS_ANALYSIS_UID).update({
+          where: { id: item.id },
+          data: { status: 'Read' },
+        }),
+      ),
+    );
 
     ctx.body = {
       data: {
         provider: providerConfig.provider,
         model,
-        baseUrl,
+        baseUrl: endpoint,
         selectedCount: newsItemsWithContent.length,
         analysis: response.data,
       },

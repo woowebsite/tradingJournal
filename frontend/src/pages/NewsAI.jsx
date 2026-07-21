@@ -6,6 +6,7 @@ import {
     RefreshCw,
     Save,
     Sparkles,
+    X,
 } from 'lucide-react';
 import { analyzeNewsWithAI, getNewsAIHistory, saveNewsAIResult } from '../services/newsAI';
 
@@ -33,6 +34,16 @@ Kết luận cuối cùng nên có:
 - 1 đến 3 ý quan sát hoặc thiết lập giao dịch đáng theo dõi.`;
 
 const getItemId = (item) => item?.documentId || item?.id || '';
+const getItemStatus = (item) => item?.status || 'Unread';
+
+const getStatusBadgeClass = (status) => {
+    if (status === 'Read') {
+        return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+    }
+
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+};
+
 const getLatestDayKey = (items) => {
     const dayKeys = Array.from(new Set(items.map((item) => item?.dayKey).filter(Boolean)));
     return dayKeys.sort((a, b) => b.localeCompare(a))[0] || new Date().toISOString().slice(0, 10);
@@ -56,6 +67,7 @@ const AI_PROVIDERS = [
     { label: 'Z.AI', value: 'z.ai', defaultModel: 'glm-4.5' },
     { label: 'OpenAI', value: 'openai', defaultModel: 'gpt-4o-mini' },
     { label: 'Gemini', value: 'gemini', defaultModel: 'gemini-3.1-flash-lite' },
+    { label: 'Gemma4', value: 'gemma', defaultModel: 'gemma4:e2b' },
 ];
 
 const stringifyObjectAsText = (value) => {
@@ -80,6 +92,8 @@ const extractAnalysisText = (result) => {
         ?.filter(Boolean)
         ?.join('\n\n');
     if (openAIText) return openAIText;
+
+    if (analysis.response) return analysis.response;
 
     if (analysis.output_text) return analysis.output_text;
     if (analysis.text) return analysis.text;
@@ -220,6 +234,8 @@ const NewsAI = () => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [saveSuccess, setSaveSuccess] = useState(false);
+    const [saveMessage, setSaveMessage] = useState('');
     const [analysisResult, setAnalysisResult] = useState(null);
     const [dayFilter, setDayFilter] = useState('');
     const [sourceFilter, setSourceFilter] = useState('');
@@ -237,12 +253,22 @@ const NewsAI = () => {
         Array.from(new Set(items.map((item) => item.sourceName || item.sourceUrl).filter(Boolean))).sort()
     ), [items]);
 
-    const filteredItems = useMemo(() => (
-        items.filter((item) => {
-            const source = item.sourceName || item.sourceUrl || '';
-            return (!dayFilter || item.dayKey === dayFilter) && (!sourceFilter || source === sourceFilter);
-        })
-    ), [dayFilter, items, sourceFilter]);
+    const filteredItems = useMemo(() => {
+        const statusRank = (item) => (getItemStatus(item) === 'Read' ? 1 : 0);
+        const timeRank = (item) => new Date(item?.fetchedAt || item?.createdAt || 0).getTime();
+
+        return items
+            .filter((item) => {
+                const source = item.sourceName || item.sourceUrl || '';
+                return (!dayFilter || item.dayKey === dayFilter) && (!sourceFilter || source === sourceFilter);
+            })
+            .sort((left, right) => {
+                const statusDiff = statusRank(left) - statusRank(right);
+                if (statusDiff !== 0) return statusDiff;
+
+                return timeRank(right) - timeRank(left);
+            });
+    }, [dayFilter, items, sourceFilter]);
 
     const checkAllVisibleItems = () => {
         const visibleIds = filteredItems.map((item) => getItemId(item)).filter(Boolean);
@@ -258,13 +284,26 @@ const NewsAI = () => {
         if (!analysisResult) return null;
 
         const text = extractAnalysisText(analysisResult);
+        const ollamaUsage = analysisResult.analysis?.prompt_eval_count != null || analysisResult.analysis?.eval_count != null
+            ? {
+                model: analysisResult.analysis?.model,
+                done: analysisResult.analysis?.done,
+                done_reason: analysisResult.analysis?.done_reason,
+                prompt_eval_count: analysisResult.analysis?.prompt_eval_count,
+                prompt_eval_duration: analysisResult.analysis?.prompt_eval_duration,
+                eval_count: analysisResult.analysis?.eval_count,
+                eval_duration: analysisResult.analysis?.eval_duration,
+                total_duration: analysisResult.analysis?.total_duration,
+                load_duration: analysisResult.analysis?.load_duration,
+            }
+            : null;
         return {
             text,
             provider: analysisResult.provider || '-',
             model: analysisResult.model || analysisResult.analysis?.modelVersion || '-',
             selectedCount: analysisResult.selectedCount ?? '-',
-            usage: analysisResult.analysis?.usageMetadata || analysisResult.analysis?.usage || null,
-            finishReason: analysisResult.analysis?.candidates?.[0]?.finishReason || analysisResult.analysis?.choices?.[0]?.finish_reason || '',
+            usage: analysisResult.analysis?.usageMetadata || analysisResult.analysis?.usage || ollamaUsage,
+            finishReason: analysisResult.analysis?.candidates?.[0]?.finishReason || analysisResult.analysis?.choices?.[0]?.finish_reason || analysisResult.analysis?.done_reason || '',
         };
     }, [analysisResult]);
 
@@ -280,6 +319,17 @@ const NewsAI = () => {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (!saveSuccess) return undefined;
+
+        const timer = setTimeout(() => {
+            setSaveSuccess(false);
+            setSaveMessage('');
+        }, 3000);
+
+        return () => clearTimeout(timer);
+    }, [saveSuccess]);
 
     useEffect(() => {
         loadItems();
@@ -357,7 +407,8 @@ const NewsAI = () => {
                 selectedDays: Array.from(new Set(selectedItems.map((item) => item?.dayKey).filter(Boolean))),
             });
 
-            setNotice('Saved to NewsAI.');
+            setSaveMessage('Saved to NewsAI.');
+            setSaveSuccess(true);
         } catch (err) {
             setError(
                 err?.response?.data?.error?.message ||
@@ -380,7 +431,7 @@ const NewsAI = () => {
                     </div>
                     <h2 className="mt-4 text-3xl font-bold text-white">AI news analysis workspace</h2>
                     <p className="mt-2 max-w-3xl text-sm text-gray-400">
-                        Select saved news from the news analysis database, send it to z.ai, then review the AI output before using it in your trading plan.
+                        Select saved news from the news analysis database, send it to your chosen AI provider, then review the AI output before using it in your trading plan.
                     </p>
                 </div>
             </div>
@@ -393,7 +444,7 @@ const NewsAI = () => {
                     </div>
 
                     <label className="block">
-                        <span className="mb-2 block text-sm font-medium text-gray-300">AI Model</span>
+                        <span className="mb-2 block text-sm font-medium text-gray-300">AI Provider</span>
                         <select
                             value={provider}
                             onChange={(event) => {
@@ -416,7 +467,7 @@ const NewsAI = () => {
                             value={model}
                             onChange={(event) => setModel(event.target.value)}
                             className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                            placeholder="glm-4.5"
+                            placeholder={AI_PROVIDERS.find((item) => item.value === provider)?.defaultModel || ''}
                         />
                     </label>
 
@@ -449,7 +500,7 @@ const NewsAI = () => {
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <h3 className="text-lg font-semibold text-white">News Analysis Database</h3>
-                                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-gray-500">Select rows to send to z.ai</p>
+                                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-gray-500">Select rows to send to the chosen AI provider</p>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
@@ -530,6 +581,7 @@ const NewsAI = () => {
                                     <tr>
                                         <th className="w-12 px-5 py-3"></th>
                                         <th className="px-5 py-3">Day Key</th>
+                                        <th className="px-5 py-3">Status</th>
                                         <th className="px-5 py-3">Source</th>
                                         <th className="px-5 py-3">Title</th>
                                     </tr>
@@ -551,6 +603,11 @@ const NewsAI = () => {
                                                 </td>
                                                 <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-gray-400">
                                                     {item.dayKey || '-'}
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${getStatusBadgeClass(getItemStatus(item))}`}>
+                                                        {getItemStatus(item)}
+                                                    </span>
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <div className="font-medium text-white">{item.sourceName || '-'}</div>
@@ -587,7 +644,7 @@ const NewsAI = () => {
                     <div>
                         <h3 className="text-lg font-semibold text-white">News Analysis</h3>
                         <p className="mt-1 text-xs uppercase tracking-[0.2em] text-gray-500">
-                            Latest z.ai response
+                            Latest AI response
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -627,7 +684,18 @@ const NewsAI = () => {
                             ) : (
                                 selectedItems.slice(0, 6).map((item) => (
                                     <div key={getItemId(item)} className="rounded-lg border border-gray-700 bg-gray-900/60 p-3">
-                                        <div className="line-clamp-2 text-sm text-gray-200">{item.title}</div>
+                                        {item.title ? (
+                                            <a
+                                                href={item.articleUrl || item.sourceUrl || '#'}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="line-clamp-2 text-sm text-gray-200 transition hover:text-emerald-300 hover:underline"
+                                            >
+                                                {item.title}
+                                            </a>
+                                        ) : (
+                                            <div className="text-sm text-gray-200">-</div>
+                                        )}
                                         <div className="mt-2 text-xs text-gray-500">{item.sourceName || item.sourceUrl}</div>
                                     </div>
                                 ))
@@ -692,12 +760,37 @@ const NewsAI = () => {
                             </div>
                         ) : (
                             <div className="rounded-lg border border-dashed border-gray-700 bg-gray-900/40 p-10 text-center text-sm text-gray-500">
-                                Analysis results will appear here after the backend z.ai endpoint returns.
+                                Analysis results will appear here after the backend AI endpoint returns.
                             </div>
                         )}
                     </div>
                 </div>
             </div>
+
+            {saveSuccess && (
+                <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-right-10 fade-in duration-300">
+                    <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/50 bg-gray-900 px-5 py-4 shadow-2xl shadow-emerald-500/10 backdrop-blur-xl">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20">
+                            <CheckCircle2 size={20} className="text-emerald-500" />
+                        </div>
+                        <div className="min-w-[200px]">
+                            <p className="text-sm font-bold text-gray-100">Save Complete!</p>
+                            <div className="mt-1 text-xs text-gray-400">
+                                <p className="text-emerald-400">{saveMessage || 'News AI result has been saved.'}</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setSaveSuccess(false);
+                                setSaveMessage('');
+                            }}
+                            className="rounded-lg p-1 text-gray-500 transition-colors hover:bg-gray-800"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

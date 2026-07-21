@@ -627,6 +627,8 @@ export interface ApiNewsAnalysisNewsAnalysis
     publishedAt: Schema.Attribute.DateTime;
     sourceName: Schema.Attribute.String;
     sourceUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    status: Schema.Attribute.Enumeration<['Unread', 'Read']> &
+      Schema.Attribute.DefaultTo<'Unread'>;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
