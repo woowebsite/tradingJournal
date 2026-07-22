@@ -12,7 +12,13 @@ const Sidebar = () => {
         {
             label: 'Menu',
             items: [
-                { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+                {
+                    icon: LayoutDashboard, label: 'Dashboard', path: '/',
+                    subItems: [
+                        { label: 'VietNam', path: '/vietnam' },
+                        { label: 'Global', path: '/global' },
+                    ]
+                },
                 {
                     icon: Newspaper, label: 'News', path: '/news',
                     subItems: [
@@ -94,7 +100,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/journal', '/webhooks', '/trade-station', '/manage-market', '/signals', '/manage-strategies', '/news']);
+    const [expandedItems, setExpandedItems] = useState(['/', '/journal', '/webhooks', '/trade-station', '/manage-market', '/signals', '/manage-strategies', '/news']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>

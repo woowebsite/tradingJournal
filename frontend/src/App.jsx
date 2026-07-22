@@ -32,6 +32,8 @@ import Plan from './pages/Plan';
 import Roadmap from './pages/Roadmap';
 import TCBSStrategySignals from './pages/TCBSStrategySignals';
 import TCBSRecommendations from './pages/TCBSRecommendations';
+import Vietnam from './pages/Vietnam';
+import Global from './pages/Global';
 import { AccountProvider } from './context/AccountContext';
 
 function App() {
@@ -41,6 +43,8 @@ function App() {
         <Routes>
           <Route path="/" element={<MainLayout />}>
             <Route index element={<Dashboard />} />
+            <Route path="vietnam" element={<Vietnam />} />
+            <Route path="global" element={<Global />} />
             <Route path="news-ai" element={<NewsAI />} />
             <Route path="news-analysis" element={<NewsAnalysis />} />
             <Route path="news-summary" element={<NewsSummary />} />

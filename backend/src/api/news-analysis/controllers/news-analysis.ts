@@ -643,6 +643,39 @@ const buildGemmaPayload = (model: string, prompt: string, newsItems: Array<Recor
   },
 });
 
+const buildGlobalMacroPayload = () => ({
+  contents: [{
+    role: 'user',
+    parts: [{
+      text: [
+        'You are a macroeconomic data updater. Use Google Search grounding to find the latest available values as of today for fed, usCpi, us10y, us2y, dxy, brent, wti, steel, pmi, and flows.',
+        'Definitions: fed=effective Fed Funds Rate; usCpi=US headline CPI year-over-year; us10y/us2y=US Treasury nominal yields; dxy=US Dollar Index; brent/wti=crude oil prices; steel=global steel or HRC benchmark; pmi=J.P. Morgan Global Composite PMI; flows=FTSE Emerging and MSCI Emerging Markets index levels.',
+        'Return ONLY valid JSON in this shape: {"updatedAt":"ISO-8601","indicators":{"fed":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"usCpi":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"us10y":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"us2y":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"dxy":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"brent":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"wti":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"steel":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"pmi":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""},"flows":{"value":"","unit":"","asOf":"","sourceUrl":"","sourceName":""}}}',
+        'Rules: prefer official or primary sources; use publication or trading date in asOf; never invent a value; if unavailable use value N/A and explain why in unit; keep values concise for dashboard cards.',
+      ].join('\n\n'),
+    }],
+  }],
+  tools: [{ google_search: {} }],
+  generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
+});
+
+const parseJsonText = (value: string) => {
+  const cleaned = String(value || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  return JSON.parse(cleaned);
+};
+
+const buildGlobalMacroOpenAIPayload = () => ({
+  messages: [
+    { role: 'system', content: 'You are a macroeconomic data updater. Use web search or your latest available knowledge, prefer primary sources, and never invent a value.' },
+    {
+      role: 'user',
+      content: 'Return ONLY valid JSON with updatedAt and indicators for fed, usCpi, us10y, us2y, dxy, brent, wti, steel, pmi, and flows. Each indicator must contain value, unit, asOf, sourceUrl, and sourceName. Definitions: fed=effective Fed Funds Rate; usCpi=US headline CPI year-over-year; us10y/us2y=US Treasury nominal yields; dxy=US Dollar Index; brent/wti=crude oil prices; steel=global steel or HRC benchmark; pmi=J.P. Morgan Global Composite PMI; flows=FTSE Emerging and MSCI Emerging Markets index levels. Use publication or trading date in asOf. If unavailable use value N/A and explain why in unit. Keep values concise for dashboard cards.',
+    },
+  ],
+  temperature: 0.1,
+  response_format: { type: 'json_object' },
+});
+
 const parseRssFeed = (html: string, sourceUrl: string, fetchedAt: Date) => {
   const items: Array<Record<string, any>> = [];
   const dayKey = fetchedAt.toISOString().slice(0, 10);
@@ -1165,6 +1198,58 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         baseUrl: endpoint,
         selectedCount: newsItemsWithContent.length,
         analysis: response.data,
+      },
+    };
+  },
+  async globalMacro(ctx) {
+    const requestedProvider = normalizeText(String(ctx.request.body?.provider || 'gemini')).toLowerCase();
+    const provider = requestedProvider === 'openai' ? 'openai' : 'gemini';
+    const providerConfig = resolveAIProviderConfig(provider, normalizeText(String(ctx.request.body?.model || '')));
+    const { endpoint, apiKey, model } = providerConfig;
+
+    if (!apiKey) ctx.throw(500, providerConfig.missingKeyMessage);
+    if (!endpoint) ctx.throw(500, providerConfig.missingApiMessage);
+
+    const isGemini = provider === 'gemini';
+    const response = await axios.post(
+      isGemini
+        ? `${endpoint}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+        : `${endpoint}/chat/completions`,
+      isGemini ? buildGlobalMacroPayload() : buildGlobalMacroOpenAIPayload(),
+      {
+        timeout: 90000,
+        headers: isGemini
+          ? { Accept: 'application/json', 'Content-Type': 'application/json' }
+          : { Authorization: `Bearer ${apiKey}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+        validateStatus: () => true,
+      },
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      strapi.log.error(`gemini global macro failed: HTTP ${response.status}`);
+      ctx.throw(
+        response.status,
+        response.data?.error?.message || response.data?.message || 'Gemini global macro update failed.',
+      );
+    }
+
+    const responseText = isGemini
+      ? response.data?.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || '').join('') || ''
+      : response.data?.choices?.[0]?.message?.content || '';
+    let snapshot: any;
+    try {
+      snapshot = parseJsonText(responseText);
+    } catch (error: any) {
+      strapi.log.error(`Gemini global macro returned invalid JSON: ${error?.message || error}`);
+      ctx.throw(502, 'Gemini returned an invalid macro snapshot.');
+    }
+
+    ctx.body = {
+      data: {
+        provider,
+        model,
+        updatedAt: snapshot.updatedAt || new Date().toISOString(),
+        indicators: snapshot.indicators || {},
       },
     };
   },

@@ -310,12 +310,21 @@ const Portfolio = () => {
                         <tbody className="divide-y divide-gray-700/70">
                             {holdingRows.length > 0 ? holdingRows.map(row => (
                                 <tr key={row.id} className="transition hover:bg-gray-700/30">
-                                    <td className="whitespace-nowrap px-4 py-3 font-bold text-white">{row.ticker}</td>
+                                    <td className="whitespace-nowrap px-4 py-3 font-bold text-white">
+                                        <a
+                                            href={`/trade-station?symbol=${encodeURIComponent(row.ticker)}`}
+                                            className="transition hover:text-blue-300 hover:underline"
+                                        >
+                                            {row.ticker}
+                                        </a>
+                                    </td>
                                     <td className="min-w-[220px] px-4 py-3 text-gray-300">{row.company}</td>
                                     <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">{formatMetric(row.latestClose)}</td>
                                     {technicalRules.map(([template, config]) => (
                                         <td key={template} className="px-4 py-3">
-                                            <div className="mb-1 text-center font-mono font-bold text-blue-300">{formatMetric(row.templateAllocations[template])}%</div>
+                                            <div className={`mb-1 text-center font-mono font-bold ${row.templateAllocations[template] >= 100 ? 'text-emerald-300' : row.templateAllocations[template] > 0 ? 'text-amber-300' : 'text-gray-500'}`}>
+                                                {formatMetric(row.templateAllocations[template])}%
+                                            </div>
                                             <div className="flex flex-wrap justify-center gap-1">
                                                 {(config.rules || []).map(rule => (
                                                     <span key={rule.key} className={`rounded px-1.5 py-0.5 text-[11px] ${row.ruleResults[rule.key] ? 'bg-emerald-500/15 text-emerald-300' : 'bg-gray-700 text-gray-500'}`}>

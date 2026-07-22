@@ -26,6 +26,14 @@ export default {
     },
     {
       method: 'POST',
+      path: '/news-analyses/ai/global-macro',
+      handler: 'news-analysis.globalMacro',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'POST',
       path: '/news-analyses/ai/save',
       handler: 'news-analysis.saveAnalysis',
       config: {

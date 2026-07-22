@@ -775,7 +775,14 @@ const MarketFlow = () => {
                                                     </span>
                                                 </td>
                                                 <td className={`p-4 font-bold transition-colors ${item.ticker === selectedTicker ? 'text-blue-300' : 'text-gray-100 group-hover:text-blue-400'}`}>
-                                                    {item.ticker}
+                                                    <Link
+                                                        to={`/trade-station?symbol=${encodeURIComponent(item.ticker)}`}
+                                                        onClick={(event) => event.stopPropagation()}
+                                                        className="hover:underline focus:outline-none focus:ring-2 focus:ring-blue-400 rounded"
+                                                        title={`Open ${item.ticker} in Trade Station`}
+                                                    >
+                                                        {item.ticker}
+                                                    </Link>
                                                 </td>
                                                 <td className="p-4 text-right">
                                                     <span className={`font-mono font-bold ${item.score >= 0 ? 'text-green-400' : 'text-red-400'}`}>
