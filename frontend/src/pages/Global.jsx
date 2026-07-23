@@ -123,6 +123,7 @@ const Global = () => {
                 }
                 : indicator
         )));
+        return latestBrent;
     };
 
     const loadLatestWtiHistory = async () => {
@@ -153,16 +154,30 @@ const Global = () => {
                 }
                 : indicator
         )));
+        return latestWti;
     };
 
     const loadGlobalMacro = async (selectedProvider = provider) => {
         setLoading(true);
         setError('');
         try {
-            const snapshot = await getGlobalMacroSnapshot(selectedProvider);
+            const [snapshot, latestBrent, latestWti] = await Promise.all([
+                getGlobalMacroSnapshot(selectedProvider),
+                loadLatestBrentHistory(),
+                loadLatestWtiHistory(),
+            ]);
             setIndicators((currentIndicators) => globalIndicators.map((indicator) => {
                 if (indicator.key === 'brent' || indicator.key === 'wti') {
-                    return currentIndicators.find((item) => item.key === indicator.key) || indicator;
+                    const latestOil = indicator.key === 'brent' ? latestBrent : latestWti;
+                    const currentOil = currentIndicators.find((item) => item.key === indicator.key) || indicator;
+                    if (!latestOil) return currentOil;
+                    return {
+                        ...currentOil,
+                        value: latestOil.value || currentOil.value,
+                        unit: latestOil.asOf ? `${latestOil.unit || currentOil.unit} Â· ${latestOil.asOf}` : (latestOil.unit || currentOil.unit),
+                        sourceUrl: latestOil.sourceUrl,
+                        sourceName: latestOil.sourceName,
+                    };
                 }
 
                 const latest = snapshot?.indicators?.[indicator.key];
