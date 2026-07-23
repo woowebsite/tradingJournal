@@ -33,6 +33,22 @@ export default {
       },
     },
     {
+      method: 'GET',
+      path: '/news-analyses/brent-price',
+      handler: 'news-analysis.brentPrice',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
+      path: '/news-analyses/wti-price',
+      handler: 'news-analysis.wtiPrice',
+      config: {
+        auth: false,
+      },
+    },
+    {
       method: 'POST',
       path: '/news-analyses/ai/save',
       handler: 'news-analysis.saveAnalysis',

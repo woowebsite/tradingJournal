@@ -664,7 +664,8 @@ const parseJsonText = (value: string) => {
   return JSON.parse(cleaned);
 };
 
-const buildGlobalMacroOpenAIPayload = () => ({
+const buildGlobalMacroOpenAIPayload = (model: string) => ({
+  model,
   messages: [
     { role: 'system', content: 'You are a macroeconomic data updater. Use web search or your latest available knowledge, prefer primary sources, and never invent a value.' },
     {
@@ -675,6 +676,9 @@ const buildGlobalMacroOpenAIPayload = () => ({
   temperature: 0.1,
   response_format: { type: 'json_object' },
 });
+
+const BRENT_HISTORICAL_URL = 'https://www.investing.com/commodities/brent-oil-historical-data';
+const CRUDE_OIL_HISTORICAL_URL = 'https://www.investing.com/commodities/crude-oil-historical-data';
 
 const parseRssFeed = (html: string, sourceUrl: string, fetchedAt: Date) => {
   const items: Array<Record<string, any>> = [];
@@ -1005,16 +1009,16 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
           const articleUrl = normalizeUrl(item);
           return articleUrl
             ? {
-                title: '',
-                sourceName: '',
-                sourceUrl: articleUrl,
-                articleUrl,
-                excerpt: '',
-                dayKey: '',
-                fetchedAt: '',
-                documentId: '',
-                id: '',
-              }
+              title: '',
+              sourceName: '',
+              sourceUrl: articleUrl,
+              articleUrl,
+              excerpt: '',
+              dayKey: '',
+              fetchedAt: '',
+              documentId: '',
+              id: '',
+            }
             : null;
         }
 
@@ -1154,15 +1158,15 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         timeout: 60000,
         headers: isGemini
           ? {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          }
+          : isGemma
+            ? {
               Accept: 'application/json',
               'Content-Type': 'application/json',
             }
-          : isGemma
-            ? {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-              }
-          : {
+            : {
               Authorization: `Bearer ${apiKey}`,
               Accept: 'application/json',
               'Content-Type': 'application/json',
@@ -1176,9 +1180,9 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
       ctx.throw(
         response.status,
         response.data?.error?.message ||
-          response.data?.error ||
-          response.data?.message ||
-          `${providerConfig.provider} analysis failed.`,
+        response.data?.error ||
+        response.data?.message ||
+        `${providerConfig.provider} analysis failed.`,
       );
     }
 
@@ -1201,6 +1205,54 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
       },
     };
   },
+  async brentPrice(ctx) {
+    const latestHistory = await strapi.db.query('api::symbol-history.symbol-history').findOne({
+      where: {
+        publishedAt: { $notNull: true },
+        symbol: { Name: { $eqi: 'brent-oil' } },
+      },
+      orderBy: { date: 'desc' },
+      populate: { symbol: true },
+    });
+
+    if (!latestHistory?.close) {
+      ctx.throw(404, 'No published history was found for symbol brent-oil.');
+    }
+
+    ctx.body = {
+      data: {
+        value: Number(latestHistory.close).toFixed(2).replace('.', ','),
+        unit: 'USD/thùng · giá đóng cửa gần nhất',
+        asOf: latestHistory.date,
+        sourceUrl: BRENT_HISTORICAL_URL,
+        sourceName: 'Symbol history',
+      },
+    };
+  },
+  async wtiPrice(ctx) {
+    const latestHistory = await strapi.db.query('api::symbol-history.symbol-history').findOne({
+      where: {
+        publishedAt: { $notNull: true },
+        symbol: { Name: { $eqi: 'crude-oil' } },
+      },
+      orderBy: { date: 'desc' },
+      populate: { symbol: true },
+    });
+
+    if (!latestHistory?.close) {
+      ctx.throw(404, 'No published history was found for symbol crude-oil.');
+    }
+
+    ctx.body = {
+      data: {
+        value: Number(latestHistory.close).toFixed(2).replace('.', ','),
+        unit: 'USD/thùng · giá đóng cửa gần nhất',
+        asOf: latestHistory.date,
+        sourceUrl: CRUDE_OIL_HISTORICAL_URL,
+        sourceName: 'Symbol history',
+      },
+    };
+  },
   async globalMacro(ctx) {
     const requestedProvider = normalizeText(String(ctx.request.body?.provider || 'gemini')).toLowerCase();
     const provider = requestedProvider === 'openai' ? 'openai' : 'gemini';
@@ -1215,7 +1267,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
       isGemini
         ? `${endpoint}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
         : `${endpoint}/chat/completions`,
-      isGemini ? buildGlobalMacroPayload() : buildGlobalMacroOpenAIPayload(),
+      isGemini ? buildGlobalMacroPayload() : buildGlobalMacroOpenAIPayload(model),
       {
         timeout: 90000,
         headers: isGemini
@@ -1243,7 +1295,6 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
       strapi.log.error(`Gemini global macro returned invalid JSON: ${error?.message || error}`);
       ctx.throw(502, 'Gemini returned an invalid macro snapshot.');
     }
-
     ctx.body = {
       data: {
         provider,

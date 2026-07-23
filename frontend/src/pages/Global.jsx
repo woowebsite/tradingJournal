@@ -13,7 +13,7 @@ import {
     Ship,
     TrendingUp,
 } from 'lucide-react';
-import { getGlobalMacroSnapshot } from '../services/globalMacro';
+import { getGlobalMacroSnapshot, getLatestBrentHistory, getLatestWtiHistory } from '../services/globalMacro';
 
 const periods = ['Jul 25', 'Aug 25', 'Sep 25', 'Oct 25', 'Nov 25', 'Dec 25', 'Jan 26', 'Feb 26', 'Mar 26', 'Apr 26', 'May 26', 'Jun 26'];
 
@@ -23,8 +23,8 @@ const sourceLinks = [
     { key: 'us10y', label: 'U.S. Treasury US10Y ↗', url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' },
     { key: 'us2y', label: 'U.S. Treasury US2Y ↗', url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' },
     { key: 'dxy', label: 'Investing.com DXY ↗', url: 'https://www.investing.com/indices/usdollar-historical-data' },
-    { key: 'brent', label: 'Investing.com Brent ↗', url: 'https://www.investing.com/commodities/brent-oil' },
-    { key: 'wti', label: 'Investing.com WTI ↗', url: 'https://www.investing.com/commodities/crude-oil' },
+    { key: 'brent', label: 'Investing.com Brent ↗', url: 'https://www.investing.com/commodities/brent-oil-historical-data' },
+    { key: 'wti', label: 'Investing.com WTI ↗', url: 'https://www.investing.com/commodities/crude-oil-historical-data' },
     { key: 'steel', label: 'Fastmarkets HRC ↗', url: 'https://www.tacto.ai/en/commodities/steel-price' },
     { key: 'pmi', label: 'S&P Global PMI ↗', url: 'https://www.pmi.spglobal.com/' },
     { key: 'flows', label: 'FTSE Emerging ↗', url: 'https://www.investing.com/indices/ftse-emerging-historical-data' },
@@ -38,8 +38,8 @@ const globalIndicators = [
     { key: 'us10y', label: 'Lợi suất US10Y', value: '4,60%', unit: 'Treasury nominal · 20/07/2026', tone: 'text-violet-400', color: '#a78bfa', icon: TrendingUp, values: [100, 101, 102, 101, 103, 104, 103, 104, 105, 106, 105, 107] },
     { key: 'us2y', label: 'Lợi suất US2Y', value: '4,21%', unit: 'Treasury nominal · 20/07/2026', tone: 'text-fuchsia-400', color: '#e879f9', icon: TrendingUp, values: [100, 99, 100, 99, 101, 101, 100, 101, 102, 102, 101, 102] },
     { key: 'dxy', label: 'DXY', value: '101,14', unit: 'đóng cửa · 22/07/2026', tone: 'text-rose-400', color: '#fb7185', icon: CircleDollarSign, values: [100, 99, 98, 99, 100, 99, 98, 97, 98, 99, 100, 101] },
-    { key: 'brent', label: 'Brent', value: '94,17', unit: 'USD/thùng · realtime', tone: 'text-orange-400', color: '#fb923c', icon: Flame, values: [100, 102, 101, 103, 105, 104, 103, 106, 108, 107, 109, 110] },
-    { key: 'wti', label: 'WTI', value: '86,88', unit: 'USD/thùng · realtime', tone: 'text-red-400', color: '#f87171', icon: Flame, values: [100, 101, 100, 102, 104, 103, 102, 105, 107, 106, 108, 109] },
+    { key: 'brent', label: 'Brent', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-orange-400', color: '#fb923c', icon: Flame, values: [100, 102, 101, 103, 105, 104, 103, 106, 108, 107, 109, 110] },
+    { key: 'wti', label: 'WTI', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-red-400', color: '#f87171', icon: Flame, values: [100, 101, 100, 102, 104, 103, 102, 105, 107, 106, 108, 109] },
     { key: 'steel', label: 'Giá thép', value: '710', unit: 'EUR/t · HRC Bắc Âu · 14/07/2026', tone: 'text-slate-300', color: '#cbd5e1', icon: Factory, values: [100, 99, 98, 99, 100, 101, 100, 99, 101, 102, 103, 103] },
     { key: 'pmi', label: 'Global PMI', value: '52,0', unit: 'Global Composite · 06/2026', tone: 'text-cyan-400', color: '#22d3ee', icon: BarChart3, values: [100, 100, 101, 101, 102, 103, 102, 103, 104, 105, 105, 106] },
     { key: 'flows', label: 'Dòng vốn quốc tế FTSE / MSCI', value: 'FTSE 756,43', unit: 'MSCI EM 1.616,96 · 20-21/07/2026', tone: 'text-lime-400', color: '#a3e635', icon: Globe2, values: [100, 101, 102, 101, 103, 104, 105, 104, 106, 107, 108, 109] },
@@ -49,6 +49,34 @@ const nonChartTopics = [
     { key: 'china', label: 'Kinh tế Trung Quốc', description: 'Theo dõi GDP, bất động sản, xuất nhập khẩu, chính sách PBOC và dữ liệu sản xuất – tiêu dùng.', icon: Ship },
     { key: 'news', label: 'Tin tức thế giới', description: 'Theo dõi các sự kiện địa chính trị, chính sách tiền tệ, thương mại và rủi ro thị trường toàn cầu.', icon: Newspaper },
 ];
+
+const fetchLatestBrentHistory = async () => {
+    const source = sourceLinks.find((item) => item.key === 'brent');
+    if (!source?.url) {
+        throw new Error('Không tìm thấy sourceLinks[brent].');
+    }
+
+    const latestHistory = await getLatestBrentHistory();
+    return {
+        ...latestHistory,
+        sourceUrl: source.url,
+        sourceName: latestHistory?.sourceName || 'Symbol history',
+    };
+};
+
+const fetchLatestWtiHistory = async () => {
+    const source = sourceLinks.find((item) => item.key === 'wti');
+    if (!source?.url) {
+        throw new Error('Không tìm thấy sourceLinks[wti].');
+    }
+
+    const latestHistory = await getLatestWtiHistory();
+    return {
+        ...latestHistory,
+        sourceUrl: source.url,
+        sourceName: latestHistory?.sourceName || 'Symbol history',
+    };
+};
 
 const buildChartOption = (indicators) => ({
     backgroundColor: 'transparent',
@@ -62,17 +90,81 @@ const buildChartOption = (indicators) => ({
 
 const Global = () => {
     const [indicators, setIndicators] = useState(globalIndicators);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [updatedAt, setUpdatedAt] = useState('');
     const [provider, setProvider] = useState('gemini');
+
+    const loadLatestBrentHistory = async () => {
+        let latestBrent;
+        try {
+            latestBrent = await fetchLatestBrentHistory();
+        } catch (brentHistoryError) {
+            console.error('Không thể lấy lịch sử giá Brent:', brentHistoryError);
+            const source = sourceLinks.find((item) => item.key === 'brent');
+            latestBrent = {
+                value: 'N/A',
+                unit: 'Không tìm thấy lịch sử giá',
+                sourceUrl: source?.url,
+                sourceName: 'Symbol history',
+            };
+        }
+
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'brent'
+                ? {
+                    ...indicator,
+                    value: latestBrent.value,
+                    unit: latestBrent.asOf
+                        ? `${latestBrent.unit} · ${latestBrent.asOf}`
+                        : latestBrent.unit,
+                    sourceUrl: latestBrent.sourceUrl,
+                    sourceName: latestBrent.sourceName,
+                }
+                : indicator
+        )));
+    };
+
+    const loadLatestWtiHistory = async () => {
+        let latestWti;
+        try {
+            latestWti = await fetchLatestWtiHistory();
+        } catch (wtiHistoryError) {
+            console.error('Không thể lấy lịch sử giá WTI:', wtiHistoryError);
+            const source = sourceLinks.find((item) => item.key === 'wti');
+            latestWti = {
+                value: 'N/A',
+                unit: 'Không tìm thấy lịch sử giá',
+                sourceUrl: source?.url,
+                sourceName: 'Symbol history',
+            };
+        }
+
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'wti'
+                ? {
+                    ...indicator,
+                    value: latestWti.value,
+                    unit: latestWti.asOf
+                        ? `${latestWti.unit} · ${latestWti.asOf}`
+                        : latestWti.unit,
+                    sourceUrl: latestWti.sourceUrl,
+                    sourceName: latestWti.sourceName,
+                }
+                : indicator
+        )));
+    };
 
     const loadGlobalMacro = async (selectedProvider = provider) => {
         setLoading(true);
         setError('');
         try {
             const snapshot = await getGlobalMacroSnapshot(selectedProvider);
-            setIndicators(globalIndicators.map((indicator) => {
+            setIndicators((currentIndicators) => globalIndicators.map((indicator) => {
+                if (indicator.key === 'brent' || indicator.key === 'wti') {
+                    return currentIndicators.find((item) => item.key === indicator.key) || indicator;
+                }
+
                 const latest = snapshot?.indicators?.[indicator.key];
                 if (!latest) return indicator;
                 return { ...indicator, value: latest.value || indicator.value, unit: latest.asOf ? `${latest.unit || indicator.unit} · ${latest.asOf}` : (latest.unit || indicator.unit), sourceUrl: latest.sourceUrl, sourceName: latest.sourceName };
@@ -86,10 +178,10 @@ const Global = () => {
     };
 
     useEffect(() => {
-        loadGlobalMacro(provider);
-        const refreshTimer = window.setInterval(() => loadGlobalMacro(provider), 30 * 60 * 1000);
-        return () => window.clearInterval(refreshTimer);
-    }, [provider]);
+        loadLatestBrentHistory();
+        loadLatestWtiHistory();
+    }, []);
+
     const formatUpdatedAt = updatedAt ? new Date(updatedAt).toLocaleString('vi-VN') : 'chưa cập nhật';
 
     return (
@@ -110,7 +202,7 @@ const Global = () => {
                     </label>
                     <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300">Đang dùng: {provider === 'openai' ? 'OpenAI' : 'Gemini'}</span>
                     <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-300">Gemini · {formatUpdatedAt}</span>
-                    <button type="button" onClick={loadGlobalMacro} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{loading ? 'Đang cập nhật…' : 'Cập nhật Gemini'}</button>
+                    <button type="button" onClick={() => loadGlobalMacro(provider)} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{loading ? 'Đang cập nhật…' : 'Cập nhật AI'}</button>
                 </div>
             </div>
             {error && <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{error} Đang hiển thị dữ liệu gần nhất.</div>}
