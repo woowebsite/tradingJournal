@@ -13,7 +13,7 @@ import {
     Ship,
     TrendingUp,
 } from 'lucide-react';
-import { getGlobalMacroSnapshot, getLatestBrentHistory, getLatestWtiHistory } from '../services/globalMacro';
+import { getGlobalMacroSnapshot, getLatestBrentHistory, getLatestWtiHistory, getLatestDxyHistory, getLatestGoldHistory, getLatestNasdaqHistory, getLatestSp500History } from '../services/globalMacro';
 
 const periods = ['Jul 25', 'Aug 25', 'Sep 25', 'Oct 25', 'Nov 25', 'Dec 25', 'Jan 26', 'Feb 26', 'Mar 26', 'Apr 26', 'May 26', 'Jun 26'];
 
@@ -22,12 +22,12 @@ const sourceLinks = [
     { key: 'usCpi', label: 'BLS CPI ↗', url: 'https://www.bls.gov/cpi/' },
     { key: 'us10y', label: 'U.S. Treasury US10Y ↗', url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' },
     { key: 'us2y', label: 'U.S. Treasury US2Y ↗', url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' },
-    { key: 'dxy', label: 'Investing.com DXY ↗', url: 'https://www.investing.com/indices/usdollar-historical-data' },
+    { key: 'dxy', label: 'Investing.com DXY ↗', url: 'https://www.investing.com/currencies/us-dollar-index-historical-data' },
     { key: 'brent', label: 'Investing.com Brent ↗', url: 'https://www.investing.com/commodities/brent-oil-historical-data' },
     { key: 'wti', label: 'Investing.com WTI ↗', url: 'https://www.investing.com/commodities/crude-oil-historical-data' },
-    { key: 'steel', label: 'Fastmarkets HRC ↗', url: 'https://www.tacto.ai/en/commodities/steel-price' },
-    { key: 'pmi', label: 'S&P Global PMI ↗', url: 'https://www.pmi.spglobal.com/' },
-    { key: 'flows', label: 'FTSE Emerging ↗', url: 'https://www.investing.com/indices/ftse-emerging-historical-data' },
+    { key: 'nasdaq', label: 'Investing.com Nasdaq ↗', url: 'https://www.investing.com/indices/nasdaq-composite-historical-data' },
+    { key: 'sp500', label: 'Investing.com S&P 500 ↗', url: 'https://www.investing.com/indices/us-spx-500-historical-data' },
+    { key: 'gold', label: 'Investing.com Gold ↗', url: 'https://www.investing.com/commodities/gold-historical-data' },
     { key: 'china', label: 'China NBS ↗', url: 'https://www.stats.gov.cn/english/' },
     { key: 'news', label: 'Reuters World ↗', url: 'https://www.reuters.com/world/' },
 ];
@@ -40,15 +40,31 @@ const globalIndicators = [
     { key: 'dxy', label: 'DXY', value: '101,14', unit: 'đóng cửa · 22/07/2026', tone: 'text-rose-400', color: '#fb7185', icon: CircleDollarSign, values: [100, 99, 98, 99, 100, 99, 98, 97, 98, 99, 100, 101] },
     { key: 'brent', label: 'Brent', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-orange-400', color: '#fb923c', icon: Flame, values: [100, 102, 101, 103, 105, 104, 103, 106, 108, 107, 109, 110] },
     { key: 'wti', label: 'WTI', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-red-400', color: '#f87171', icon: Flame, values: [100, 101, 100, 102, 104, 103, 102, 105, 107, 106, 108, 109] },
-    { key: 'steel', label: 'Giá thép', value: '710', unit: 'EUR/t · HRC Bắc Âu · 14/07/2026', tone: 'text-slate-300', color: '#cbd5e1', icon: Factory, values: [100, 99, 98, 99, 100, 101, 100, 99, 101, 102, 103, 103] },
-    { key: 'pmi', label: 'Global PMI', value: '52,0', unit: 'Global Composite · 06/2026', tone: 'text-cyan-400', color: '#22d3ee', icon: BarChart3, values: [100, 100, 101, 101, 102, 103, 102, 103, 104, 105, 105, 106] },
-    { key: 'flows', label: 'Dòng vốn quốc tế FTSE / MSCI', value: 'FTSE 756,43', unit: 'MSCI EM 1.616,96 · 20-21/07/2026', tone: 'text-lime-400', color: '#a3e635', icon: Globe2, values: [100, 101, 102, 101, 103, 104, 105, 104, 106, 107, 108, 109] },
+    { key: 'nasdaq', label: 'Giá Nasdaq', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-slate-300', color: '#cbd5e1', icon: Factory, values: [100, 99, 98, 99, 100, 101, 100, 99, 101, 102, 103, 103] },
+    { key: 'sp500', label: 'Giá S&P 500', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-cyan-400', color: '#22d3ee', icon: BarChart3, values: [100, 100, 101, 101, 102, 103, 102, 103, 104, 105, 105, 106] },
+    { key: 'gold', label: 'Giá Gold', value: 'N/A', unit: 'Chưa có lịch sử giá', tone: 'text-yellow-400', color: '#facc15', icon: CircleDollarSign, values: [100, 101, 102, 101, 103, 104, 105, 104, 106, 107, 108, 109] },
 ];
 
 const nonChartTopics = [
     { key: 'china', label: 'Kinh tế Trung Quốc', description: 'Theo dõi GDP, bất động sản, xuất nhập khẩu, chính sách PBOC và dữ liệu sản xuất – tiêu dùng.', icon: Ship },
     { key: 'news', label: 'Tin tức thế giới', description: 'Theo dõi các sự kiện địa chính trị, chính sách tiền tệ, thương mại và rủi ro thị trường toàn cầu.', icon: Newspaper },
 ];
+
+const fetchLatestDxyHistory = async () => {
+    const source = sourceLinks.find((item) => item.key === 'dxy');
+    if (!source?.url) {
+        throw new Error('Không tìm thấy sourceLinks[dxy].');
+    }
+
+    const latestHistory = await getLatestDxyHistory();
+    return {
+        ...latestHistory,
+        value: latestHistory?.value || 'N/A',
+        unit: latestHistory?.unit || 'Chưa có dữ liệu',
+        sourceUrl: source.url,
+        sourceName: latestHistory?.sourceName || 'Symbol history',
+    };
+};
 
 const fetchLatestBrentHistory = async () => {
     const source = sourceLinks.find((item) => item.key === 'brent');
@@ -78,6 +94,48 @@ const fetchLatestWtiHistory = async () => {
     };
 };
 
+const fetchLatestGoldHistory = async () => {
+    const source = sourceLinks.find((item) => item.key === 'gold');
+    if (!source?.url) {
+        throw new Error('Không tìm thấy sourceLinks[gold].');
+    }
+
+    const latestHistory = await getLatestGoldHistory();
+    return {
+        ...latestHistory,
+        sourceUrl: source.url,
+        sourceName: latestHistory?.sourceName || 'Symbol history',
+    };
+};
+
+const fetchLatestNasdaqHistory = async () => {
+    const source = sourceLinks.find((item) => item.key === 'nasdaq');
+    if (!source?.url) {
+        throw new Error('Không tìm thấy sourceLinks[nasdaq].');
+    }
+
+    const latestHistory = await getLatestNasdaqHistory();
+    return {
+        ...latestHistory,
+        sourceUrl: source.url,
+        sourceName: latestHistory?.sourceName || 'Symbol history',
+    };
+};
+
+const fetchLatestSp500History = async () => {
+    const source = sourceLinks.find((item) => item.key === 'sp500');
+    if (!source?.url) {
+        throw new Error('Không tìm thấy sourceLinks[sp500].');
+    }
+
+    const latestHistory = await getLatestSp500History();
+    return {
+        ...latestHistory,
+        sourceUrl: source.url,
+        sourceName: latestHistory?.sourceName || 'Symbol history',
+    };
+};
+
 const buildChartOption = (indicators) => ({
     backgroundColor: 'transparent',
     tooltip: { trigger: 'axis', backgroundColor: '#111827', borderColor: '#374151', textStyle: { color: '#f3f4f6' } },
@@ -94,6 +152,37 @@ const Global = () => {
     const [error, setError] = useState('');
     const [updatedAt, setUpdatedAt] = useState('');
     const [provider, setProvider] = useState('gemini');
+
+    const loadLatestDxyHistory = async () => {
+        let latestDxy;
+        try {
+            latestDxy = await fetchLatestDxyHistory();
+        } catch (dxyHistoryError) {
+            console.error('Không thể lấy lịch sử giá DXY:', dxyHistoryError);
+            const source = sourceLinks.find((item) => item.key === 'dxy');
+            latestDxy = {
+                value: 'N/A',
+                unit: 'Không tìm thấy lịch sử giá',
+                sourceUrl: source?.url,
+                sourceName: 'Symbol history',
+            };
+        }
+
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'dxy'
+                ? {
+                    ...indicator,
+                    value: latestDxy.value,
+                    unit: latestDxy.asOf
+                        ? `${latestDxy.unit} · ${latestDxy.asOf}`
+                        : latestDxy.unit,
+                    sourceUrl: latestDxy.sourceUrl,
+                    sourceName: latestDxy.sourceName,
+                }
+                : indicator
+        )));
+        return latestDxy;
+    };
 
     const loadLatestBrentHistory = async () => {
         let latestBrent;
@@ -157,26 +246,133 @@ const Global = () => {
         return latestWti;
     };
 
+    const loadLatestGoldHistory = async () => {
+        let latestGold;
+        try {
+            latestGold = await fetchLatestGoldHistory();
+        } catch (goldHistoryError) {
+            console.error('Không thể lấy lịch sử giá vàng:', goldHistoryError);
+            const source = sourceLinks.find((item) => item.key === 'gold');
+            latestGold = {
+                value: 'N/A',
+                unit: 'Không tìm thấy lịch sử giá',
+                sourceUrl: source?.url,
+                sourceName: 'Symbol history',
+            };
+        }
+
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'gold'
+                ? {
+                    ...indicator,
+                    value: latestGold.value,
+                    unit: latestGold.asOf
+                        ? `${latestGold.unit} · ${latestGold.asOf}`
+                        : latestGold.unit,
+                    sourceUrl: latestGold.sourceUrl,
+                    sourceName: latestGold.sourceName,
+                }
+                : indicator
+        )));
+        return latestGold;
+    };
+
+    const loadLatestNasdaqHistory = async () => {
+        let latestNasdaq;
+        try {
+            latestNasdaq = await fetchLatestNasdaqHistory();
+        } catch (nasdaqHistoryError) {
+            console.error('Không thể lấy lịch sử Nasdaq:', nasdaqHistoryError);
+            const source = sourceLinks.find((item) => item.key === 'nasdaq');
+            latestNasdaq = {
+                value: 'N/A',
+                unit: 'Không tìm thấy lịch sử giá',
+                sourceUrl: source?.url,
+                sourceName: 'Symbol history',
+            };
+        }
+
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'nasdaq'
+                ? {
+                    ...indicator,
+                    value: latestNasdaq.value,
+                    unit: latestNasdaq.asOf
+                        ? `${latestNasdaq.unit} · ${latestNasdaq.asOf}`
+                        : latestNasdaq.unit,
+                    sourceUrl: latestNasdaq.sourceUrl,
+                    sourceName: latestNasdaq.sourceName,
+                }
+                : indicator
+        )));
+        return latestNasdaq;
+    };
+
+    const loadLatestSp500History = async () => {
+        let latestSp500;
+        try {
+            latestSp500 = await fetchLatestSp500History();
+        } catch (sp500HistoryError) {
+            console.error('Không thể lấy lịch sử S&P 500:', sp500HistoryError);
+            const source = sourceLinks.find((item) => item.key === 'sp500');
+            latestSp500 = {
+                value: 'N/A',
+                unit: 'Không tìm thấy lịch sử giá',
+                sourceUrl: source?.url,
+                sourceName: 'Symbol history',
+            };
+        }
+
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'sp500'
+                ? {
+                    ...indicator,
+                    value: latestSp500.value,
+                    unit: latestSp500.asOf
+                        ? `${latestSp500.unit} · ${latestSp500.asOf}`
+                        : latestSp500.unit,
+                    sourceUrl: latestSp500.sourceUrl,
+                    sourceName: latestSp500.sourceName,
+                }
+                : indicator
+        )));
+        return latestSp500;
+    };
+
     const loadGlobalMacro = async (selectedProvider = provider) => {
         setLoading(true);
         setError('');
         try {
-            const [snapshot, latestBrent, latestWti] = await Promise.all([
+            const [snapshot, latestBrent, latestWti, latestDxy, latestGold, latestNasdaq, latestSp500] = await Promise.all([
                 getGlobalMacroSnapshot(selectedProvider),
                 loadLatestBrentHistory(),
                 loadLatestWtiHistory(),
+                loadLatestDxyHistory(),
+                loadLatestGoldHistory(),
+                loadLatestNasdaqHistory(),
+                loadLatestSp500History(),
             ]);
             setIndicators((currentIndicators) => globalIndicators.map((indicator) => {
-                if (indicator.key === 'brent' || indicator.key === 'wti') {
-                    const latestOil = indicator.key === 'brent' ? latestBrent : latestWti;
-                    const currentOil = currentIndicators.find((item) => item.key === indicator.key) || indicator;
-                    if (!latestOil) return currentOil;
+                if (indicator.key === 'brent' || indicator.key === 'wti' || indicator.key === 'dxy' || indicator.key === 'gold' || indicator.key === 'nasdaq' || indicator.key === 'sp500') {
+                    const latestHist = indicator.key === 'brent'
+                        ? latestBrent
+                        : indicator.key === 'wti'
+                            ? latestWti
+                            : indicator.key === 'dxy'
+                                ? latestDxy
+                                : indicator.key === 'gold'
+                                    ? latestGold
+                                    : indicator.key === 'nasdaq'
+                                        ? latestNasdaq
+                                        : latestSp500;
+                    const currentHist = currentIndicators.find((item) => item.key === indicator.key) || indicator;
+                    if (!latestHist) return currentHist;
                     return {
-                        ...currentOil,
-                        value: latestOil.value || currentOil.value,
-                        unit: latestOil.asOf ? `${latestOil.unit || currentOil.unit} Â· ${latestOil.asOf}` : (latestOil.unit || currentOil.unit),
-                        sourceUrl: latestOil.sourceUrl,
-                        sourceName: latestOil.sourceName,
+                        ...currentHist,
+                        value: latestHist.value || currentHist.value,
+                        unit: latestHist.asOf ? `${latestHist.unit || currentHist.unit} · ${latestHist.asOf}` : (latestHist.unit || currentHist.unit),
+                        sourceUrl: latestHist.sourceUrl,
+                        sourceName: latestHist.sourceName,
                     };
                 }
 
@@ -195,6 +391,10 @@ const Global = () => {
     useEffect(() => {
         loadLatestBrentHistory();
         loadLatestWtiHistory();
+        loadLatestDxyHistory();
+        loadLatestGoldHistory();
+        loadLatestNasdaqHistory();
+        loadLatestSp500History();
     }, []);
 
     const formatUpdatedAt = updatedAt ? new Date(updatedAt).toLocaleString('vi-VN') : 'chưa cập nhật';

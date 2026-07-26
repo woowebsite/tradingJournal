@@ -34,6 +34,14 @@ export default {
     },
     {
       method: 'GET',
+      path: '/news-analyses/dxy-price',
+      handler: 'news-analysis.dxyPrice',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
       path: '/news-analyses/brent-price',
       handler: 'news-analysis.brentPrice',
       config: {
@@ -44,6 +52,30 @@ export default {
       method: 'GET',
       path: '/news-analyses/wti-price',
       handler: 'news-analysis.wtiPrice',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
+      path: '/news-analyses/gold-price',
+      handler: 'news-analysis.goldPrice',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
+      path: '/news-analyses/nasdaq-price',
+      handler: 'news-analysis.nasdaqPrice',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
+      path: '/news-analyses/sp500-price',
+      handler: 'news-analysis.sp500Price',
       config: {
         auth: false,
       },
