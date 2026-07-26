@@ -707,6 +707,26 @@ const getDatePart = (dateVal: any): string | null => {
   return null;
 };
 
+const getRecentPublishedSymbolHistory = async (strapi: any, symbolName: string, limit = 30) => {
+  const rows = await strapi.db.query('api::symbol-history.symbol-history').findMany({
+    where: {
+      publishedAt: { $notNull: true },
+      symbol: { Name: { $eqi: symbolName } },
+    },
+    orderBy: { date: 'desc' },
+    limit,
+  });
+
+  return rows.reverse().map((row: any) => ({
+    date: row.date,
+    open: Number(row.open),
+    high: Number(row.high),
+    low: Number(row.low),
+    close: Number(row.close),
+    volume: row.volume == null ? null : Number(row.volume),
+  }));
+};
+
 const DXY_HISTORICAL_URL = 'https://www.investing.com/currencies/us-dollar-index-historical-data';
 const BRENT_HISTORICAL_URL = 'https://www.investing.com/commodities/brent-oil-historical-data';
 const CRUDE_OIL_HISTORICAL_URL = 'https://www.investing.com/commodities/crude-oil-historical-data';
@@ -1885,6 +1905,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     if (!latestHistory?.close) {
       ctx.throw(404, 'No published history was found for symbol brent-oil.');
     }
+    const history = await getRecentPublishedSymbolHistory(strapi, 'brent-oil');
 
     ctx.body = {
       data: {
@@ -1893,6 +1914,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         asOf: latestHistory.date,
         sourceUrl: BRENT_HISTORICAL_URL,
         sourceName: 'Symbol history',
+        history,
       },
     };
   },
@@ -1916,6 +1938,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     if (!latestHistory?.close) {
       ctx.throw(404, 'No published history was found for symbol crude-oil.');
     }
+    const history = await getRecentPublishedSymbolHistory(strapi, 'crude-oil');
 
     ctx.body = {
       data: {
@@ -1924,6 +1947,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         asOf: latestHistory.date,
         sourceUrl: CRUDE_OIL_HISTORICAL_URL,
         sourceName: 'Symbol history',
+        history,
       },
     };
   },
@@ -1947,6 +1971,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     if (!latestHistory?.close) {
       ctx.throw(404, 'No published history was found for symbol gold-price.');
     }
+    const history = await getRecentPublishedSymbolHistory(strapi, 'gold-price');
 
     ctx.body = {
       data: {
@@ -1958,6 +1983,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         asOf: latestHistory.date,
         sourceUrl: GOLD_HISTORICAL_URL,
         sourceName: 'Symbol history',
+        history,
       },
     };
   },
@@ -1981,6 +2007,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     if (!latestHistory?.close) {
       ctx.throw(404, 'No published history was found for symbol nashdaq-index.');
     }
+    const history = await getRecentPublishedSymbolHistory(strapi, 'nashdaq-index');
 
     ctx.body = {
       data: {
@@ -1992,6 +2019,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         asOf: latestHistory.date,
         sourceUrl: NASDAQ_HISTORICAL_URL,
         sourceName: 'Symbol history',
+        history,
       },
     };
   },
@@ -2015,6 +2043,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     if (!latestHistory?.close) {
       ctx.throw(404, 'No published history was found for symbol sp-500-index.');
     }
+    const history = await getRecentPublishedSymbolHistory(strapi, 'sp-500-index');
 
     ctx.body = {
       data: {
@@ -2026,6 +2055,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         asOf: latestHistory.date,
         sourceUrl: SP500_HISTORICAL_URL,
         sourceName: 'Symbol history',
+        history,
       },
     };
   },

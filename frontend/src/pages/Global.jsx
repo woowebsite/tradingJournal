@@ -136,15 +136,75 @@ const fetchLatestSp500History = async () => {
     };
 };
 
-const buildChartOption = (indicators) => ({
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', backgroundColor: '#111827', borderColor: '#374151', textStyle: { color: '#f3f4f6' } },
-    legend: { type: 'scroll', bottom: 0, textStyle: { color: '#9ca3af' }, pageTextStyle: { color: '#9ca3af' } },
-    grid: { left: 48, right: 24, top: 24, bottom: 72 },
-    xAxis: { type: 'category', boundaryGap: false, data: periods, axisLine: { lineStyle: { color: '#374151' } }, axisLabel: { color: '#9ca3af' } },
-    yAxis: { type: 'value', min: 96, max: 114, splitLine: { lineStyle: { color: '#1f2937' } }, axisLabel: { color: '#9ca3af' } },
-    series: indicators.map((indicator) => ({ name: indicator.label, type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: indicator.color }, data: indicator.values })),
-});
+const symbolHistoryKeys = new Set(['brent', 'wti', 'nasdaq', 'sp500', 'gold']);
+
+const buildChartOption = (indicators) => {
+    const chartIndicators = indicators.filter((indicator) => symbolHistoryKeys.has(indicator.key));
+    const historyDates = [...new Set(chartIndicators.flatMap((indicator) => (
+        (indicator.history || []).map((row) => String(row.date || '').slice(0, 10)).filter(Boolean)
+    )))].sort().slice(-30);
+    const hasSymbolHistory = historyDates.length > 0;
+    const categories = hasSymbolHistory
+        ? historyDates.map((date) => date.split('-').reverse().slice(0, 2).join('/'))
+        : periods;
+
+    const series = chartIndicators.map((indicator) => {
+        if (!hasSymbolHistory) {
+            return {
+                name: indicator.label,
+                type: 'line',
+                symbol: 'none',
+                lineStyle: { width: 2 },
+                itemStyle: { color: indicator.color },
+                data: periods.map(() => null),
+            };
+        }
+        if (!indicator.history?.length) {
+            return {
+                name: indicator.label,
+                type: 'line',
+                symbol: 'none',
+                lineStyle: { width: 2 },
+                itemStyle: { color: indicator.color },
+                data: historyDates.map(() => null),
+            };
+        }
+
+        const closeByDate = new Map(indicator.history.map((row) => [
+            String(row.date || '').slice(0, 10),
+            Number(row.close),
+        ]));
+        const firstClose = historyDates.map((date) => closeByDate.get(date)).find(Number.isFinite);
+        const data = historyDates.map((date) => {
+            const close = closeByDate.get(date);
+            return Number.isFinite(close) && Number.isFinite(firstClose) && firstClose !== 0
+                ? Number((((close / firstClose) - 1) * 100).toFixed(2))
+                : null;
+        });
+
+        return {
+            name: indicator.label,
+            type: 'line',
+            smooth: true,
+            connectNulls: true,
+            symbol: 'none',
+            lineStyle: { width: 2 },
+            itemStyle: { color: indicator.color },
+            tooltip: { valueFormatter: (value) => `${Number(value).toFixed(2)}%` },
+            data,
+        };
+    });
+
+    return {
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis', backgroundColor: '#111827', borderColor: '#374151', textStyle: { color: '#f3f4f6' } },
+        legend: { type: 'scroll', bottom: 0, textStyle: { color: '#9ca3af' }, pageTextStyle: { color: '#9ca3af' } },
+        grid: { left: 48, right: 24, top: 24, bottom: 72 },
+        xAxis: { type: 'category', boundaryGap: false, data: categories, axisLine: { lineStyle: { color: '#374151' } }, axisLabel: { color: '#9ca3af' } },
+        yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#1f2937' } }, axisLabel: { color: '#9ca3af', formatter: '{value}%' } },
+        series,
+    };
+};
 
 const Global = () => {
     const [indicators, setIndicators] = useState(globalIndicators);
@@ -209,6 +269,7 @@ const Global = () => {
                         : latestBrent.unit,
                     sourceUrl: latestBrent.sourceUrl,
                     sourceName: latestBrent.sourceName,
+                    history: latestBrent.history || [],
                 }
                 : indicator
         )));
@@ -240,6 +301,7 @@ const Global = () => {
                         : latestWti.unit,
                     sourceUrl: latestWti.sourceUrl,
                     sourceName: latestWti.sourceName,
+                    history: latestWti.history || [],
                 }
                 : indicator
         )));
@@ -271,6 +333,7 @@ const Global = () => {
                         : latestGold.unit,
                     sourceUrl: latestGold.sourceUrl,
                     sourceName: latestGold.sourceName,
+                    history: latestGold.history || [],
                 }
                 : indicator
         )));
@@ -302,6 +365,7 @@ const Global = () => {
                         : latestNasdaq.unit,
                     sourceUrl: latestNasdaq.sourceUrl,
                     sourceName: latestNasdaq.sourceName,
+                    history: latestNasdaq.history || [],
                 }
                 : indicator
         )));
@@ -333,6 +397,7 @@ const Global = () => {
                         : latestSp500.unit,
                     sourceUrl: latestSp500.sourceUrl,
                     sourceName: latestSp500.sourceName,
+                    history: latestSp500.history || [],
                 }
                 : indicator
         )));
@@ -373,6 +438,7 @@ const Global = () => {
                         unit: latestHist.asOf ? `${latestHist.unit || currentHist.unit} · ${latestHist.asOf}` : (latestHist.unit || currentHist.unit),
                         sourceUrl: latestHist.sourceUrl,
                         sourceName: latestHist.sourceName,
+                        history: latestHist.history || currentHist.history || [],
                     };
                 }
 
@@ -423,7 +489,7 @@ const Global = () => {
             {error && <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{error} Đang hiển thị dữ liệu gần nhất.</div>}
 
             <section className="rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
-                <div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-100">Diễn biến các chỉ số toàn cầu</h2><p className="mt-1 text-xs text-gray-400">Chỉ số cơ sở 100 tại kỳ đầu · Trung Quốc và tin tức thế giới được tách khỏi biểu đồ.</p></div><Globe2 className="hidden text-blue-400 sm:block" size={22} /></div>
+                <div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-100">Diễn biến các chỉ số toàn cầu</h2><p className="mt-1 text-xs text-gray-400">Brent, WTI, Nasdaq, S&amp;P 500 và Gold · % biến động giá đóng cửa trong 30 phiên gần nhất từ symbol-history · phiên đầu = 0%.</p></div><Globe2 className="hidden text-blue-400 sm:block" size={22} /></div>
                 <div className="h-[460px]"><ReactECharts option={buildChartOption(indicators)} style={{ width: '100%', height: '100%' }} notMerge lazyUpdate /></div>
             </section>
 
