@@ -13,7 +13,7 @@ import {
     Ship,
     TrendingUp,
 } from 'lucide-react';
-import { getGlobalMacroSnapshot, getLatestBrentHistory, getLatestWtiHistory, getLatestDxyHistory, getLatestGoldHistory, getLatestNasdaqHistory, getLatestSp500History } from '../services/globalMacro';
+import { getGlobalMacroSnapshot, getLatestBrentHistory, getLatestWtiHistory, getLatestDxyHistory, getLatestGoldHistory, getLatestNasdaqHistory, getLatestSp500History, getLatestFedFundsRate, getLatestUsCpi } from '../services/globalMacro';
 
 const periods = ['Jul 25', 'Aug 25', 'Sep 25', 'Oct 25', 'Nov 25', 'Dec 25', 'Jan 26', 'Feb 26', 'Mar 26', 'Apr 26', 'May 26', 'Jun 26'];
 
@@ -213,6 +213,53 @@ const Global = () => {
     const [updatedAt, setUpdatedAt] = useState('');
     const [provider, setProvider] = useState('gemini');
 
+    const applyLatestFedFundsRate = (latestFed) => {
+        if (!latestFed) return;
+        setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+            indicator.key === 'fed'
+                ? {
+                    ...indicator,
+                    value: latestFed.value || indicator.value,
+                    unit: latestFed.asOf ? `${latestFed.unit || indicator.unit} · ${latestFed.asOf}` : (latestFed.unit || indicator.unit),
+                    sourceUrl: latestFed.sourceUrl,
+                    sourceName: latestFed.sourceName,
+                }
+                : indicator
+        )));
+    };
+
+    const loadLatestFedFundsRate = async () => {
+        try {
+            const latestFed = await getLatestFedFundsRate();
+            applyLatestFedFundsRate(latestFed);
+            return latestFed;
+        } catch (fedError) {
+            console.error('Không thể lấy Fed Funds Rate từ Trading Economics:', fedError);
+            return null;
+        }
+    };
+
+    const loadLatestUsCpi = async () => {
+        try {
+            const latestCpi = await getLatestUsCpi();
+            setIndicators((currentIndicators) => currentIndicators.map((indicator) => (
+                indicator.key === 'usCpi'
+                    ? {
+                        ...indicator,
+                        value: latestCpi.value || indicator.value,
+                        unit: latestCpi.asOf ? `${latestCpi.unit || indicator.unit} · ${latestCpi.asOf}` : (latestCpi.unit || indicator.unit),
+                        sourceUrl: latestCpi.sourceUrl,
+                        sourceName: latestCpi.sourceName,
+                    }
+                    : indicator
+            )));
+            return latestCpi;
+        } catch (cpiError) {
+            console.error('Không thể lấy CPI Mỹ từ Trading Economics:', cpiError);
+            return null;
+        }
+    };
+
     const loadLatestDxyHistory = async () => {
         let latestDxy;
         try {
@@ -408,8 +455,10 @@ const Global = () => {
         setLoading(true);
         setError('');
         try {
-            const [snapshot, latestBrent, latestWti, latestDxy, latestGold, latestNasdaq, latestSp500] = await Promise.all([
+            const [snapshot, latestFed, latestCpi, latestBrent, latestWti, latestDxy, latestGold, latestNasdaq, latestSp500] = await Promise.all([
                 getGlobalMacroSnapshot(selectedProvider),
+                getLatestFedFundsRate(),
+                getLatestUsCpi(),
                 loadLatestBrentHistory(),
                 loadLatestWtiHistory(),
                 loadLatestDxyHistory(),
@@ -418,6 +467,24 @@ const Global = () => {
                 loadLatestSp500History(),
             ]);
             setIndicators((currentIndicators) => globalIndicators.map((indicator) => {
+                if (indicator.key === 'fed') {
+                    return latestFed ? {
+                        ...(currentIndicators.find((item) => item.key === 'fed') || indicator),
+                        value: latestFed.value || indicator.value,
+                        unit: latestFed.asOf ? `${latestFed.unit || indicator.unit} · ${latestFed.asOf}` : (latestFed.unit || indicator.unit),
+                        sourceUrl: latestFed.sourceUrl,
+                        sourceName: latestFed.sourceName,
+                    } : indicator;
+                }
+                if (indicator.key === 'usCpi') {
+                    return latestCpi ? {
+                        ...(currentIndicators.find((item) => item.key === 'usCpi') || indicator),
+                        value: latestCpi.value || indicator.value,
+                        unit: latestCpi.asOf ? `${latestCpi.unit || indicator.unit} · ${latestCpi.asOf}` : (latestCpi.unit || indicator.unit),
+                        sourceUrl: latestCpi.sourceUrl,
+                        sourceName: latestCpi.sourceName,
+                    } : indicator;
+                }
                 if (indicator.key === 'brent' || indicator.key === 'wti' || indicator.key === 'dxy' || indicator.key === 'gold' || indicator.key === 'nasdaq' || indicator.key === 'sp500') {
                     const latestHist = indicator.key === 'brent'
                         ? latestBrent
@@ -461,6 +528,8 @@ const Global = () => {
         loadLatestGoldHistory();
         loadLatestNasdaqHistory();
         loadLatestSp500History();
+        loadLatestFedFundsRate();
+        loadLatestUsCpi();
     }, []);
 
     const formatUpdatedAt = updatedAt ? new Date(updatedAt).toLocaleString('vi-VN') : 'chưa cập nhật';

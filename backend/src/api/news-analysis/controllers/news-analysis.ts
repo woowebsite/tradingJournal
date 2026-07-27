@@ -11,6 +11,10 @@ const USER_AGENT =
 const MAX_ITEMS_PER_SOURCE = 25;
 const NEWS_ANALYSIS_UID = 'api::news-analysis.news-analysis' as any;
 const NEWS_SUMMARY_UID = 'api::news-summary.news-summary' as any;
+const TRADING_ECONOMICS_FED_RATE_URL = 'https://tradingeconomics.com/united-states/interest-rate';
+const TRADING_ECONOMICS_READER_URL = `https://r.jina.ai/http://${TRADING_ECONOMICS_FED_RATE_URL.replace(/^https?:\/\//, '')}`;
+const TRADING_ECONOMICS_CPI_URL = 'https://tradingeconomics.com/united-states/inflation-cpi';
+const TRADING_ECONOMICS_CPI_READER_URL = `https://r.jina.ai/http://${TRADING_ECONOMICS_CPI_URL.replace(/^https?:\/\//, '')}`;
 
 const decodeHtml = (value = '') => {
   return value
@@ -108,6 +112,39 @@ const fetchArticleText = async (url: string) => {
     status: 'ok',
     error: '',
     text: extractReadableArticleText(html),
+  };
+};
+
+const parseTradingEconomicsFedRate = (content: string) => {
+  const latestValueMatch = content.match(/last recorded at\s+([\d,.]+)\s+percent/i);
+  const relatedRowMatch = content.match(/\[Fed Interest Rate\][^\n]*?\|\s*([\d,.]+)\s*\|[^\n]*?\|\s*percent\s*\|\s*([^|\n]+)/i);
+  const value = latestValueMatch?.[1] || relatedRowMatch?.[1];
+
+  if (!value) return null;
+
+  return {
+    value: value.replace('.', ','),
+    unit: 'Fed Funds Rate',
+    asOf: relatedRowMatch?.[2]?.trim() || '',
+  };
+};
+
+const parseTradingEconomicsCpi = (content: string) => {
+  const latestValueMatch = content.match(/annual inflation rate in the US fell to\s+([\d,.]+)%\s+in\s+([A-Za-z]+\s+\d{4})/i)
+    || content.match(/Inflation Rate in the United States decreased to\s+([\d,.]+)\s+percent in\s+([A-Za-z]+)\s+from/i);
+  const tableMatch = content.match(/\|\s*([\d,.]+)\s*\|\s*[\d,.]+\s*\|\s*[\d,.]+\s*\|\s*-?[\d,.]+\s*\|\s*[^|]+\s*\|\s*percent\s*\|\s*Monthly/i);
+  const value = latestValueMatch?.[1] || tableMatch?.[1];
+
+  if (!value) return null;
+
+  const asOf = latestValueMatch?.[2]
+    || content.match(/\[Inflation Rate YoY\][^\n]*?\|\s*[^|]+\s*\|\s*[^|]+\s*\|\s*percent\s*\|\s*([^|\n]+)/i)?.[1]?.trim()
+    || '';
+
+  return {
+    value: value.replace('.', ','),
+    unit: 'CPI-U · YoY',
+    asOf,
   };
 };
 
@@ -2107,6 +2144,62 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
         model,
         updatedAt: snapshot.updatedAt || new Date().toISOString(),
         indicators: snapshot.indicators || {},
+      },
+    };
+  },
+  async fedFundsRate(ctx) {
+    const response = await axios.get(TRADING_ECONOMICS_READER_URL, {
+      timeout: 30000,
+      headers: {
+        Accept: 'text/plain,text/markdown;q=0.9,*/*;q=0.8',
+        'User-Agent': USER_AGENT,
+      },
+      validateStatus: () => true,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      ctx.throw(502, `Trading Economics returned HTTP ${response.status}.`);
+    }
+
+    const parsed = parseTradingEconomicsFedRate(String(response.data || ''));
+    if (!parsed) {
+      ctx.throw(502, 'Could not parse the latest Fed Funds Rate from Trading Economics.');
+    }
+
+    ctx.body = {
+      data: {
+        ...parsed,
+        sourceUrl: TRADING_ECONOMICS_FED_RATE_URL,
+        sourceName: 'Trading Economics',
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  },
+  async usCpi(ctx) {
+    const response = await axios.get(TRADING_ECONOMICS_CPI_READER_URL, {
+      timeout: 30000,
+      headers: {
+        Accept: 'text/plain,text/markdown;q=0.9,*/*;q=0.8',
+        'User-Agent': USER_AGENT,
+      },
+      validateStatus: () => true,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      ctx.throw(502, `Trading Economics returned HTTP ${response.status}.`);
+    }
+
+    const parsed = parseTradingEconomicsCpi(String(response.data || ''));
+    if (!parsed) {
+      ctx.throw(502, 'Could not parse the latest US CPI from Trading Economics.');
+    }
+
+    ctx.body = {
+      data: {
+        ...parsed,
+        sourceUrl: TRADING_ECONOMICS_CPI_URL,
+        sourceName: 'Trading Economics',
+        updatedAt: new Date().toISOString(),
       },
     };
   },

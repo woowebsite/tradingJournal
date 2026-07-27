@@ -81,6 +81,22 @@ export default {
       },
     },
     {
+      method: 'GET',
+      path: '/news-analyses/fed-funds-rate',
+      handler: 'news-analysis.fedFundsRate',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'GET',
+      path: '/news-analyses/us-cpi',
+      handler: 'news-analysis.usCpi',
+      config: {
+        auth: false,
+      },
+    },
+    {
       method: 'POST',
       path: '/news-analyses/ai/save',
       handler: 'news-analysis.saveAnalysis',

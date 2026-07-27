@@ -34,3 +34,13 @@ export const getLatestSp500History = async () => {
     const response = await api.get('/news-analyses/sp500-price');
     return response.data?.data ?? response.data;
 };
+
+export const getLatestFedFundsRate = async () => {
+    const response = await api.get('/news-analyses/fed-funds-rate');
+    return response.data?.data ?? response.data;
+};
+
+export const getLatestUsCpi = async () => {
+    const response = await api.get('/news-analyses/us-cpi');
+    return response.data?.data ?? response.data;
+};
