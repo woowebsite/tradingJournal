@@ -4,11 +4,23 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { factories } from '@strapi/strapi';
-import axios from 'axios';
+import { fetchTcbs } from '../../../utils/tcbs-client';
 
 const DEFAULT_STRATEGY_KEY = 'price_volume_increase';
 const DEFAULT_STRATEGY_NAME = 'Bùng nổ khối lượng';
 const DEFAULT_TICKER = 'NNC';
+
+const TCBS_ENDPOINTS: Record<string, string> = {
+  'stock-history': '/stock-insight/v2/stock/bars-long-term',
+  'futures-history': '/futures-insight/v2/stock/bars',
+  'intraday-snapshots': '/stock-insight/v1/stock/intraday-snapshots',
+  'market-flow-leader': '/stock-insight/v1/intraday/flow-market-leader',
+  'technical-indicators': '/ta/v1/summary/gaugechart/:ticker',
+  'ticker-overview': '/tcanalysis/v1/ticker/:ticker/overview',
+  'stock-ratio': '/tcanalysis/v1/ticker/:ticker/stockratio',
+  'futures-intraday-history': '/futures-insight/v1/intraday/:ticker/his/paging',
+  'backtest-conclusion': '/tcbs-hfc-data/v2/digital/backtest-conclusion',
+};
 
 function normalizeSignalRows(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
@@ -19,6 +31,45 @@ function normalizeSignalRows(payload: any): any[] {
 }
 
 export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy' as any, ({ strapi }) => ({
+  async tcbsData(ctx) {
+    const resource = String(ctx.params.resource || '');
+    const template = TCBS_ENDPOINTS[resource];
+    if (!template) return ctx.badRequest('Unsupported TCBS resource');
+
+    const ticker = String(ctx.query.ticker || '').trim().toUpperCase();
+    if (template.includes(':ticker') && !/^[A-Z0-9]{1,20}$/.test(ticker)) {
+      return ctx.badRequest('A valid ticker is required');
+    }
+
+    const allowedParams: Record<string, string[]> = {
+      'stock-history': ['ticker', 'type', 'resolution', 'to', 'countBack'],
+      'futures-history': ['ticker', 'type', 'resolution', 'to', 'countBack'],
+      'intraday-snapshots': ['tickers'],
+      'market-flow-leader': ['exchange', 'industry', 'type'],
+      'technical-indicators': ['period'],
+      'ticker-overview': [],
+      'stock-ratio': [],
+      'futures-intraday-history': [],
+      'backtest-conclusion': ['ticker'],
+    };
+    const params = Object.fromEntries(allowedParams[resource]
+      .filter(key => ctx.query[key] !== undefined)
+      .map(key => [key, String(ctx.query[key])]));
+    const token = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token');
+
+    try {
+      ctx.body = await fetchTcbs(
+        template.replace(':ticker', encodeURIComponent(ticker)),
+        params,
+        token
+      );
+    } catch (error: any) {
+      strapi.log.error(`[tcbs-client] ${error?.message || error}`);
+      ctx.status = 502;
+      ctx.body = { error: { status: 502, message: error?.message || 'TCBS request failed' } };
+    }
+  },
+
   async syncSignal(ctx) {
     const strategyKey = String(ctx.query.strategyKey || DEFAULT_STRATEGY_KEY);
     const strategyName = String(ctx.query.strategyName || DEFAULT_STRATEGY_NAME);
@@ -45,27 +96,18 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       });
     }
 
-    const tcbsToken = ctx.get('x-tcbs-token') || process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN;
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    };
-
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
-      headers.Authorization = `Bearer ${tcbsToken}`;
-    }
-
-    const response = await axios.get('https://apiextaws.tcbs.com.vn/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-signal', {
-      params: {
+    const tcbsToken = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token') || process.env.VITE_TCBS_TOKEN;
+    const response = await fetchTcbs(
+      '/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-signal',
+      {
         strategyKey,
         strategyName,
         ticker,
       },
-      headers,
-      timeout: 20000,
-    });
+      tcbsToken
+    );
 
-    const rows = normalizeSignalRows(response.data);
+    const rows = normalizeSignalRows(response);
     const signalRows = rows.filter(row => Number(row?.Sig) === 1);
     const staleRows = await documents(signalUid).findMany({
       filters: {
@@ -139,27 +181,18 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     const documents = (strapi as any).documents;
     const detailUid = 'api::tcbs-strategy-detail.tcbs-strategy-detail';
 
-    const tcbsToken = ctx.get('x-tcbs-token') || process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN;
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    };
-
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
-      headers.Authorization = `Bearer ${tcbsToken}`;
-    }
-
-    const response = await axios.get('https://apiextaws.tcbs.com.vn/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-detail', {
-      params: {
+    const tcbsToken = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token') || process.env.VITE_TCBS_TOKEN;
+    const response = await fetchTcbs(
+      '/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-detail',
+      {
         strategyKey,
         strategyName,
         ticker,
       },
-      headers,
-      timeout: 20000,
-    });
+      tcbsToken
+    );
 
-    const body = response.data || {};
+    const body = response || {};
 
     let existing = await documents(detailUid).findFirst({
       filters: {

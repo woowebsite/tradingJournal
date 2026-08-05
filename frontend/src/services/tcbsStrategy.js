@@ -1,5 +1,7 @@
 import api from './api';
 
+const isAsciiToken = token => token && [...token].every(char => char.charCodeAt(0) <= 127);
+
 export const syncTcbsStrategySignals = async ({
     strategyKey = 'price_volume_increase',
     strategyName = 'Bùng nổ khối lượng',
@@ -14,7 +16,7 @@ export const syncTcbsStrategySignals = async ({
     const tcbsToken = import.meta.env.VITE_TCBS_TOKEN;
     const headers = {};
 
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
+    if (isAsciiToken(tcbsToken)) {
         headers['X-TCBS-Token'] = tcbsToken;
     }
 
@@ -85,7 +87,7 @@ export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NN
     const tcbsToken = import.meta.env.VITE_TCBS_TOKEN;
     const headers = {};
 
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
+    if (isAsciiToken(tcbsToken)) {
         headers['X-TCBS-Token'] = tcbsToken;
     }
 
@@ -102,23 +104,10 @@ export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NN
 export const getBacktestConclusion = async (ticker = 'All') => {
     const normalizedTicker = String(ticker || 'All').trim() || 'All';
     const token = import.meta.env.VITE_TCBS_TOKEN;
-    const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-    };
-
-    if (token && /^[\x00-\x7F]+$/.test(token)) {
-        headers.Authorization = `Bearer ${token}`;
-    }
-
-    const response = await fetch(
-        `/api-tcbs/tcbs-hfc-data/v2/digital/backtest-conclusion?ticker=${encodeURIComponent(normalizedTicker)}`,
-        { method: 'GET', headers }
-    );
-
-    if (!response.ok) {
-        throw new Error(`TCBS backtest conclusion API error: ${response.status} ${response.statusText}`);
-    }
-
-    return response.json();
+    const headers = isAsciiToken(token) ? { 'X-TCBS-Token': token } : {};
+    const response = await api.get('/tcbs-data/backtest-conclusion', {
+        params: { ticker: normalizedTicker },
+        headers,
+    });
+    return response.data;
 };

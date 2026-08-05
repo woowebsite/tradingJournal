@@ -1,3 +1,5 @@
+import api from './api';
+
 export const getTCBSToken = async (otp) => {
     const url = `/openapi-tcbs/gaia/v1/oauth2/openapi/token`;
     const tcbsApi = import.meta.env.VITE_TCBS_API;
@@ -136,18 +138,12 @@ export const getTCBSIntradayHistory = async (symbol, jwtToken) => {
 };
 
 export const getTCBSIntradayHistory2 = async (symbol, jwtToken) => {
-    // /api-tcbs proxies to https://apiextaws.tcbs.com.vn
-    const url = `/api-tcbs/futures-insight/v1/intraday/${symbol}/his/paging`;
-    const headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
-    };
-
     try {
-        const response = await fetch(url, { method: 'GET', headers });
-        if (!response.ok) throw new Error(`TCBS Intraday History 2 API Error`);
-        return await response.json();
+        const response = await api.get('/tcbs-data/futures-intraday-history', {
+            params: { ticker: symbol },
+            headers: jwtToken ? { 'X-TCBS-Token': jwtToken } : {},
+        });
+        return response.data;
     } catch (error) {
         console.error("Failed to fetch TCBS Intraday History 2:", error);
         throw error;

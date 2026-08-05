@@ -4,7 +4,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { factories } from '@strapi/strapi';
-import axios from 'axios';
+import { fetchTcbs } from '../../../utils/tcbs-client';
 
 function normalizeRecommendationRows(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
@@ -18,30 +18,21 @@ export default factories.createCoreController('api::tcbs-recommen.tcbs-recommen'
   async sync(ctx) {
     const documents = (strapi as any).documents;
     const uid = 'api::tcbs-recommen.tcbs-recommen';
-    const tcbsToken = ctx.get('x-tcbs-token') || process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN;
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    };
-
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
-      headers.Authorization = `Bearer ${tcbsToken}`;
-    }
-
-    const response = await axios.get('https://apiextaws.tcbs.com.vn/tcanalysis/v1/recommend/his', {
-      params: {
-        fData: 1,
+    const tcbsToken = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token') || process.env.VITE_TCBS_TOKEN;
+    const response = await fetchTcbs(
+      '/tcanalysis/v1/recommend/his',
+      {
+        fData: '1',
         fType: 'market',
-        page: 0,
-        size: 100,
-        fRecommend: 0,
+        page: '0',
+        size: '100',
+        fRecommend: '0',
         fTime: 'A',
       },
-      headers,
-      timeout: 20000,
-    });
+      tcbsToken
+    );
 
-    const rows = normalizeRecommendationRows(response.data);
+    const rows = normalizeRecommendationRows(response);
     const results = [];
 
     for (const row of rows) {
