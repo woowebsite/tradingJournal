@@ -38,8 +38,25 @@ export const fetchSignals = createAsyncThunk(
     'signals/fetchSignals',
     async (_, { rejectWithValue }) => {
         try {
-            const res = await api.get('/signals?populate=*&sort=date:desc&pagination[pageSize]=1000');
-            return res.data.data;
+            const pageSize = 100;
+            let page = 1;
+            let pageCount = 1;
+            const signals = [];
+
+            // Strapi caps REST responses at 100 records. Fetch every page so
+            // historical signals are not lost when the list is sorted by date.
+            do {
+                const res = await api.get(
+                    `/signals?populate=*&sort=date:desc&pagination[page]=${page}&pagination[pageSize]=${pageSize}`
+                );
+                const responseData = res.data;
+
+                signals.push(...(responseData.data || []));
+                pageCount = responseData.meta?.pagination?.pageCount || page;
+                page += 1;
+            } while (page <= pageCount);
+
+            return signals;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
         }

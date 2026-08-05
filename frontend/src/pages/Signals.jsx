@@ -200,10 +200,17 @@ const Signals = () => {
         }
     }, [availableSymbols, selectedSymbol]);
 
+    // When a symbol is explicitly selected, show every signal for that symbol.
+    // The strategy/watchlist filters above are useful for the default overview,
+    // but must not hide historical signals from a symbol-specific lookup.
     const filteredSignals = selectedSymbol
-        ? baseFilteredSignals.filter(signal => {
+        ? signals.filter(signal => {
             const symbolId = signal.symbol?.documentId || signal.symbol?.id;
-            return symbolId?.toString() === selectedSymbol;
+            const matchesSymbol = symbolId?.toString() === selectedSymbol;
+            const matchesRule = !selectedRule || signal.rules?.some(rule =>
+                (rule.id || rule.documentId)?.toString() === selectedRule
+            );
+            return matchesSymbol && matchesRule;
         })
         : baseFilteredSignals;
 

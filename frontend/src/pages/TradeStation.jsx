@@ -285,32 +285,13 @@ const TradeStation = () => {
         });
     })();
 
-    const strategySignals = activeStrategy
-        ? allSignals.filter(signal => {
-            if (!signal.rules || signal.rules.length === 0) return false;
-
-            const strategyRuleIds = new Set();
-            [
-                ...(activeStrategy.rules || []),
-                ...(activeStrategy.entryRules || []),
-                ...(activeStrategy.takeProfitRules || []),
-                ...(activeStrategy.stoplossRules || []),
-                ...(activeStrategy.exitRules || [])
-            ].forEach(rule => {
-                if (rule.id) strategyRuleIds.add(rule.id.toString());
-                if (rule.documentId) strategyRuleIds.add(rule.documentId.toString());
-            });
-
-            return signal.rules.some(rule =>
-                (rule.id && strategyRuleIds.has(rule.id.toString())) ||
-                (rule.documentId && strategyRuleIds.has(rule.documentId.toString()))
-            );
-        })
-        : [];
-
-    // Filter signals for selected symbol and current account strategy.
+    // A symbol-specific Trade Station view should show every signal for that
+    // symbol, including signals from other rules/accounts.
     const symbolSignals = selectedSymbolId
-        ? strategySignals.filter(s => s.symbol.id === selectedSymbolId || s.symbol.documentId === selectedSymbolId)
+        ? allSignals.filter(signal => {
+            const signalSymbolId = signal.symbol?.documentId || signal.symbol?.id;
+            return signalSymbolId?.toString() === selectedSymbolId?.toString();
+        })
         : [];
 
     const symbolTrades = selectedSymbolId ? trades.filter(t => t.symbol.id === selectedSymbolId || t.symbol.documentId === selectedSymbolId) : [];

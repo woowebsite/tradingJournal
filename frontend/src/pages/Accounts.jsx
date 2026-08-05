@@ -10,7 +10,7 @@ const Accounts = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedAccountToEdit, setSelectedAccountToEdit] = useState(null);
-    const { setSelectedAccount } = useAccount();
+    const { setSelectedAccount, defaultAccountId, setDefaultAccountId } = useAccount();
     const navigate = useNavigate();
 
     const fetchAccounts = async () => {
@@ -93,13 +93,37 @@ const Accounts = () => {
 
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-3xl font-bold">Accounts</h2>
-                <button
-                    onClick={openCreateModal}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
-                >
-                    <Plus size={18} />
-                    New Account
-                </button>
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                        <span className="whitespace-nowrap">Default Account</span>
+                        <select
+                            value={defaultAccountId}
+                            onChange={(e) => {
+                                const accountId = e.target.value;
+                                const account = accounts.find(item =>
+                                    String(item.documentId || item.id) === accountId
+                                );
+                                setDefaultAccountId(accountId);
+                                if (account) setSelectedAccount(account);
+                            }}
+                            className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">Select account</option>
+                            {accounts.map(account => (
+                                <option key={account.documentId || account.id} value={account.documentId || account.id}>
+                                    {account.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <button
+                        onClick={openCreateModal}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
+                    >
+                        <Plus size={18} />
+                        New Account
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
