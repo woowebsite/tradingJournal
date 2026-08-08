@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { fetchTrades, saveTrade, deleteTrade } from '../features/tradeSlice';
+import { fetchTrades, saveTrade, deleteTrade, deleteDemoTradesByStrategy } from '../features/tradeSlice';
 import { Filter, Edit2, RefreshCw } from 'lucide-react';
 import TradeModal from '../components/TradeModal';
 import TradeDetailModal from '../components/TradeDetailModal';
@@ -25,6 +25,7 @@ const Backtest = () => {
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [tradeToEdit, setTradeToEdit] = useState(null);
     const [strategyFilter, setStrategyFilter] = useState('');
+    const [resettingDemoTrades, setResettingDemoTrades] = useState(false);
 
     const refreshBacktestTrades = useCallback(() => {
         dispatch(fetchTrades({ mode: 'Demo', strategyId: strategyFilter }));
@@ -107,7 +108,7 @@ const Backtest = () => {
         );
     }, [activeStrategy, rules]);
 
-    const handleScanSignals = () => {
+    const handleScanSignals = async () => {
         if (!activeStrategy) {
             alert('Please select a strategy before scanning.');
             return;
@@ -127,15 +128,26 @@ const Backtest = () => {
         const selectedRuleIds = availableRules.map(rule => rule.documentId || rule.id).filter(Boolean);
         const strategyId = activeStrategy.documentId || activeStrategy.id;
 
-        dispatch(scanSignals({ selectedRuleIds, accountId, strategyId, syncDemoTrades: true }))
-            .unwrap()
-            .then((count) => {
-                refreshBacktestTrades();
-                alert(`Scan complete. Found ${count} new signals.`);
-            })
-            .catch((err) => {
-                alert(`Scan failed: ${err}`);
-            });
+        try {
+            setResettingDemoTrades(true);
+            await dispatch(deleteDemoTradesByStrategy(strategyId)).unwrap();
+            setResettingDemoTrades(false);
+
+            const count = await dispatch(scanSignals({
+                selectedRuleIds,
+                accountId,
+                strategyId,
+                syncDemoTrades: true
+            })).unwrap();
+
+            refreshBacktestTrades();
+            alert(`Scan complete. Found ${count} new signals.`);
+        } catch (err) {
+            refreshBacktestTrades();
+            alert(`Scan failed: ${err?.message || JSON.stringify(err) || err}`);
+        } finally {
+            setResettingDemoTrades(false);
+        }
     };
 
 
@@ -223,11 +235,11 @@ const Backtest = () => {
                     </div>
                     <button
                         onClick={handleScanSignals}
-                        disabled={scanningSignals}
+                        disabled={scanningSignals || resettingDemoTrades}
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/50 disabled:cursor-not-allowed rounded-lg transition font-medium text-white shadow-lg shadow-emerald-500/20"
                     >
-                        <RefreshCw size={18} className={scanningSignals ? 'animate-spin' : ''} />
-                        Scan Signals
+                        <RefreshCw size={18} className={scanningSignals || resettingDemoTrades ? 'animate-spin' : ''} />
+                        {resettingDemoTrades ? 'Resetting Demo Trades...' : 'Scan Signals'}
                     </button>
                 </div>
             </div>

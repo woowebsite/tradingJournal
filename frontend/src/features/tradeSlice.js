@@ -218,6 +218,51 @@ export const deleteTrade = createAsyncThunk(
     }
 );
 
+export const deleteDemoTradesByStrategy = createAsyncThunk(
+    'trades/deleteDemoTradesByStrategy',
+    async (strategyId, { rejectWithValue }) => {
+        try {
+            if (!strategyId) throw new Error('Strategy ID is required.');
+
+            const trades = [];
+            const pageSize = 100;
+            let page = 1;
+            let pageCount = 1;
+            const strategyFilter = typeof strategyId === 'string' ? 'documentId' : 'id';
+
+            do {
+                const url = `/trades?filters[mode][$eq]=Demo` +
+                    `&filters[strategy][${strategyFilter}][$eq]=${encodeURIComponent(strategyId)}` +
+                    `&populate[0]=trade_details&pagination[page]=${page}&pagination[pageSize]=${pageSize}`;
+                const res = await api.get(url);
+                trades.push(...(res.data?.data || []));
+                pageCount = res.data?.meta?.pagination?.pageCount || 1;
+                page++;
+            } while (page <= pageCount);
+
+            const detailIds = Array.from(new Set(
+                trades.flatMap(trade => trade.trade_details || [])
+                    .map(detail => detail.documentId || detail.id)
+                    .filter(Boolean)
+            ));
+            const tradeIds = trades
+                .map(trade => trade.documentId || trade.id)
+                .filter(Boolean);
+
+            // TradeDetail must be removed first because it owns the relation to Trade.
+            await Promise.all(detailIds.map(id => api.delete(`/trade-details/${id}`)));
+            await Promise.all(tradeIds.map(id => api.delete(`/trades/${id}`)));
+
+            return {
+                deletedTradeCount: tradeIds.length,
+                deletedTradeDetailCount: detailIds.length
+            };
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
 export const executeSignalTrade = createAsyncThunk(
     'trades/executeSignalTrade',
     async ({ signal, price, volume, accountId, symbolId, screenshotFile, account }, { rejectWithValue }) => {
