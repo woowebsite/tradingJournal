@@ -6,7 +6,15 @@ import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimo
 
 const getRuleId = (rule) => rule?.documentId || rule?.id || '';
 
-const TradingViewChart = ({ data, symbol, signals = [], strategy = null, template = 'Supertrend' }) => {
+const TradingViewChart = ({
+    data,
+    symbol,
+    signals = [],
+    strategy = null,
+    template = 'Supertrend',
+    disableScrollZoom = false,
+    disableChartMove = false
+}) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
     const [hoverTooltip, setHoverTooltip] = useState(null);
@@ -39,7 +47,7 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null, templat
 
             const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
             const ruleId = String(getRuleId(rule));
-            const type = strategyRuleLookup.get(ruleId) || 'unknown';
+            const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || 'unknown';
 
             const colors = {
                 entry: '#60a5fa', // blue
@@ -111,7 +119,16 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null, templat
             },
             crosshair: {
                 mode: 0, // CrosshairMode.Normal
-            }
+            },
+            handleScale: {
+                mouseWheel: !disableScrollZoom,
+            },
+            handleScroll: {
+                mouseWheel: !disableChartMove,
+                pressedMouseMove: !disableChartMove,
+                horzTouchDrag: !disableChartMove,
+                vertTouchDrag: !disableChartMove,
+            },
         };
 
         const chart = createChart(chartContainerRef.current, {
@@ -200,7 +217,7 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null, templat
 
                 const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
                 const ruleId = String(getRuleId(rule));
-                const type = strategyRuleLookup.get(ruleId) || 'unknown';
+                const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || 'unknown';
 
                 const colors = {
                     entry: '#60a5fa', // blue
@@ -316,7 +333,7 @@ const TradingViewChart = ({ data, symbol, signals = [], strategy = null, templat
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template]);
+    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, disableScrollZoom, disableChartMove]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">

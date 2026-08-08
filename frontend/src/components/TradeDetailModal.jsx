@@ -1,19 +1,21 @@
-import { useState, useEffect } from 'react';
-import { X, DollarSign, Image as ImageIcon, Pencil, ExternalLink } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, DollarSign, Image as ImageIcon, Pencil, ExternalLink, ChartCandlestick } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../utils/formatNumber';
 import { useAccount } from '../context/AccountContext';
 import { useDispatch } from 'react-redux';
-import { fetchLatestHistory } from '../features/marketSlice';
+import { fetchLatestHistory, fetchPagedSymbolHistories } from '../features/marketSlice';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import useEscapeKey from '../hooks/useEscapeKey';
+import TradingViewChart from './TradingViewChart';
 
 const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const navigate = useNavigate();
     const [currentPrice, setCurrentPrice] = useState('');
+    const [chartState, setChartState] = useState({ symbolId: null, data: [], error: '' });
 
     useEffect(() => {
         const fetchPrice = async () => {
@@ -40,6 +42,51 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
 
         fetchPrice();
     }, [isOpen, trade, dispatch]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const symbolId = trade?.symbol?.documentId || trade?.symbol?.id;
+
+        if (!isOpen || !symbolId) return () => { cancelled = true; };
+
+        fetchPagedSymbolHistories(symbolId)
+            .then(data => {
+                if (!cancelled) setChartState({ symbolId, data, error: '' });
+            })
+            .catch(error => {
+                console.error('Failed to fetch chart history:', error);
+                if (!cancelled) {
+                    setChartState({ symbolId, data: [], error: 'Unable to load chart data.' });
+                }
+            });
+
+        return () => { cancelled = true; };
+    }, [isOpen, trade?.symbol?.documentId, trade?.symbol?.id]);
+
+    const activeSymbolId = trade?.symbol?.documentId || trade?.symbol?.id;
+    const chartLoading = Boolean(isOpen && activeSymbolId && chartState.symbolId !== activeSymbolId);
+    const chartData = chartState.symbolId === activeSymbolId ? chartState.data : [];
+    const chartError = chartState.symbolId === activeSymbolId ? chartState.error : '';
+
+    const chartSignals = useMemo(() => (trade?.trade_details || [])
+        .filter(detail => detail.date && detail.signal)
+        .map(detail => {
+            const normalizedSignal = String(detail.signal).toLowerCase().replace(/[\s_-]/g, '');
+            let type = 'unknown';
+            if (normalizedSignal.includes('entry') || normalizedSignal.includes('buy')) type = 'entry';
+            else if (normalizedSignal.includes('takeprofit') || normalizedSignal === 'tp') type = 'takeprofit';
+            else if (normalizedSignal.includes('stoploss') || normalizedSignal === 'sl') type = 'stoploss';
+            else if (normalizedSignal.includes('exit') || normalizedSignal.includes('sell')) type = 'exit';
+
+            return {
+                date: detail.date,
+                rules: [{
+                    documentId: `trade-detail-${detail.documentId || detail.id || detail.date}`,
+                    Name: detail.signal,
+                    Type: type
+                }]
+            };
+        }), [trade?.trade_details]);
 
     useEscapeKey(onClose, isOpen);
 
@@ -102,7 +149,7 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-4xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-6xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="p-6 border-b border-gray-800 flex justify-between items-start bg-gray-800/50">
                     <div>
@@ -144,6 +191,40 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
 
                 {/* Scrollable Content */}
                 <div className="overflow-y-auto p-6 space-y-8 flex-1">
+                    {/* Symbol chart with trade signals */}
+                    <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <h4 className="text-lg font-semibold text-gray-200 flex items-center gap-2">
+                                <ChartCandlestick size={18} /> Symbol Chart
+                            </h4>
+                            <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                                <span className="text-blue-400">● Entry</span>
+                                <span className="text-green-400">● Take Profit</span>
+                                <span className="text-red-400">● Stop Loss</span>
+                                <span className="text-orange-400">● Exit</span>
+                            </div>
+                        </div>
+                        <div className="relative h-[520px] overflow-hidden rounded-xl border border-gray-700/50 bg-gray-800">
+                            {chartLoading ? (
+                                <div className="absolute inset-0 flex items-center justify-center text-sm text-blue-400 animate-pulse">
+                                    Loading chart...
+                                </div>
+                            ) : chartError ? (
+                                <div className="absolute inset-0 flex items-center justify-center text-sm text-red-400">
+                                    {chartError}
+                                </div>
+                            ) : (
+                                <TradingViewChart
+                                    data={chartData}
+                                    symbol={trade.symbol?.Name || trade.symbol?.name}
+                                    signals={chartSignals}
+                                    disableScrollZoom
+                                    disableChartMove
+                                />
+                            )}
+                        </div>
+                    </div>
+
                     {/* PnL and Quantity Summary */}
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700/50">
