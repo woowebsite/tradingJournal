@@ -5,9 +5,25 @@ export const fetchRules = createAsyncThunk(
     'rules/fetchRules',
     async (filterStatus, { rejectWithValue }) => {
         try {
-            let url = '/rules?populate=*';
-            const res = await api.get(url);
-            return res.data.data;
+            const pageSize = 100;
+            let page = 1;
+            let rules = [];
+            let pageCount = 1;
+
+            // Strapi limits REST responses to 100 records per page. Keep
+            // requesting pages until the API reports that every page is read.
+            do {
+                const res = await api.get(
+                    `/rules?populate=*&pagination[page]=${page}&pagination[pageSize]=${pageSize}`
+                );
+                const responseData = res.data;
+
+                rules = rules.concat(responseData.data || []);
+                pageCount = responseData.meta?.pagination?.pageCount || page;
+                page += 1;
+            } while (page <= pageCount);
+
+            return rules;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
         }

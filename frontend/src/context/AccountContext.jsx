@@ -6,6 +6,7 @@ import { fetchSymbols } from '../features/symbolSlice';
 import api from '../services/api';
 
 const AccountContext = createContext();
+const DEFAULT_ACCOUNT_STORAGE_KEY = 'trading_journal_default_account_id';
 
 export const useAccount = () => useContext(AccountContext);
 
@@ -13,6 +14,9 @@ export const AccountProvider = ({ children }) => {
     const dispatch = useDispatch();
     const [accounts, setAccounts] = useState([]);
     const [selectedAccount, setSelectedAccount] = useState(null);
+    const [defaultAccountId, setDefaultAccountIdState] = useState(() =>
+        localStorage.getItem(DEFAULT_ACCOUNT_STORAGE_KEY) || ''
+    );
     const [selectedWatchlist, setSelectedWatchlist] = useState(null);
     const [loading, setLoading] = useState(true);
     const { items: symbols } = useSelector(state => state.symbols);
@@ -34,8 +38,16 @@ export const AccountProvider = ({ children }) => {
 
                 setAccounts(formattedAccounts);
 
-                // Default to first account if none selected
-                if (formattedAccounts.length > 0 && !selectedAccount) {
+                const savedDefaultId = localStorage.getItem(DEFAULT_ACCOUNT_STORAGE_KEY);
+                const defaultAccount = formattedAccounts.find(account =>
+                    String(account.documentId || account.id) === String(savedDefaultId)
+                );
+
+                if (defaultAccount) {
+                    setDefaultAccountIdState(String(defaultAccount.documentId || defaultAccount.id));
+                    setSelectedAccount(defaultAccount);
+                } else if (formattedAccounts.length > 0 && !selectedAccount) {
+                    // Keep the existing first-account fallback when no default is set.
                     setSelectedAccount(formattedAccounts[0]);
                 }
             } catch (error) {
@@ -47,6 +59,17 @@ export const AccountProvider = ({ children }) => {
 
         fetchAccounts();
     }, []);
+
+    const setDefaultAccountId = (accountId) => {
+        const normalizedId = accountId ? String(accountId) : '';
+        setDefaultAccountIdState(normalizedId);
+
+        if (normalizedId) {
+            localStorage.setItem(DEFAULT_ACCOUNT_STORAGE_KEY, normalizedId);
+        } else {
+            localStorage.removeItem(DEFAULT_ACCOUNT_STORAGE_KEY);
+        }
+    };
 
     useEffect(() => {
         if (selectedAccount?.market) {
@@ -108,6 +131,8 @@ export const AccountProvider = ({ children }) => {
             accounts,
             selectedAccount,
             setSelectedAccount,
+            defaultAccountId,
+            setDefaultAccountId,
             loading,
             accountSymbols,
             defaultWatchlist,
