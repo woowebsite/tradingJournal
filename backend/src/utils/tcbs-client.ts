@@ -18,6 +18,7 @@ export async function fetchTcbs(pathname: string, params: Record<string, string>
 
   if (!response.ok) {
     const body = await response.text();
+    console.error(`TCBS API token: ${token}`);
     throw new Error(`TCBS API error: ${response.status} ${body.slice(0, 200)}`);
   }
 

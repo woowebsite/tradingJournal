@@ -285,12 +285,35 @@ const TradeStation = () => {
         });
     })();
 
-    // A symbol-specific Trade Station view should show every signal for that
-    // symbol, including signals from other rules/accounts.
+    const activeStrategyRuleIds = new Set([
+        ...(activeStrategy?.rules || []),
+        ...(activeStrategy?.entryRules || []),
+        ...(activeStrategy?.takeProfitRules || []),
+        ...(activeStrategy?.stoplossRules || []),
+        ...(activeStrategy?.exitRules || [])
+    ]
+        .map(rule => rule?.documentId || rule?.id || rule)
+        .filter(Boolean)
+        .map(id => id.toString()));
+
+    // Signals do not store the strategy directly. They are linked to the
+    // account and to rules, so use the active strategy's rule IDs here.
     const symbolSignals = selectedSymbolId
         ? allSignals.filter(signal => {
             const signalSymbolId = signal.symbol?.documentId || signal.symbol?.id;
-            return signalSymbolId?.toString() === selectedSymbolId?.toString();
+            if (signalSymbolId?.toString() !== selectedSymbolId?.toString()) return false;
+
+            const signalAccountId = signal.account?.documentId || signal.account?.id;
+            const selectedAccountId = selectedAccount?.documentId || selectedAccount?.id;
+            if (!signalAccountId || !selectedAccountId || signalAccountId.toString() !== selectedAccountId.toString()) {
+                return false;
+            }
+
+            if (activeStrategyRuleIds.size === 0) return false;
+            return (signal.rules || []).some(rule => {
+                const ruleId = rule?.documentId || rule?.id || rule;
+                return ruleId && activeStrategyRuleIds.has(ruleId.toString());
+            });
         })
         : [];
 

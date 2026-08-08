@@ -113,6 +113,15 @@ const Signals = () => {
 
         let list = signals;
 
+        // Signals are associated with an account. Keep the list scoped to the
+        // currently selected account before applying strategy/rule filters.
+        const currentAccountId = selectedAccount.documentId || selectedAccount.id;
+        list = list.filter(signal => {
+            const signalAccountId = signal.account?.documentId || signal.account?.id;
+            return signalAccountId && currentAccountId &&
+                signalAccountId.toString() === currentAccountId.toString();
+        });
+
         // 1. Filter by Strategy Rules
         // Collect ALL valid identifiers (id and documentId) from all strategy rule categories
         const strategyRuleIdentifiers = new Set();
@@ -200,11 +209,10 @@ const Signals = () => {
         }
     }, [availableSymbols, selectedSymbol]);
 
-    // When a symbol is explicitly selected, show every signal for that symbol.
-    // The strategy/watchlist filters above are useful for the default overview,
-    // but must not hide historical signals from a symbol-specific lookup.
+    // A symbol selection narrows the already strategy-scoped list; it must not
+    // bypass the active strategy filter.
     const filteredSignals = selectedSymbol
-        ? signals.filter(signal => {
+        ? baseFilteredSignals.filter(signal => {
             const symbolId = signal.symbol?.documentId || signal.symbol?.id;
             const matchesSymbol = symbolId?.toString() === selectedSymbol;
             const matchesRule = !selectedRule || signal.rules?.some(rule =>

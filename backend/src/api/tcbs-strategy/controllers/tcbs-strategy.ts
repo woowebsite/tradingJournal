@@ -55,7 +55,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     const params = Object.fromEntries(allowedParams[resource]
       .filter(key => ctx.query[key] !== undefined)
       .map(key => [key, String(ctx.query[key])]));
-    const token = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token');
+    const token = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
 
     try {
       ctx.body = await fetchTcbs(
@@ -96,7 +96,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       });
     }
 
-    const tcbsToken = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token') || process.env.VITE_TCBS_TOKEN;
+    const tcbsToken = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
     const response = await fetchTcbs(
       '/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-signal',
       {
@@ -181,7 +181,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     const documents = (strapi as any).documents;
     const detailUid = 'api::tcbs-strategy-detail.tcbs-strategy-detail';
 
-    const tcbsToken = process.env.TCBS_TOKEN || ctx.get('x-tcbs-token') || process.env.VITE_TCBS_TOKEN;
+    const tcbsToken = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
     const response = await fetchTcbs(
       '/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-detail',
       {
