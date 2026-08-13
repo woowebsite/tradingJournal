@@ -23,7 +23,7 @@ const SignalPanel = ({ trades, signals }) => {
                     title="Recent Trades"
                 >
                     <Activity size={14} />
-                    Recent News
+                    Recent Trades
                 </button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
