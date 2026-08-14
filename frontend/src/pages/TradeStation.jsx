@@ -4,15 +4,17 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata } from '../features/marketSlice';
 import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
-import { fetchOpenTrades, fetchTrades } from '../features/tradeSlice';
+import { deleteTrade, fetchOpenTrades, fetchTrades, saveTrade } from '../features/tradeSlice';
 import { createSymbol } from '../features/symbolSlice';
 import { fetchWatchlists, updateWatchlist } from '../features/watchlistSlice';
 import TradingViewChart from '../components/TradingViewChart';
 import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
 import TechnicalPanel from '../containers/TechnicalPanel';
-import SignalPanel from '../containers/SignalPanel';
+import WatchlistSelector from '../components/WatchlistSelector';
 import TradeStationOrderForm from '../components/TradeStationOrderForm';
+import TradeDetailModal from '../components/TradeDetailModal';
+import TradeModal from '../components/TradeModal';
 import { Search, RefreshCw, Plus } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
@@ -26,11 +28,14 @@ import { getStrategyId } from '../utils/roadmapCalculations';
 const TradeStation = () => {
     const dispatch = useDispatch();
     const { symbols, histories, externalIndicators, loading } = useSelector(state => state.market);
-    const { items: trades } = useSelector(state => state.trades);
     const { items: allSignals } = useSelector(state => state.signals);
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
     const [selectedSymbolId, setSelectedSymbolId] = useState(null);
+    const [accountTrades, setAccountTrades] = useState([]);
+    const [selectedTrade, setSelectedTrade] = useState(null);
+    const [tradeToEdit, setTradeToEdit] = useState(null);
+    const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
     const [tcbsRecommendations, setTcbsRecommendations] = useState([]);
     const [tcbsRecentSignals, setTcbsRecentSignals] = useState([]);
     const [loadingTcbsInsights, setLoadingTcbsInsights] = useState(false);
@@ -98,10 +103,28 @@ const TradeStation = () => {
     }, [dispatch, selectedSymbolId, symbols]); // 'symbols' dependency keeps the selected symbol lookup stable
 
     useEffect(() => {
-        if (selectedAccount) {
-            const accId = selectedAccount.documentId || selectedAccount.id;
-            dispatch(fetchTrades({ accountId: accId, pageSize: 50 }));
+        const accountId = selectedAccount?.documentId || selectedAccount?.id;
+        if (!accountId) {
+            setAccountTrades([]);
+            return;
         }
+
+        let cancelled = false;
+        dispatch(fetchTrades({ accountId, pageSize: 50 }))
+            .unwrap()
+            .then(fetchedTrades => {
+                if (!cancelled) setAccountTrades(fetchedTrades || []);
+            })
+            .catch(error => {
+                if (!cancelled) {
+                    console.error('Failed to fetch Trade Station account trades:', error);
+                    setAccountTrades([]);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [dispatch, selectedAccount]);
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
@@ -161,8 +184,51 @@ const TradeStation = () => {
     const refreshSelectedAccountTrades = useCallback(() => {
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
         if (!accountId) return Promise.resolve();
-        return dispatch(fetchTrades({ accountId, pageSize: 50 })).unwrap();
+        return dispatch(fetchTrades({ accountId, pageSize: 50 }))
+            .unwrap()
+            .then(fetchedTrades => {
+                setAccountTrades(fetchedTrades || []);
+                return fetchedTrades;
+            });
     }, [dispatch, selectedAccount]);
+
+    const handleEditTrade = useCallback((trade) => {
+        setSelectedTrade(null);
+        setTradeToEdit(trade);
+        setIsTradeModalOpen(true);
+    }, []);
+
+    const handleSaveTrade = useCallback(async (tradeData) => {
+        try {
+            await dispatch(saveTrade({ tradeData, tradeToEdit })).unwrap();
+            await refreshSelectedAccountTrades();
+            dispatch(fetchOpenTrades({ accountId: selectedAccount?.documentId || selectedAccount?.id }));
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Failed to save trade from Trade Station:', error);
+            alert(`Failed to save trade: ${error?.error?.message || error?.message || error}`);
+        }
+    }, [dispatch, refreshSelectedAccountTrades, selectedAccount, tradeToEdit]);
+
+    const handleDeleteTrade = useCallback(async () => {
+        if (!tradeToEdit) return;
+        if (!window.confirm('Delete this trade and all of its trade details?')) return;
+
+        try {
+            await dispatch(deleteTrade({
+                tradeId: tradeToEdit.documentId || tradeToEdit.id,
+                tradeDetails: tradeToEdit.trade_details || []
+            })).unwrap();
+            await refreshSelectedAccountTrades();
+            dispatch(fetchOpenTrades({ accountId: selectedAccount?.documentId || selectedAccount?.id }));
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Failed to delete trade from Trade Station:', error);
+            alert(`Failed to delete trade: ${error?.error?.message || error?.message || error}`);
+        }
+    }, [dispatch, refreshSelectedAccountTrades, selectedAccount, tradeToEdit]);
 
     const handleCreateMissingSymbol = useCallback(async (formData) => {
         const name = String(formData?.Name || '').trim();
@@ -317,7 +383,26 @@ const TradeStation = () => {
         })
         : [];
 
-    const symbolTrades = selectedSymbolId ? trades.filter(t => t.symbol.id === selectedSymbolId || t.symbol.documentId === selectedSymbolId) : [];
+    // Older manually-created trades may not have `mode` persisted even though
+    // Real is the schema default. Demo trades are always explicitly marked.
+    const realTrades = accountTrades.filter(trade => trade.mode !== 'Demo');
+
+    const symbolTrades = selectedSymbolId
+        ? realTrades.filter(trade => {
+            const tradeSymbolIds = [trade.symbol?.documentId, trade.symbol?.id]
+                .filter(id => id !== undefined && id !== null)
+                .map(String);
+            const selectedSymbolIds = [selectedSymbol?.documentId, selectedSymbol?.id, selectedSymbolId]
+                .filter(id => id !== undefined && id !== null)
+                .map(String);
+            const idsMatch = tradeSymbolIds.some(id => selectedSymbolIds.includes(id));
+            const namesMatch = trade.symbol?.Name && selectedSymbol?.Name
+                && trade.symbol.Name.trim().toUpperCase() === selectedSymbol.Name.trim().toUpperCase();
+
+            return idsMatch || namesMatch;
+        })
+        : realTrades;
+
 
     const handleRefresh = useCallback(() => {
         if (!selectedSymbol || !selectedSymbolId) return;
@@ -362,11 +447,11 @@ const TradeStation = () => {
             })
             .then(() => {
                 dispatch(fetchSignals());
-                if (accountId) dispatch(fetchTrades({ accountId, pageSize: 50 }));
+                if (accountId) refreshSelectedAccountTrades();
             })
             .catch(err => console.error(`Failed to refresh history: ${err}`));
 
-    }, [activeStrategy, activeStrategyId, dispatch, selectedAccount, selectedSymbol, selectedSymbolId]);
+    }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId]);
 
     useEffect(() => {
         if (!symbolParam || !selectedSymbol || !selectedSymbolId) return;
@@ -452,12 +537,25 @@ const TradeStation = () => {
                     <StrategyPanel
                         activeStrategy={activeStrategy}
                         trades={symbolTrades}
+                        onTradeClick={setSelectedTrade}
+                        signals={symbolSignals}
                         recommendations={tcbsRecommendations}
                         tcbsSignals={tcbsRecentSignals}
                         loadingTcbsInsights={loadingTcbsInsights}
                     />
                 </div>
                 <div className="w-80 flex flex-col gap-4 h-full shrink-0">
+                    <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 shadow-lg flex flex-col">
+                        <WatchlistSelector
+                            className="justify-between mt-2"
+                            showSymbols={true}
+                            selectedSymbolId={selectedSymbolId}
+                            onSymbolClick={(symbol) => {
+                                setSelectedSymbolId(symbol.documentId || symbol.id);
+                                setSearchParams({ symbol: symbol.Name }, { replace: true });
+                            }}
+                        />
+                    </div>
                     <TradeStationOrderForm
                         key={tradeSetupKey}
                         selectedAccount={selectedAccount}
@@ -466,10 +564,25 @@ const TradeStation = () => {
                         value={tradeSetupValue}
                         onSaved={refreshSelectedAccountTrades}
                     />
-                    <SignalPanel trades={symbolTrades} signals={symbolSignals} />
                     <TechnicalPanel externalIndicators={externalIndicators} />
                 </div>
             </div>
+            <TradeDetailModal
+                isOpen={Boolean(selectedTrade)}
+                onClose={() => setSelectedTrade(null)}
+                trade={selectedTrade}
+                onEdit={handleEditTrade}
+            />
+            <TradeModal
+                isOpen={isTradeModalOpen}
+                onClose={() => {
+                    setIsTradeModalOpen(false);
+                    setTradeToEdit(null);
+                }}
+                onSubmit={handleSaveTrade}
+                onDelete={handleDeleteTrade}
+                initialData={tradeToEdit}
+            />
         </div>
     );
 };

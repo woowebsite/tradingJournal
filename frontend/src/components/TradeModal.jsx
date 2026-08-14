@@ -285,6 +285,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
 
     const payload = {
       ...formData,
+      mode: initialData?.mode || 'Real',
       scoreds: selectedScoredIds,
       // Pass details as is, formatted
       trade_details: formData.trade_details.map(d => ({
@@ -384,6 +385,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
 
     const payload = {
       ...formData,
+      mode: initialData?.mode || 'Real',
       trade_details: newDetails.map(d => ({
         ...d,
         price: parseFloat(d.price) || 0,
