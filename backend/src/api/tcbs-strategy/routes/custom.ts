@@ -24,6 +24,12 @@ export default {
     },
     {
       method: 'GET',
+      path: '/tcbs-strategies/sync-investor',
+      handler: 'tcbs-strategy.syncInvestor',
+      config: { auth: false },
+    },
+    {
+      method: 'GET',
       path: '/tcbs-strategies/get-detail',
       handler: 'tcbs-strategy.getDetail',
       config: {

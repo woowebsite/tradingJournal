@@ -503,6 +503,46 @@ export interface ApiIndustryIndustry extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiInvestorInvestor extends Struct.CollectionTypeSchema {
+  collectionName: 'investors';
+  info: {
+    displayName: 'Investor';
+    pluralName: 'investors';
+    singularName: 'investor';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    buyPercent: Schema.Attribute.Decimal;
+    buyVolume: Schema.Attribute.Integer;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    investorType: Schema.Attribute.Enumeration<['CM', 'SG', 'CN']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::investor.investor'
+    > &
+      Schema.Attribute.Private;
+    marketNetBuy: Schema.Attribute.Integer;
+    netBuy: Schema.Attribute.Integer;
+    netBuyAmount: Schema.Attribute.Integer;
+    netShort: Schema.Attribute.Integer;
+    netWeight: Schema.Attribute.Integer;
+    publishedAt: Schema.Attribute.DateTime;
+    sellPercent: Schema.Attribute.Decimal;
+    sellVolume: Schema.Attribute.Integer;
+    sourceDate: Schema.Attribute.String;
+    symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiMarketAnalyticMarketAnalytic
   extends Struct.CollectionTypeSchema {
   collectionName: 'market_analytics';
@@ -1129,6 +1169,7 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     industryIdLevel2: Schema.Attribute.String;
     industryIdLevel4: Schema.Attribute.String;
     industryIDv2: Schema.Attribute.String;
+    investors: Schema.Attribute.Relation<'oneToMany', 'api::investor.investor'>;
     issueShare: Schema.Attribute.Decimal;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
@@ -2030,6 +2071,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::account.account': ApiAccountAccount;
       'api::industry.industry': ApiIndustryIndustry;
+      'api::investor.investor': ApiInvestorInvestor;
       'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;

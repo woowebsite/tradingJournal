@@ -32,9 +32,12 @@ const Sidebar = () => {
                     subItems: [
                         { label: 'Today', path: '/today-trades' },
                         { label: 'Porfolio', path: '/portfolio' },
+                        { label: 'Investor', path: '/investor-insight' },
                     ]
                 },
-                { icon: TrendingUp, label: 'Derivation', path: '/derivation' },
+                {
+                    icon: TrendingUp, label: 'Derivation', path: '/derivation',
+                },
                 {
                     icon: NotebookPen,
                     label: 'Journal',

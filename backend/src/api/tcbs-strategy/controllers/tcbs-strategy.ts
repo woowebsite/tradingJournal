@@ -19,6 +19,8 @@ const TCBS_ENDPOINTS: Record<string, string> = {
   'ticker-overview': '/tcanalysis/v1/ticker/:ticker/overview',
   'stock-ratio': '/tcanalysis/v1/ticker/:ticker/stockratio',
   'futures-intraday-history': '/futures-insight/v1/intraday/:ticker/his/paging',
+  'futures-investor': '/futures-insight/v1/intraday/:ticker/investor',
+  'stock-investor': '/stock-insight/v1/intraday/:ticker/investor',
   'backtest-conclusion': '/tcbs-hfc-data/v2/digital/backtest-conclusion',
 };
 
@@ -28,6 +30,16 @@ function normalizeSignalRows(payload: any): any[] {
   if (Array.isArray(payload?.Data)) return payload.Data;
   if (Array.isArray(payload?.result)) return payload.result;
   return [];
+}
+
+function normalizeInvestorDate(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
+  if (!match) return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  const [, day, month, year] = match;
+  const fullYear = year.length === 2 ? `20${year}` : year;
+  const date = `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
 }
 
 export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy' as any, ({ strapi }) => ({
@@ -50,6 +62,8 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       'ticker-overview': [],
       'stock-ratio': [],
       'futures-intraday-history': [],
+      'futures-investor': ['wsize'],
+      'stock-investor': ['wsize'],
       'backtest-conclusion': ['ticker'],
     };
     const params = Object.fromEntries(allowedParams[resource]
@@ -228,6 +242,93 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     ctx.body = {
       data: result,
     };
+  },
+
+  async syncInvestor(ctx) {
+    const ticker = String(ctx.query.ticker || '').trim().toUpperCase();
+    const wsize = String(ctx.query.wsize || '1M');
+    if (!/^[A-Z0-9]{1,20}$/.test(ticker)) return ctx.badRequest('A valid ticker is required');
+
+    const documents = (strapi as any).documents;
+    let symbol = await documents('api::symbol.symbol').findFirst({
+      filters: { $or: [{ ticker }, { Name: ticker }] },
+    });
+    if (!symbol) {
+      symbol = await documents('api::symbol.symbol').create({
+        data: { Name: ticker, ticker },
+      });
+      if (!symbol.publishedAt) {
+        try {
+          await documents('api::symbol.symbol').publish({ documentId: symbol.documentId });
+        } catch (error: any) {
+          if (!String(error?.message || '').includes('already exists')) throw error;
+        }
+      }
+    }
+    const symbolDocumentFilter = symbol.documentId
+      ? { documentId: symbol.documentId }
+      : { id: symbol.id };
+
+    const token = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
+    const investorPath = /^[A-Z]+$/.test(ticker)
+      ? `/stock-insight/v1/intraday/${encodeURIComponent(ticker)}/investor`
+      : `/futures-insight/v1/intraday/${encodeURIComponent(ticker)}/investor`;
+    const response = await fetchTcbs(
+      investorPath,
+      { wsize },
+      token
+    );
+    const rows = normalizeSignalRows(response);
+    const groups = [
+      { investorType: 'CM', buy: 'shb', sell: 'shs', buyPercent: 'shbp', sellPercent: 'shsp' },
+      { investorType: 'SG', buy: 'wob', sell: 'wos', buyPercent: 'wobp', sellPercent: 'wosp' },
+      { investorType: 'CN', buy: 'skb', sell: 'sks', buyPercent: 'skbp', sellPercent: 'sksp' },
+    ];
+    const saved = [];
+    for (const row of rows) {
+      if (!row?.t) continue;
+      const date = normalizeInvestorDate(row.t);
+      if (!date) continue;
+      for (const group of groups) {
+        const data = {
+          investorType: group.investorType,
+          date,
+          sourceDate: String(row.t),
+          buyVolume: row[group.buy] ?? null,
+          sellVolume: row[group.sell] ?? null,
+          buyPercent: row[group.buyPercent] ?? null,
+          sellPercent: row[group.sellPercent] ?? null,
+          netBuy: row[group.buy] != null && row[group.sell] != null
+            ? Number(row[group.buy]) - Number(row[group.sell])
+            : null,
+          marketNetBuy: row.nsb ?? null,
+          netWeight: row.nwb ?? null,
+          netShort: row.nskb ?? null,
+          netBuyAmount: row.nba ?? null,
+          symbol: symbol.documentId || symbol.id,
+        };
+        const existing = await documents('api::investor.investor').findFirst({
+          filters: { symbol: symbolDocumentFilter, date, investorType: group.investorType },
+        });
+        const result = existing
+          ? await documents('api::investor.investor').update({ documentId: existing.documentId, data })
+          : await documents('api::investor.investor').create({ data });
+        // A second sync can find the already-published version of a document.
+        // Publishing it again makes Strapi try to create a second published
+        // entry with the same documentId, so only publish draft results.
+        if (!result.publishedAt) {
+          try {
+            await documents('api::investor.investor').publish({ documentId: result.documentId });
+          } catch (error: any) {
+            // Strapi can still return this race-condition error when the
+            // published version was created between update and publish.
+            if (!String(error?.message || '').includes('already exists')) throw error;
+          }
+        }
+        saved.push(result);
+      }
+    }
+    ctx.body = { data: { ticker, wsize, totalFromTcbs: rows.length, saved: saved.length, investors: saved } };
   },
 
   async getDetail(ctx) {

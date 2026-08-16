@@ -62,6 +62,8 @@ export default {
         'api::tcbs-strategy-signal.tcbs-strategy-signal.create',
         'api::tcbs-strategy-signal.tcbs-strategy-signal.update',
         'api::tcbs-strategy-signal.tcbs-strategy-signal.delete',
+        'api::tcbs-recommen.tcbs-recommen.find',
+        'api::tcbs-recommen.tcbs-recommen.findOne',
         'api::symbol.symbol.find',
         'api::symbol.symbol.findOne',
         'api::symbol.symbol.create',
@@ -72,6 +74,11 @@ export default {
         'api::stock-ratio.stock-ratio.create',
         'api::stock-ratio.stock-ratio.update',
         'api::stock-ratio.stock-ratio.delete',
+        'api::investor.investor.find',
+        'api::investor.investor.findOne',
+        'api::investor.investor.create',
+        'api::investor.investor.update',
+        'api::investor.investor.delete',
         'api::symbol-technical-analysis.symbol-technical-analysis.find',
         'api::symbol-technical-analysis.symbol-technical-analysis.findOne',
         'api::symbol-technical-analysis.symbol-technical-analysis.create',
@@ -118,15 +125,28 @@ export default {
       const newActions = permissionsToEnable.filter(action => !existingActions.includes(action));
 
       if (newActions.length > 0) {
-        await Promise.all(newActions.map(action => {
-          return strapi.db.query('plugin::users-permissions.permission').create({
-            data: {
-              action,
-              role: role.id,
-            },
-          });
-        }));
-        strapi.log.info(`Updated ${roleType} permissions for Trading Journal API`);
+        let createdCount = 0;
+
+        // Permission bootstrap can run more than once (for example after a
+        // development restart). Treat an existing permission-role link as a
+        // successful no-op instead of crashing on PostgreSQL's unique key.
+        for (const action of newActions) {
+          try {
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: {
+                action,
+                role: role.id,
+              },
+            });
+            createdCount += 1;
+          } catch (error) {
+            if (error?.code !== '23505') throw error;
+          }
+        }
+
+        if (createdCount > 0) {
+          strapi.log.info(`Updated ${roleType} permissions for Trading Journal API`);
+        }
       }
     }
   },

@@ -44,6 +44,7 @@ const TradeStation = () => {
     const [addingToWatchlist, setAddingToWatchlist] = useState(false);
     const [chartTemplate, setChartTemplate] = useState('Supertrend');
     const lastAutoRefreshedSymbolRef = useRef(null);
+    const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
     const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
@@ -131,14 +132,19 @@ const TradeStation = () => {
 
     useEffect(() => {
         if (!selectedSymbolId || !selectedSymbol?.Name) return;
+        if (metadataSyncedSymbolRef.current === selectedSymbolId) return;
+        metadataSyncedSymbolRef.current = selectedSymbolId;
 
         dispatch(syncSymbolMetadata({
             ticker: selectedSymbol.Name,
             symbolId: selectedSymbolId,
         }))
-            .unwrap()
-            .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
-            .catch(err => console.error(`Failed to sync metadata and stock ratio: ${err}`));
+        .unwrap()
+        .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
+        .catch(err => {
+            metadataSyncedSymbolRef.current = null;
+            console.error(`Failed to sync metadata and stock ratio: ${err}`);
+        });
     }, [dispatch, selectedSymbol?.Name, selectedSymbolId]);
 
     useEffect(() => {

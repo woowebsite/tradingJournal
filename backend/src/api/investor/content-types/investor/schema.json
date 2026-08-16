@@ -1,0 +1,34 @@
+{
+  "kind": "collectionType",
+  "collectionName": "investors",
+  "info": {
+    "singularName": "investor",
+    "pluralName": "investors",
+    "displayName": "Investor"
+  },
+  "options": { "draftAndPublish": true },
+  "pluginOptions": {},
+  "attributes": {
+    "investorType": {
+      "type": "enumeration",
+      "enum": ["CM", "SG", "CN"]
+    },
+    "date": { "type": "date" },
+    "sourceDate": { "type": "string" },
+    "buyVolume": { "type": "integer" },
+    "sellVolume": { "type": "integer" },
+    "buyPercent": { "type": "decimal" },
+    "sellPercent": { "type": "decimal" },
+    "netBuy": { "type": "integer" },
+    "marketNetBuy": { "type": "integer" },
+    "netWeight": { "type": "integer" },
+    "netShort": { "type": "integer" },
+    "netBuyAmount": { "type": "integer" },
+    "symbol": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "investors"
+    }
+  }
+}

@@ -1,10 +1,23 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { Edit } from 'lucide-react';
 import { fetchTrades } from '../features/tradeSlice';
+import { fetchStrategies, updateStrategy } from '../features/strategySlice';
+import { fetchRules } from '../features/ruleSlice';
+import { fetchWebhooks } from '../features/webhookSlice';
+import { StrategyModal } from '../pages/ManageStrategies';
 
 const StrategySummary = ({ activeStrategy }) => {
     const dispatch = useDispatch();
     const { items: strategyTrades, loading: strategyTradesLoading } = useSelector(state => state.trades);
+    const { items: availableRules } = useSelector(state => state.rules);
+    const { items: availableWebhooks } = useSelector(state => state.webhooks);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+    useEffect(() => {
+        dispatch(fetchRules());
+        dispatch(fetchWebhooks());
+    }, [dispatch]);
 
     useEffect(() => {
         if (!activeStrategy) return;
@@ -67,12 +80,27 @@ const StrategySummary = ({ activeStrategy }) => {
         };
     }, [strategyTrades, strategyTradesLoading]);
 
+    const handleUpdateStrategy = async (strategyData) => {
+        const strategyId = activeStrategy?.documentId || activeStrategy?.id;
+        if (!strategyId) return;
+
+        try {
+            await dispatch(updateStrategy({ id: strategyId, data: strategyData })).unwrap();
+            await dispatch(fetchStrategies()).unwrap();
+            setIsEditModalOpen(false);
+        } catch (error) {
+            console.error('Failed to update strategy:', error);
+            alert(`Failed to update strategy: ${error?.error?.message || error?.message || error}`);
+        }
+    };
+
     if (!activeStrategy) {
         return <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>;
     }
 
     return (
         <div className="grid grid-cols-2 gap-4">
+           
             <div>
                 <p className="mb-1">
                     <span className="font-semibold text-gray-400">Name:</span>{' '}
@@ -102,6 +130,28 @@ const StrategySummary = ({ activeStrategy }) => {
                         <span className="text-xs text-gray-500">from closed trades</span>
                     </div>
                 </div>
+
+                <StrategyModal
+                    isOpen={isEditModalOpen}
+                    onClose={() => setIsEditModalOpen(false)}
+                    onSubmit={handleUpdateStrategy}
+                    initialData={activeStrategy}
+                    availableRules={availableRules}
+                    availableWebhooks={availableWebhooks}
+                />
+
+                {activeStrategy && (
+                    <div className="col-span-2 flex justify-start mt-4">
+                        <button
+                            type="button"
+                            onClick={() => setIsEditModalOpen(true)}
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200"
+                        >
+                            <Edit size={13} />
+                            Edit
+                        </button>
+                    </div>
+                )}
             </div>
             <div>
                 <p className="mb-1">

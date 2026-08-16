@@ -88,6 +88,14 @@ export const getIntradaySnapshots = async (tickers) => {
     }
 };
 
+export const syncInvestorData = async (ticker, wsize = '1M') => {
+    const response = await api.get('/tcbs-strategies/sync-investor', {
+        params: { ticker, wsize },
+        headers: getTcbsHeaders(),
+    });
+    return response.data?.data || response.data;
+};
+
 export const getMarketFlowLeader = async ({ exchange = 'ALL', industry = '2300', type = '1d' } = {}) => {
     const url = 'market-flow-leader';
     try {

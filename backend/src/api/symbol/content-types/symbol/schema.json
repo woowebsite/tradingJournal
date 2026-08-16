@@ -88,6 +88,12 @@
     },
     "chart_url": {
       "type": "string"
+    },
+    "investors": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::investor.investor",
+      "mappedBy": "symbol"
     }
   }
 }
