@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import ReactECharts from 'echarts-for-react';
 import { RefreshCw, TrendingUp } from 'lucide-react';
@@ -7,9 +7,21 @@ import { syncInvestorData } from '../services/tcbs';
 import TradingViewChart from '../components/TradingViewChart';
 import { fetchPagedSymbolHistories } from '../features/marketSlice';
 import { loadExternalHistory } from '../features/marketSlice';
+import { analyzeThreeCandlePatterns, normalizeDailyCandles } from '../utils/threeCandlePatterns';
+import PatternDetailModal from '../components/PatternDetailModal';
 
 const TICKER = 'VN30F1M';
 const COLORS = { CM: '#38bdf8', SG: '#a78bfa', CN: '#fbbf24' };
+const CANDLE_STYLES = {
+    up: { label: 'Tăng', className: 'border-emerald-300/40 bg-emerald-500 shadow-emerald-500/20' },
+    down: { label: 'Giảm', className: 'border-red-300/40 bg-red-500 shadow-red-500/20' },
+    doji: { label: 'Doji', className: 'border-amber-200/50 bg-amber-400 shadow-amber-400/20' },
+};
+const VOLUME_STYLES = {
+    up: { label: 'Tăng', symbol: '↑', className: 'text-emerald-300' },
+    down: { label: 'Giảm', symbol: '↓', className: 'text-red-300' },
+    flat: { label: 'Đi ngang', symbol: '→', className: 'text-gray-300' },
+};
 const unwrap = item => item?.attributes || item || {};
 const today = () => {
     const date = new Date();
@@ -24,6 +36,9 @@ const DerivationInvestor = () => {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [error, setError] = useState('');
     const [lastUpdated, setLastUpdated] = useState(null);
+    const [selectedPatternDate, setSelectedPatternDate] = useState('');
+    const [selectedPattern, setSelectedPattern] = useState(null);
+    const chartSectionRef = useRef(null);
 
     const loadInvestorData = useCallback(async (forceRefresh = false) => {
         setLoading(true);
@@ -114,6 +129,16 @@ const DerivationInvestor = () => {
         series: ['CM', 'SG', 'CN'].map(type => ({ name: type, type: 'line', smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, color: COLORS[type] }, itemStyle: { color: COLORS[type] }, data: chartData.series[type] })),
     }), [chartData]);
 
+    const dailyCandles = useMemo(() => normalizeDailyCandles(histories), [histories]);
+    const candlePatterns = useMemo(() => analyzeThreeCandlePatterns(histories), [histories]);
+    const totalPatternWindows = Math.max(0, dailyCandles.length - 2);
+    const mostRepeatedPattern = candlePatterns[0] || null;
+
+    const focusPatternDate = date => {
+        setSelectedPatternDate(date);
+        chartSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -129,7 +154,7 @@ const DerivationInvestor = () => {
             </div>
             {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">{error}</div>}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <section className="order-1 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
+                <section ref={chartSectionRef} className="order-1 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
                     <div className="mb-4 flex items-center justify-between gap-4">
                         <div><h2 className="text-lg font-bold text-gray-100">Biểu đồ nến <a href={`/trade-station?symbol=${TICKER}`} className="text-sky-400 hover:underline">{TICKER}</a></h2><p className="mt-1 text-xs text-gray-400">Dữ liệu lịch sử đã lưu trong database, tương tự Trade Station.</p></div>
                         <button
@@ -142,13 +167,141 @@ const DerivationInvestor = () => {
                             {historyLoading ? 'Đang tải' : 'Refresh'}
                         </button>
                     </div>
-                    <div className="h-[460px] overflow-hidden rounded-xl">{histories.length ? <TradingViewChart data={histories} symbol={TICKER} /> : <div className="flex h-full items-center justify-center text-sm text-gray-500">Chưa có dữ liệu lịch sử.</div>}</div>
+                    <div className="h-[460px] overflow-hidden rounded-xl">{histories.length ? <TradingViewChart data={histories} symbol={TICKER} focusDate={selectedPatternDate} /> : <div className="flex h-full items-center justify-center text-sm text-gray-500">Chưa có dữ liệu lịch sử.</div>}</div>
                 </section>
                 <section className="order-2 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
                     <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold text-gray-100">Mua ròng theo nhóm nhà đầu tư</h2><p className="mt-1 text-xs text-gray-400">{TICKER} · 1M · {lastUpdated ? `Cập nhật ${lastUpdated.toLocaleTimeString('vi-VN')}` : 'Chưa cập nhật'}</p></div><TrendingUp className="text-sky-400" size={22} /></div>
                     {investors.length ? <div className="h-[460px]"><ReactECharts option={chartOption} style={{ width: '100%', height: '100%' }} notMerge lazyUpdate /></div> : <div className="flex h-[460px] items-center justify-center text-sm text-gray-500">{loading ? 'Đang tải dữ liệu...' : 'Chưa có dữ liệu.'}</div>}
                 </section>
             </div>
+            <section className="rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
+                <div className="flex flex-col gap-4 border-b border-gray-700/70 pb-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <p className="text-xs font-semibold uppercase tracking-widest text-sky-400">Price &amp; Volume</p>
+                        <h2 className="mt-1 text-xl font-bold text-gray-100">Thống kê pattern 3 nến</h2>
+                        <p className="mt-2 max-w-3xl text-sm text-gray-400">
+                            Mỗi pattern gồm hướng của 3 nến D1 và biến động volume giữa nến 1→2, 2→3.
+                            Các cửa sổ 3 nến liên tiếp được tính chồng lấn.
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="min-w-24 rounded-xl border border-gray-700 bg-gray-900/50 px-3 py-2">
+                            <div className="text-lg font-bold text-gray-100">{totalPatternWindows}</div>
+                            <div className="text-[11px] text-gray-500">Cửa sổ</div>
+                        </div>
+                        <div className="min-w-24 rounded-xl border border-gray-700 bg-gray-900/50 px-3 py-2">
+                            <div className="text-lg font-bold text-sky-300">{candlePatterns.length}</div>
+                            <div className="text-[11px] text-gray-500">Pattern</div>
+                        </div>
+                        <div className="min-w-24 rounded-xl border border-gray-700 bg-gray-900/50 px-3 py-2">
+                            <div className="text-lg font-bold text-amber-300">{mostRepeatedPattern?.count || 0}</div>
+                            <div className="text-[11px] text-gray-500">Lặp nhiều nhất</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-400">
+                    <span><strong className="text-gray-300">Nến:</strong> Tăng, Giảm, Doji (thân ≤ 0,1%)</span>
+                    <span><strong className="text-gray-300">Volume:</strong> Tăng, Giảm, Đi ngang (±5%)</span>
+                </div>
+
+                {candlePatterns.length > 0 ? (
+                    <div className="mt-4 max-h-[480px] overflow-auto rounded-xl border border-gray-700">
+                        <table className="w-full min-w-[760px] text-left text-sm">
+                            <thead className="sticky top-0 z-10 bg-gray-900 text-xs uppercase tracking-wide text-gray-500">
+                                <tr>
+                                    <th className="px-4 py-3">Pattern nến</th>
+                                    <th className="px-4 py-3">Pattern volume</th>
+                                    <th className="px-4 py-3 text-right">Số lần</th>
+                                    <th className="px-4 py-3 text-right">Tỷ lệ</th>
+                                    <th className="px-4 py-3 text-right">Gần nhất</th>
+                                    <th className="px-4 py-3 text-right">Detail</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700/70">
+                                {candlePatterns.map(pattern => {
+                                    const matchesToday = (pattern.occurrences || []).some(occurrence => occurrence.endDate === today());
+                                    return (
+                                    <tr
+                                        key={pattern.key}
+                                        className={`transition ${matchesToday ? 'bg-amber-500/15 ring-1 ring-inset ring-amber-400/50 hover:bg-amber-500/20' : 'hover:bg-gray-700/30'}`}
+                                    >
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-1.5">
+                                                {pattern.candles.map((direction, index) => {
+                                                    const style = CANDLE_STYLES[direction];
+                                                    return (
+                                                        <span
+                                                            key={`${pattern.key}-candle-${index}`}
+                                                            role="img"
+                                                            aria-label={`Nến ${index + 1}: ${style.label}`}
+                                                            title={`Nến ${index + 1}: ${style.label}`}
+                                                            className={`block h-7 w-7 rounded-sm border shadow-md ${style.className}`}
+                                                        />
+                                                    );
+                                                })}
+                                                {matchesToday && (
+                                                    <span className="ml-2 rounded-full border border-amber-400/40 bg-amber-400/15 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-300">
+                                                        Hôm nay
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-3">
+                                                {pattern.volumes.map((direction, index) => {
+                                                    const style = VOLUME_STYLES[direction];
+                                                    return (
+                                                        <span key={`${pattern.key}-volume-${index}`} className={`whitespace-nowrap text-xs font-semibold ${style.className}`}>
+                                                            V{index + 2}/V{index + 1} {style.symbol} {style.label}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-mono font-bold text-gray-100">{pattern.count}</td>
+                                        <td className="px-4 py-3 text-right font-mono text-sky-300">{pattern.percentage.toFixed(1)}%</td>
+                                        <td className="px-4 py-3 text-right font-mono">
+                                            <button
+                                                type="button"
+                                                onClick={() => focusPatternDate(pattern.lastSeen)}
+                                                className={`rounded px-2 py-1 underline decoration-dotted underline-offset-4 transition hover:bg-sky-500/10 hover:text-sky-300 ${selectedPatternDate === pattern.lastSeen ? 'bg-amber-500/10 text-amber-300' : 'text-sky-400'}`}
+                                                title={`Di chuyển chart tới nến ngày ${pattern.lastSeen}`}
+                                            >
+                                                {pattern.lastSeen}
+                                            </button>
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedPattern(pattern)}
+                                                className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:border-sky-400 hover:bg-sky-500/20"
+                                            >
+                                                Xem detail
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="mt-4 flex min-h-36 items-center justify-center rounded-xl border border-dashed border-gray-700 text-sm text-gray-500">
+                        Cần ít nhất 3 nến D1 hợp lệ để thống kê pattern.
+                    </div>
+                )}
+            </section>
+            {selectedPattern && (
+                <PatternDetailModal
+                    key={selectedPattern.key}
+                    isOpen
+                    onClose={() => setSelectedPattern(null)}
+                    pattern={selectedPattern}
+                    histories={histories}
+                    symbol={TICKER}
+                />
+            )}
         </div>
     );
 };

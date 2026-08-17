@@ -13,7 +13,8 @@ const TradingViewChart = ({
     strategy = null,
     template = 'Supertrend',
     disableScrollZoom = false,
-    disableChartMove = false
+    disableChartMove = false,
+    focusDate = null
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
@@ -207,8 +208,8 @@ const TradingViewChart = ({
             minimumWidth: 80,
         });
 
-        // Markers (Signals)
-        if (signals && signals.length > 0) {
+        // Markers (Signals and an optional externally-selected candle)
+        if ((signals && signals.length > 0) || focusDate) {
             const markerGapRatio = 0.02;
             const markers = signals.map(sig => {
                 const sigDate = sig.date.split('T')[0];
@@ -243,6 +244,18 @@ const TradingViewChart = ({
                 };
             }).filter(Boolean);
 
+            const normalizedFocusDate = String(focusDate || '').split('T')[0];
+            if (normalizedFocusDate && candleData.some(candle => candle.time === normalizedFocusDate)) {
+                markers.push({
+                    time: normalizedFocusDate,
+                    position: 'belowBar',
+                    color: '#fbbf24',
+                    shape: 'arrowUp',
+                    text: 'Pattern',
+                    size: 2.5,
+                });
+            }
+
             markers.sort((a, b) => (a.time > b.time ? 1 : -1));
             createSeriesMarkers(candlestickSeries, markers);
         }
@@ -258,6 +271,18 @@ const TradingViewChart = ({
         timeScale2.subscribeVisibleLogicalRangeChange((timeRange) => {
             if (timeRange) timeScale1.setVisibleLogicalRange(timeRange);
         });
+
+        const normalizedFocusDate = String(focusDate || '').split('T')[0];
+        const focusIndex = candleData.findIndex(candle => candle.time === normalizedFocusDate);
+        if (focusIndex >= 0) {
+            const visibleRadius = 18;
+            const visibleRange = {
+                from: Math.max(-0.5, focusIndex - visibleRadius),
+                to: Math.min(candleData.length - 0.5, focusIndex + visibleRadius),
+            };
+            timeScale1.setVisibleLogicalRange(visibleRange);
+            timeScale2.setVisibleLogicalRange(visibleRange);
+        }
 
         // Sync Crosshairs & Tooltip
         chart.subscribeCrosshairMove((param) => {
@@ -280,7 +305,9 @@ const TradingViewChart = ({
                         x: param.point.x,
                         y: param.point.y,
                         date: dateStr,
-                        signals: activeSignals
+                        signals: activeSignals,
+                        chartWidth: chartContainerRef.current?.clientWidth || 300,
+                        chartHeight: chartContainerRef.current?.clientHeight || 300,
                     });
                 } else {
                     setHoverTooltip(null);
@@ -333,7 +360,7 @@ const TradingViewChart = ({
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, disableScrollZoom, disableChartMove]);
+    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, disableScrollZoom, disableChartMove, focusDate]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">
@@ -348,8 +375,8 @@ const TradingViewChart = ({
                 <div
                     className="absolute z-30 pointer-events-none bg-gray-900/95 border border-gray-700 rounded-lg p-2.5 shadow-2xl text-xs text-white space-y-1.5 min-w-[150px]"
                     style={{
-                        left: Math.min(hoverTooltip.x + 15, (chartContainerRef.current?.clientWidth || 300) - 170),
-                        top: Math.max(10, Math.min(hoverTooltip.y - 10, (chartContainerRef.current?.clientHeight || 300) - 100))
+                        left: Math.min(hoverTooltip.x + 15, hoverTooltip.chartWidth - 170),
+                        top: Math.max(10, Math.min(hoverTooltip.y - 10, hoverTooltip.chartHeight - 100))
                     }}
                 >
                     <div className="text-[11px] text-gray-400 font-semibold border-b border-gray-700/60 pb-1 flex justify-between items-center">
