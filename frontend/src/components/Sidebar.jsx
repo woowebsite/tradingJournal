@@ -32,11 +32,14 @@ const Sidebar = () => {
                     subItems: [
                         { label: 'Today', path: '/today-trades' },
                         { label: 'Porfolio', path: '/portfolio' },
-                        { label: 'Investor', path: '/investor-insight' },
                     ]
                 },
                 {
                     icon: TrendingUp, label: 'Derivation', path: '/derivation',
+                    subItems: [
+                        { label: 'Derivation Investor', path: '/derivation-investor' },
+                        { label: 'Stock Investor Insight', path: '/investor-insight' },
+                    ],
                 },
                 {
                     icon: NotebookPen,
@@ -103,7 +106,7 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/', '/journal', '/webhooks', '/trade-station', '/manage-market', '/signals', '/manage-strategies', '/news']);
+    const [expandedItems, setExpandedItems] = useState(['/', '/journal', '/webhooks', '/trade-station', '/derivation', '/manage-market', '/signals', '/manage-strategies', '/news']);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>

@@ -77,6 +77,8 @@ export const loadExternalHistory = createAsyncThunk(
             // Determine Source based on Market Type
             if (marketType === 'Crypto') {
                 externalData = await getCryptoHistory(symbol);
+            } else if (String(marketType || '').toLowerCase() === 'derivative') {
+                externalData = await getFuturesHistory(symbol.split(':')[0], 'derivative', '1');
             } else {
                 // Default to TCBS (Stocks)
                 const ticket = symbol.split(':')[0];

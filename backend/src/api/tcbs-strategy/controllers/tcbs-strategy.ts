@@ -12,7 +12,7 @@ const DEFAULT_TICKER = 'NNC';
 
 const TCBS_ENDPOINTS: Record<string, string> = {
   'stock-history': '/stock-insight/v2/stock/bars-long-term',
-  'futures-history': '/futures-insight/v2/stock/bars',
+  'futures-history': '/futures-insight/v2/stock/bars-long-term',
   'intraday-snapshots': '/stock-insight/v1/stock/intraday-snapshots',
   'market-flow-leader': '/stock-insight/v1/intraday/flow-market-leader',
   'technical-indicators': '/ta/v1/summary/gaugechart/:ticker',

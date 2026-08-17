@@ -23,6 +23,7 @@ import Portfolio from './pages/Portfolio';
 import MarketFlow from './pages/MarketFlow';
 import Derivation from './pages/Derivation';
 import InvestorInsight from './pages/InvestorInsight';
+import DerivationInvestor from './pages/DerivationInvestor';
 import AccountDetail from './pages/AccountDetail';
 import Journal from './pages/Journal';
 import JournalWorkflow from './pages/JournalWorkflow';
@@ -54,6 +55,7 @@ function App() {
             <Route path="trade-station" element={<TradeStation />} />
             <Route path="derivation" element={<Derivation />} />
             <Route path="investor-insight" element={<InvestorInsight />} />
+            <Route path="derivation-investor" element={<DerivationInvestor />} />
             <Route path="today-trades" element={<TodayTrades />} />
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="market-flow" element={<MarketFlow />} />

@@ -47,11 +47,9 @@ export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') 
     }
 };
 
-export const getFuturesHistory = async (ticker, type = 'derivative', resolution = 'D') => {
-    // Current timestamp for 'to' parameter (approximation for "now" or future to cover all)
-    // 1767052800 is roughly year 2026, safe enough.
-    const to = Math.floor(Date.now() / 1000); // or Math.floor(Date.now() / 1000);
-    const countBack = 301; // Reasonable default, user asked for 598.
+export const getFuturesHistory = async (ticker, type = 'derivative', resolution = '1') => {
+    const to = 1787011200;
+    const countBack = 598;
 
     // https://apiextaws.tcbs.com.vn/futures-insight/v2/stock/bars?ticker=41I1G4000&type=derivative&resolution=1&to=1774337040&countBack=347
 

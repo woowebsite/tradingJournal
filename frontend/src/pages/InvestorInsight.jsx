@@ -160,7 +160,7 @@ const InvestorInsight = () => {
         <div className="space-y-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
-                    <p className="text-sm font-semibold uppercase tracking-widest text-sky-400">Derivation</p>
+                    <p className="text-sm font-semibold uppercase tracking-widest text-emerald-400">Stock Insight</p>
                     <h1 className="mt-1 text-3xl font-bold text-gray-100">Investor Insight</h1>
                     <p className="mt-2 text-sm text-gray-400">Theo dõi dòng mua ròng của 3 nhóm nhà đầu tư phái sinh trong 1 tháng.</p>
                 </div>
