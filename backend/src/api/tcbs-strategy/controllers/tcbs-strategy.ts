@@ -34,8 +34,13 @@ function normalizeSignalRows(payload: any): any[] {
 
 function normalizeInvestorDate(value: unknown): string | null {
   const raw = String(value || '').trim();
-  const match = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
-  if (!match) return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  const isoDate = raw.match(/^(\d{4}-\d{2}-\d{2})(?:[ T].*)?$/)?.[1];
+  if (isoDate) return isoDate;
+
+  // TCBS appends the latest intraday update time to today's row, for example
+  // "17/08/26 14:30". Historical rows contain only the date.
+  const match = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/);
+  if (!match) return null;
   const [, day, month, year] = match;
   const fullYear = year.length === 2 ? `20${year}` : year;
   const date = `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;

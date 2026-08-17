@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import ReactECharts from 'echarts-for-react';
 import { RefreshCw, TrendingUp } from 'lucide-react';
@@ -10,7 +10,7 @@ import { loadExternalHistory } from '../features/marketSlice';
 import { analyzeThreeCandlePatterns, normalizeDailyCandles } from '../utils/threeCandlePatterns';
 import PatternDetailModal from '../components/PatternDetailModal';
 
-const TICKER = 'VN30F1M';
+const CHART_TICKER = 'VN30F1M';
 const COLORS = { CM: '#38bdf8', SG: '#a78bfa', CN: '#fbbf24' };
 const CANDLE_STYLES = {
     up: { label: 'Tăng', className: 'border-emerald-300/40 bg-emerald-500 shadow-emerald-500/20' },
@@ -30,15 +30,15 @@ const today = () => {
 
 const DerivationInvestor = () => {
     const dispatch = useDispatch();
+    const [tickerInput, setTickerInput] = useState(CHART_TICKER);
+    const [investorTicker, setInvestorTicker] = useState(CHART_TICKER);
     const [investors, setInvestors] = useState([]);
     const [histories, setHistories] = useState([]);
     const [loading, setLoading] = useState(false);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [error, setError] = useState('');
     const [lastUpdated, setLastUpdated] = useState(null);
-    const [selectedPatternDate, setSelectedPatternDate] = useState('');
     const [selectedPattern, setSelectedPattern] = useState(null);
-    const chartSectionRef = useRef(null);
 
     const loadInvestorData = useCallback(async (forceRefresh = false) => {
         setLoading(true);
@@ -46,7 +46,7 @@ const DerivationInvestor = () => {
         try {
             const response = await api.get('/investors', {
                 params: {
-                    'filters[symbol][ticker][$eq]': TICKER,
+                    'filters[symbol][ticker][$eq]': investorTicker,
                     sort: 'date:asc',
                     'pagination[pageSize]': 1000,
                 },
@@ -57,7 +57,7 @@ const DerivationInvestor = () => {
                 setLastUpdated(new Date());
                 return;
             }
-            const result = await syncInvestorData(TICKER, '1M');
+            const result = await syncInvestorData(investorTicker, '1M');
             setInvestors((result?.investors || []).map(unwrap));
             setLastUpdated(new Date());
         } catch (err) {
@@ -66,7 +66,7 @@ const DerivationInvestor = () => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [investorTicker]);
 
     useEffect(() => { loadInvestorData(); }, [loadInvestorData]);
 
@@ -75,14 +75,14 @@ const DerivationInvestor = () => {
         try {
             const response = await api.get('/symbols', {
                 params: {
-                    'filters[$or][0][ticker][$eq]': TICKER,
-                    'filters[$or][1][Name][$eq]': TICKER,
+                    'filters[$or][0][ticker][$eq]': CHART_TICKER,
+                    'filters[$or][1][Name][$eq]': CHART_TICKER,
                     'pagination[pageSize]': 1,
                 },
             });
             const existingSymbol = response.data?.data?.[0];
             const symbol = existingSymbol || (await api.post('/symbols', {
-                data: { Name: TICKER, ticker: TICKER },
+                data: { Name: CHART_TICKER, ticker: CHART_TICKER },
             })).data?.data;
             const symbolId = symbol?.documentId || symbol?.id;
             if (!symbolId) {
@@ -94,7 +94,7 @@ const DerivationInvestor = () => {
             const hasToday = existingHistories.some(item => String(item.date || '').startsWith(today()));
             if (forceRefresh || !hasToday) {
                 await dispatch(loadExternalHistory({
-                    symbol: TICKER,
+                    symbol: CHART_TICKER,
                     symbolId,
                     marketType: 'Derivative',
                     resolution: 'D',
@@ -134,29 +134,39 @@ const DerivationInvestor = () => {
     const totalPatternWindows = Math.max(0, dailyCandles.length - 2);
     const mostRepeatedPattern = candlePatterns[0] || null;
 
-    const focusPatternDate = date => {
-        setSelectedPatternDate(date);
-        chartSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const handleTickerSubmit = event => {
+        event.preventDefault();
+        const normalizedTicker = tickerInput.trim().toUpperCase();
+        if (!/^[A-Z0-9]{1,20}$/.test(normalizedTicker)) {
+            setError('Ticker chỉ được gồm chữ cái và chữ số.');
+            return;
+        }
+
+        setTickerInput(normalizedTicker);
+        if (normalizedTicker === investorTicker) {
+            loadInvestorData(true);
+            return;
+        }
+
+        setInvestors([]);
+        setLastUpdated(null);
+        setInvestorTicker(normalizedTicker);
     };
 
     return (
         <div className="space-y-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
                 <div>
                     <p className="text-sm font-semibold uppercase tracking-widest text-sky-400">Future Insight</p>
                     <h1 className="mt-1 text-3xl font-bold text-gray-100">Derivation Investor</h1>
                     <p className="mt-2 text-sm text-gray-400">Theo dõi dòng mua ròng của 3 nhóm nhà đầu tư phái sinh trong 1 tháng.</p>
                 </div>
-                <div className="flex gap-2">
-                    <input id="ticker" value={TICKER} readOnly className="w-48 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none" aria-label="Ticker" />
-                    <button onClick={() => loadInvestorData(true)} disabled={loading} className="flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} />{loading ? 'Đang tải' : 'Cập nhật'}</button>
-                </div>
             </div>
             {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">{error}</div>}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <section ref={chartSectionRef} className="order-1 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
+                <section className="order-1 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
                     <div className="mb-4 flex items-center justify-between gap-4">
-                        <div><h2 className="text-lg font-bold text-gray-100">Biểu đồ nến <a href={`/trade-station?symbol=${TICKER}`} className="text-sky-400 hover:underline">{TICKER}</a></h2><p className="mt-1 text-xs text-gray-400">Dữ liệu lịch sử đã lưu trong database, tương tự Trade Station.</p></div>
+                        <div><h2 className="text-lg font-bold text-gray-100">Biểu đồ nến <a href={`/trade-station?symbol=${CHART_TICKER}`} className="text-sky-400 hover:underline">{CHART_TICKER}</a></h2><p className="mt-1 text-xs text-gray-400">Dữ liệu lịch sử đã lưu trong database, tương tự Trade Station.</p></div>
                         <button
                             type="button"
                             onClick={() => loadChartData(true)}
@@ -167,10 +177,29 @@ const DerivationInvestor = () => {
                             {historyLoading ? 'Đang tải' : 'Refresh'}
                         </button>
                     </div>
-                    <div className="h-[460px] overflow-hidden rounded-xl">{histories.length ? <TradingViewChart data={histories} symbol={TICKER} focusDate={selectedPatternDate} /> : <div className="flex h-full items-center justify-center text-sm text-gray-500">Chưa có dữ liệu lịch sử.</div>}</div>
+                    <div className="h-[460px] overflow-hidden rounded-xl">{histories.length ? <TradingViewChart data={histories} symbol={CHART_TICKER} /> : <div className="flex h-full items-center justify-center text-sm text-gray-500">Chưa có dữ liệu lịch sử.</div>}</div>
                 </section>
                 <section className="order-2 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
-                    <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold text-gray-100">Mua ròng theo nhóm nhà đầu tư</h2><p className="mt-1 text-xs text-gray-400">{TICKER} · 1M · {lastUpdated ? `Cập nhật ${lastUpdated.toLocaleTimeString('vi-VN')}` : 'Chưa cập nhật'}</p></div><TrendingUp className="text-sky-400" size={22} /></div>
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h2 className="text-lg font-bold text-gray-100">Mua ròng theo nhóm nhà đầu tư</h2>
+                                <TrendingUp className="text-sky-400" size={22} />
+                            </div>
+                            <p className="mt-1 text-xs text-gray-400">{investorTicker} · 1M · {lastUpdated ? `Cập nhật ${lastUpdated.toLocaleTimeString('vi-VN')}` : 'Chưa cập nhật'}</p>
+                        </div>
+                        <form onSubmit={handleTickerSubmit} className="flex shrink-0 gap-2">
+                            <input
+                                id="ticker"
+                                value={tickerInput}
+                                onChange={event => setTickerInput(event.target.value.toUpperCase())}
+                                className="w-32 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm uppercase text-gray-100 outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                                aria-label="Ticker"
+                                autoComplete="off"
+                            />
+                            <button type="submit" disabled={loading} className="flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} />{loading ? 'Đang tải' : 'Cập nhật'}</button>
+                        </form>
+                    </div>
                     {investors.length ? <div className="h-[460px]"><ReactECharts option={chartOption} style={{ width: '100%', height: '100%' }} notMerge lazyUpdate /></div> : <div className="flex h-[460px] items-center justify-center text-sm text-gray-500">{loading ? 'Đang tải dữ liệu...' : 'Chưa có dữ liệu.'}</div>}
                 </section>
             </div>
@@ -261,16 +290,7 @@ const DerivationInvestor = () => {
                                         </td>
                                         <td className="px-4 py-3 text-right font-mono font-bold text-gray-100">{pattern.count}</td>
                                         <td className="px-4 py-3 text-right font-mono text-sky-300">{pattern.percentage.toFixed(1)}%</td>
-                                        <td className="px-4 py-3 text-right font-mono">
-                                            <button
-                                                type="button"
-                                                onClick={() => focusPatternDate(pattern.lastSeen)}
-                                                className={`rounded px-2 py-1 underline decoration-dotted underline-offset-4 transition hover:bg-sky-500/10 hover:text-sky-300 ${selectedPatternDate === pattern.lastSeen ? 'bg-amber-500/10 text-amber-300' : 'text-sky-400'}`}
-                                                title={`Di chuyển chart tới nến ngày ${pattern.lastSeen}`}
-                                            >
-                                                {pattern.lastSeen}
-                                            </button>
-                                        </td>
+                                        <td className="px-4 py-3 text-right font-mono text-gray-400">{pattern.lastSeen}</td>
                                         <td className="px-4 py-3 text-right">
                                             <button
                                                 type="button"
@@ -299,7 +319,7 @@ const DerivationInvestor = () => {
                     onClose={() => setSelectedPattern(null)}
                     pattern={selectedPattern}
                     histories={histories}
-                    symbol={TICKER}
+                    symbol={CHART_TICKER}
                 />
             )}
         </div>
