@@ -12,7 +12,7 @@ const DEFAULT_TICKER = 'NNC';
 
 const TCBS_ENDPOINTS: Record<string, string> = {
   'stock-history': '/stock-insight/v2/stock/bars-long-term',
-  'futures-history': '/futures-insight/v2/stock/bars-long-term',
+  'futures-history': '/futures-insight/v2/stock/bars',
   'intraday-snapshots': '/stock-insight/v1/stock/intraday-snapshots',
   'market-flow-leader': '/stock-insight/v1/intraday/flow-market-leader',
   'technical-indicators': '/ta/v1/summary/gaugechart/:ticker',
@@ -45,7 +45,9 @@ function normalizeInvestorDate(value: unknown): string | null {
 export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy' as any, ({ strapi }) => ({
   async tcbsData(ctx) {
     const resource = String(ctx.params.resource || '');
-    const template = TCBS_ENDPOINTS[resource];
+    const template = resource === 'futures-history' && String(ctx.query.resolution || '').toUpperCase() === 'D'
+      ? '/futures-insight/v2/stock/bars-long-term'
+      : TCBS_ENDPOINTS[resource];
     if (!template) return ctx.badRequest('Unsupported TCBS resource');
 
     const ticker = String(ctx.query.ticker || '').trim().toUpperCase();

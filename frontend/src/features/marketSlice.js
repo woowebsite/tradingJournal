@@ -70,7 +70,7 @@ export const fetchHistories = createAsyncThunk(
 
 export const loadExternalHistory = createAsyncThunk(
     'market/loadExternalHistory',
-    async ({ symbol, symbolId, marketType }, { dispatch, rejectWithValue }) => {
+    async ({ symbol, symbolId, marketType, resolution }, { dispatch, rejectWithValue }) => {
         try {
             let externalData = [];
 
@@ -78,7 +78,7 @@ export const loadExternalHistory = createAsyncThunk(
             if (marketType === 'Crypto') {
                 externalData = await getCryptoHistory(symbol);
             } else if (String(marketType || '').toLowerCase() === 'derivative') {
-                externalData = await getFuturesHistory(symbol.split(':')[0], 'derivative', '1');
+                externalData = await getFuturesHistory(symbol.split(':')[0], 'derivative', resolution || '1');
             } else {
                 // Default to TCBS (Stocks)
                 const ticket = symbol.split(':')[0];

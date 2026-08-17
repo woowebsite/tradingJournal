@@ -48,7 +48,7 @@ export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') 
 };
 
 export const getFuturesHistory = async (ticker, type = 'derivative', resolution = '1') => {
-    const to = 1787011200;
+    const to = Math.floor(Date.now() / 1000);
     const countBack = 598;
 
     // https://apiextaws.tcbs.com.vn/futures-insight/v2/stock/bars?ticker=41I1G4000&type=derivative&resolution=1&to=1774337040&countBack=347

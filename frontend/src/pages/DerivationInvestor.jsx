@@ -55,35 +55,46 @@ const DerivationInvestor = () => {
 
     useEffect(() => { loadInvestorData(); }, [loadInvestorData]);
 
-    useEffect(() => {
-        let cancelled = false;
+    const loadChartData = useCallback(async (forceRefresh = false) => {
         setHistoryLoading(true);
-        api.get('/symbols', {
-            params: {
-                'filters[$or][0][ticker][$eq]': TICKER,
-                'filters[$or][1][Name][$eq]': TICKER,
-                'pagination[pageSize]': 1,
-            },
-        })
-            .then(response => {
-                const symbol = response.data?.data?.[0];
-                if (!symbol) return api.post('/symbols', { data: { Name: TICKER, ticker: TICKER } }).then(result => result.data?.data);
-                return symbol;
-            })
-            .then(async symbol => {
-                const symbolId = symbol?.documentId || symbol?.id;
-                if (!symbolId) return [];
-                const existingHistories = await fetchPagedSymbolHistories(symbolId);
-                const hasToday = existingHistories.some(item => String(item.date || '').startsWith(today()));
-                if (hasToday) return existingHistories;
-                await dispatch(loadExternalHistory({ symbol: TICKER, symbolId, marketType: 'Derivative' })).unwrap();
-                return fetchPagedSymbolHistories(symbolId);
-            })
-            .then(data => { if (!cancelled) setHistories(data || []); })
-            .catch(() => { if (!cancelled) setHistories([]); })
-            .finally(() => { if (!cancelled) setHistoryLoading(false); });
-        return () => { cancelled = true; };
+        try {
+            const response = await api.get('/symbols', {
+                params: {
+                    'filters[$or][0][ticker][$eq]': TICKER,
+                    'filters[$or][1][Name][$eq]': TICKER,
+                    'pagination[pageSize]': 1,
+                },
+            });
+            const existingSymbol = response.data?.data?.[0];
+            const symbol = existingSymbol || (await api.post('/symbols', {
+                data: { Name: TICKER, ticker: TICKER },
+            })).data?.data;
+            const symbolId = symbol?.documentId || symbol?.id;
+            if (!symbolId) {
+                setHistories([]);
+                return;
+            }
+
+            const existingHistories = await fetchPagedSymbolHistories(symbolId);
+            const hasToday = existingHistories.some(item => String(item.date || '').startsWith(today()));
+            if (forceRefresh || !hasToday) {
+                await dispatch(loadExternalHistory({
+                    symbol: TICKER,
+                    symbolId,
+                    marketType: 'Derivative',
+                    resolution: 'D',
+                })).unwrap();
+            }
+            setHistories(await fetchPagedSymbolHistories(symbolId));
+        } catch (chartError) {
+            console.error('Unable to refresh derivation chart:', chartError);
+            if (!forceRefresh) setHistories([]);
+        } finally {
+            setHistoryLoading(false);
+        }
     }, [dispatch]);
+
+    useEffect(() => { loadChartData(); }, [loadChartData]);
 
     const chartData = useMemo(() => {
         const dates = [...new Set(investors.map(row => row.date).filter(Boolean))].sort();
@@ -119,7 +130,18 @@ const DerivationInvestor = () => {
             {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">{error}</div>}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <section className="order-1 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
-                    <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold text-gray-100">Biểu đồ nến <a href={`/trade-station?symbol=${TICKER}`} className="text-sky-400 hover:underline">{TICKER}</a></h2><p className="mt-1 text-xs text-gray-400">Dữ liệu lịch sử đã lưu trong database, tương tự Trade Station.</p></div>{historyLoading && <span className="text-xs text-sky-400">Đang tải...</span>}</div>
+                    <div className="mb-4 flex items-center justify-between gap-4">
+                        <div><h2 className="text-lg font-bold text-gray-100">Biểu đồ nến <a href={`/trade-station?symbol=${TICKER}`} className="text-sky-400 hover:underline">{TICKER}</a></h2><p className="mt-1 text-xs text-gray-400">Dữ liệu lịch sử đã lưu trong database, tương tự Trade Station.</p></div>
+                        <button
+                            type="button"
+                            onClick={() => loadChartData(true)}
+                            disabled={historyLoading}
+                            className="flex shrink-0 items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <RefreshCw size={16} className={historyLoading ? 'animate-spin' : ''} />
+                            {historyLoading ? 'Đang tải' : 'Refresh'}
+                        </button>
+                    </div>
                     <div className="h-[460px] overflow-hidden rounded-xl">{histories.length ? <TradingViewChart data={histories} symbol={TICKER} /> : <div className="flex h-full items-center justify-center text-sm text-gray-500">Chưa có dữ liệu lịch sử.</div>}</div>
                 </section>
                 <section className="order-2 rounded-2xl border border-gray-700 bg-gray-800 p-4 shadow-xl md:p-6">
