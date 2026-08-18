@@ -287,9 +287,9 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     );
     const rows = normalizeSignalRows(response);
     const groups = [
-      { investorType: 'CM', buy: 'shb', sell: 'shs', buyPercent: 'shbp', sellPercent: 'shsp' },
+      { investorType: 'CN', buy: 'shb', sell: 'shs', buyPercent: 'shbp', sellPercent: 'shsp' },
       { investorType: 'SG', buy: 'wob', sell: 'wos', buyPercent: 'wobp', sellPercent: 'wosp' },
-      { investorType: 'CN', buy: 'skb', sell: 'sks', buyPercent: 'skbp', sellPercent: 'sksp' },
+      { investorType: 'CM', buy: 'skb', sell: 'sks', buyPercent: 'skbp', sellPercent: 'sksp' },
     ];
     const saved = [];
     for (const row of rows) {

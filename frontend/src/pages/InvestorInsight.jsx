@@ -6,7 +6,7 @@ import api from '../services/api';
 import TradingViewChart from '../components/TradingViewChart';
 import { fetchPagedSymbolHistories } from '../features/marketSlice';
 
-const COLORS = { CM: '#38bdf8', SG: '#a78bfa', CN: '#fbbf24' };
+const COLORS = { CM: '#38bdf8', SG: '#ff3a96', CN: '#fbbf24' };
 
 const unwrapInvestor = (item) => item?.attributes || item || {};
 

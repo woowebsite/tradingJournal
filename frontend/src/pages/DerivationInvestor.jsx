@@ -11,7 +11,8 @@ import { analyzeThreeCandlePatterns, normalizeDailyCandles } from '../utils/thre
 import PatternDetailModal from '../components/PatternDetailModal';
 
 const CHART_TICKER = 'VN30F1M';
-const COLORS = { CM: '#38bdf8', SG: '#a78bfa', CN: '#fbbf24' };
+const DERIVATION_TICKER = '41I1G8000';
+const COLORS = { CM: '#38bdf8', SG: '#ff3a96', CN: '#fbbf24' };
 const CANDLE_STYLES = {
     up: { label: 'Tăng', className: 'border-emerald-300/40 bg-emerald-500 shadow-emerald-500/20' },
     down: { label: 'Giảm', className: 'border-red-300/40 bg-red-500 shadow-red-500/20' },
@@ -30,8 +31,8 @@ const today = () => {
 
 const DerivationInvestor = () => {
     const dispatch = useDispatch();
-    const [tickerInput, setTickerInput] = useState(CHART_TICKER);
-    const [investorTicker, setInvestorTicker] = useState(CHART_TICKER);
+    const [tickerInput, setTickerInput] = useState(DERIVATION_TICKER);
+    const [investorTicker, setInvestorTicker] = useState(DERIVATION_TICKER);
     const [investors, setInvestors] = useState([]);
     const [histories, setHistories] = useState([]);
     const [loading, setLoading] = useState(false);
