@@ -3,6 +3,7 @@ import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries,
 import { calculateSMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimoku';
+import { calculateVWAP, drawVWAP } from '../indicators/vwap';
 
 const getRuleId = (rule) => rule?.documentId || rule?.id || '';
 
@@ -14,7 +15,8 @@ const TradingViewChart = ({
     template = 'Supertrend',
     disableScrollZoom = false,
     disableChartMove = false,
-    focusDate = null
+    focusDate = null,
+    vwapAnchor = 'Year'
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
@@ -184,6 +186,9 @@ const TradingViewChart = ({
                 basePeriod: 78,
             });
             drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
+        } else if (template === 'VWAP') {
+            const vwapData = calculateVWAP(sortedData, vwapAnchor);
+            drawVWAP(chart, LineSeries, vwapData);
         } else {
             const supertrendData = calculateSupertrend(10, 3, sortedData);
             drawSupertrend(chart, LineSeries, supertrendData);
@@ -360,7 +365,7 @@ const TradingViewChart = ({
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, disableScrollZoom, disableChartMove, focusDate]);
+    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, vwapAnchor, disableScrollZoom, disableChartMove, focusDate]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">

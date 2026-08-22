@@ -43,6 +43,7 @@ const TradeStation = () => {
     const [creatingSymbol, setCreatingSymbol] = useState(false);
     const [addingToWatchlist, setAddingToWatchlist] = useState(false);
     const [chartTemplate, setChartTemplate] = useState('Supertrend');
+    const [vwapAnchor, setVwapAnchor] = useState('Year');
     const lastAutoRefreshedSymbolRef = useRef(null);
     const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
@@ -506,8 +507,25 @@ const TradeStation = () => {
                                     >
                                         <option value="Supertrend">Supertrend</option>
                                         <option value="Ichimoku">Ichimoku</option>
+                                        <option value="VWAP">VWAP</option>
                                     </select>
                                 </label>
+                                {chartTemplate === 'VWAP' && (
+                                    <label className="inline-flex items-center gap-2 text-sm text-gray-400">
+                                        <span>Anchor</span>
+                                        <select
+                                            aria-label="VWAP Anchor"
+                                            value={vwapAnchor}
+                                            onChange={event => setVwapAnchor(event.target.value)}
+                                            className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                            <option value="Day">Day</option>
+                                            <option value="Week">Week</option>
+                                            <option value="Month">Month</option>
+                                            <option value="Year">Year</option>
+                                        </select>
+                                    </label>
+                                )}
                                 {selectedSymbol && (
                                     <button
                                         type="button"
@@ -535,7 +553,7 @@ const TradeStation = () => {
                             </div>
                         </div>
                         <div className="flex-1 min-h-0">
-                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} />
+                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} vwapAnchor={vwapAnchor} />
                         </div>
                     </div>
 
