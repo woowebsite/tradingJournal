@@ -7,6 +7,11 @@ import TradingViewChart from '../components/TradingViewChart';
 import { fetchPagedSymbolHistories } from '../features/marketSlice';
 
 const COLORS = { CM: '#38bdf8', SG: '#ff3a96', CN: '#fbbf24' };
+const INVESTOR_FIELDS = {
+    CM: { buy: 'skb', sell: 'sks' },
+    SG: { buy: 'wob', sell: 'wos' },
+    CN: { buy: 'shb', sell: 'shs' },
+};
 
 const unwrapInvestor = (item) => item?.attributes || item || {};
 
@@ -205,13 +210,20 @@ const InvestorInsight = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                {latestByType.map(({ type, row }) => (
-                    <div key={type} className="rounded-xl border border-gray-700 bg-gray-800/80 p-4">
-                        <div className="flex items-center justify-between"><span className="text-sm font-semibold text-gray-300">Nhóm {type}</span><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[type] }} /></div>
-                        <p className="mt-3 text-2xl font-bold text-gray-100">{row ? Number(row.netBuy ?? 0).toLocaleString('vi-VN') : '—'}</p>
-                        <p className="mt-1 text-xs text-gray-500">Mua ròng · {row?.sourceDate || 'chưa có dữ liệu'}</p>
-                    </div>
-                ))}
+                {latestByType.map(({ type, row }) => {
+                    const netBuy = row ? Number(row.netBuy ?? 0) : null;
+                    const netBuyColor = netBuy < 0 ? 'text-red-400' : netBuy > 0 ? 'text-emerald-400' : 'text-gray-100';
+                    return (
+                        <div key={type} className="rounded-xl border border-gray-700 bg-gray-800/80 p-4">
+                            <div className="flex items-center justify-between"><span className="text-sm font-semibold" style={{ color: COLORS[type] }}>Nhóm {type}</span></div>
+                            <p className={`mt-3 text-2xl font-bold ${netBuyColor}`}>{netBuy !== null ? netBuy.toLocaleString('vi-VN') : '—'}</p>
+                            <p className="mt-1 text-xs text-gray-500">
+                                {INVESTOR_FIELDS[type].buy} (mua) - {INVESTOR_FIELDS[type].sell} (bán): {row ? `${Number(row.buyVolume ?? 0).toLocaleString('vi-VN')} - ${Number(row.sellVolume ?? 0).toLocaleString('vi-VN')}` : '—'}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">Mua ròng · {row?.sourceDate || 'chưa có dữ liệu'}</p>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );
