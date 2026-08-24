@@ -20,6 +20,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
     const [formData, setFormData] = useState({
         name: '',
         description: '',
+        template: '',
         type: 'Rules',
         webhook: '',
         entryRules: [],
@@ -50,6 +51,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
             setFormData({
                 name: initialData.name || '',
                 description: initialData.description || '',
+                template: initialData.template || '',
                 type: initialData.type || (initialData.webhook ? 'Webhook' : 'Rules'),
                 webhook: initialData.webhook ? (initialData.webhook.documentId || initialData.webhook.id) : '',
                 entryRules: getInitialRules('entryRules'),
@@ -62,6 +64,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
             setFormData({
                 name: '',
                 description: '',
+                template: '',
                 type: 'Rules',
                 webhook: '',
                 entryRules: [],
@@ -127,6 +130,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
 
         onSubmit({
             ...formData,
+            template: formData.template?.trim() || '',
             webhook: formData.type === 'Webhook' ? formData.webhook : null,
             rules: formData.type === 'Rules' ? [...new Set(ruleIds)] : [],
             entryRules: formData.type === 'Rules' ? formData.entryRules : [],
@@ -317,17 +321,36 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-sm text-gray-400 mb-1">Type</label>
-                        <select
-                            name="type"
-                            value={formData.type}
-                            onChange={handleChange}
-                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
-                        >
-                            <option value="Rules">Rules</option>
-                            <option value="Webhook">Webhook</option>
-                        </select>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">Type</label>
+                            <select
+                                name="type"
+                                value={formData.type}
+                                onChange={handleChange}
+                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
+                            >
+                                <option value="Rules">Rules</option>
+                                <option value="Webhook">Webhook</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">Chart Template</label>
+                            <input
+                                type="text"
+                                name="template"
+                                list="strategy-template-options"
+                                value={formData.template}
+                                onChange={handleChange}
+                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
+                                placeholder="e.g. Supertrend, Ichimoku, VWAP"
+                            />
+                            <datalist id="strategy-template-options">
+                                <option value="Supertrend" />
+                                <option value="Ichimoku" />
+                                <option value="VWAP" />
+                            </datalist>
+                        </div>
                     </div>
 
                     {formData.type === 'Webhook' ? (
@@ -492,13 +515,20 @@ const ManageStrategies = () => {
                             {strategy.description || 'No description provided.'}
                         </p>
 
-                        {/* Show strategy source */}
-                        <div className="mt-auto pt-4 border-t border-gray-700 text-xs text-gray-500 flex justify-between">
-                            <span>{strategy.type === 'Webhook' ? 'Webhook' : 'Rules'}</span>
+                        {/* Show strategy source & template */}
+                        <div className="mt-auto pt-4 border-t border-gray-700 text-xs text-gray-500 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <span>{strategy.type === 'Webhook' ? 'Webhook' : 'Rules'}</span>
+                                {strategy.template && (
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[10px] font-bold">
+                                        {strategy.template}
+                                    </span>
+                                )}
+                            </div>
                             <span className="text-gray-300 font-medium">
                                 {strategy.type === 'Webhook'
                                     ? (strategy.webhook?.Title || strategy.webhook?.App || '-')
-                                    : `${getStrategyRuleCount(strategy)}`}
+                                    : `${getStrategyRuleCount(strategy)} rules`}
                             </span>
                         </div>
                     </div>

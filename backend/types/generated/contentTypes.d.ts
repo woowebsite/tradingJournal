@@ -1060,6 +1060,7 @@ export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
     rules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
     stoplossRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
     takeProfitRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    template: Schema.Attribute.String;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
     type: Schema.Attribute.Enumeration<['Rules', 'Webhook']> &
       Schema.Attribute.DefaultTo<'Rules'>;

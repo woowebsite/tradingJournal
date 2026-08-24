@@ -2,7 +2,7 @@
   "rules": [
     {
       "left": {
-        "name": "high",
+        "name": "low",
         "type": "function",
         "params": {
           "output": "price"
@@ -14,15 +14,15 @@
         "params": {
           "field": "typical",
           "anchor": "Year",
-          "output": "upper3"
+          "output": "value"
         }
       },
-      "operator": ">=",
-      "identifier": "price_at_vwap_year_upper_band_3"
+      "operator": ">",
+      "identifier": "price_at_vwap_year_breakout"
     },
     {
       "left": {
-        "name": "high",
+        "name": "low",
         "type": "function",
         "params": {
           "offset": 1,
@@ -36,10 +36,10 @@
           "field": "typical",
           "anchor": "Year",
           "offset": 1,
-          "output": "upper3"
+          "output": "value"
         }
       },
-      "operator": "<"
+      "operator": "<="
     }
   ],
   "condition": "AND"

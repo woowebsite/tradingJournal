@@ -358,6 +358,19 @@ const TradeStation = () => {
         });
     })();
 
+    // Automatically sync chart template from strategy if specified
+    useEffect(() => {
+        if (activeStrategy?.template) {
+            const rawTemplate = String(activeStrategy.template).trim();
+            if (rawTemplate) {
+                const matched = ['Supertrend', 'Ichimoku', 'VWAP'].find(
+                    t => t.toLowerCase() === rawTemplate.toLowerCase()
+                );
+                setChartTemplate(matched || rawTemplate);
+            }
+        }
+    }, [activeStrategy?.template]);
+
     const activeStrategyRuleIds = new Set([
         ...(activeStrategy?.rules || []),
         ...(activeStrategy?.entryRules || []),
@@ -508,6 +521,9 @@ const TradeStation = () => {
                                         <option value="Supertrend">Supertrend</option>
                                         <option value="Ichimoku">Ichimoku</option>
                                         <option value="VWAP">VWAP</option>
+                                        {!['Supertrend', 'Ichimoku', 'VWAP'].includes(chartTemplate) && (
+                                            <option value={chartTemplate}>{chartTemplate}</option>
+                                        )}
                                     </select>
                                 </label>
                                 {chartTemplate === 'VWAP' && (

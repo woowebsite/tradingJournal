@@ -27,6 +27,9 @@
       ],
       "default": "Rules"
     },
+    "template": {
+      "type": "string"
+    },
     "trades": {
       "type": "relation",
       "relation": "oneToMany",
