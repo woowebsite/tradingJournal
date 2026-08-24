@@ -8,6 +8,11 @@ const INDICATORS = {
         defaults: { fast: 12, slow: 26, signal: 9 },
         outputs: ['macd', 'signal', 'histogram']
     },
+    'vwap': {
+        params: ['anchor'],
+        defaults: { anchor: 'Day', field: 'typical' },
+        outputs: ['value', 'upper1', 'lower1', 'upper2', 'lower2', 'upper3', 'lower3']
+    },
     'rsi': {
         params: ['period'],
         defaults: { period: 14 },
@@ -61,7 +66,7 @@ const OperandInput = ({ value, onChange, label }) => {
             newData.params = { ...config.defaults };
             // Default field to close if not specified (for overlaid indicators)
             if (!['close', 'open', 'high', 'low', 'volume'].includes(val)) {
-                newData.params.field = val === 'highest' ? 'high' : (val === 'lowest' ? 'low' : 'close');
+                newData.params.field = val === 'highest' ? 'high' : (val === 'lowest' ? 'low' : (val === 'vwap' ? 'typical' : 'close'));
             }
             // Default output
             if (config.outputs.length > 0) newData.params.output = config.outputs[0];
@@ -148,17 +153,33 @@ const OperandInput = ({ value, onChange, label }) => {
 
                     {/* Parameters */}
                     <div className="grid grid-cols-2 gap-2">
-                        {value.name && INDICATORS[value.name]?.params.map(p => (
-                            <div key={p} className="flex flex-col">
-                                <label className="text-[10px] text-gray-500 uppercase">{p}</label>
-                                <input
-                                    type="number"
-                                    value={value.params?.[p] || 0}
-                                    onChange={(e) => handleParamChange(p, e.target.value)}
+                        {value.name === 'vwap' ? (
+                            <div className="flex flex-col col-span-2">
+                                <label className="text-[10px] text-gray-500 uppercase">Anchor</label>
+                                <select
+                                    value={value.params?.anchor || 'Day'}
+                                    onChange={(e) => handleStringParamChange('anchor', e.target.value)}
                                     className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white"
-                                />
+                                >
+                                    <option value="Day">Day</option>
+                                    <option value="Week">Week</option>
+                                    <option value="Month">Month</option>
+                                    <option value="Year">Year</option>
+                                </select>
                             </div>
-                        ))}
+                        ) : (
+                            value.name && INDICATORS[value.name]?.params.map(p => (
+                                <div key={p} className="flex flex-col">
+                                    <label className="text-[10px] text-gray-500 uppercase">{p}</label>
+                                    <input
+                                        type="number"
+                                        value={value.params?.[p] || 0}
+                                        onChange={(e) => handleParamChange(p, e.target.value)}
+                                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white"
+                                    />
+                                </div>
+                            ))
+                        )}
                         {/* Output Selector (if multiple) */}
                         {value.name && INDICATORS[value.name]?.outputs.length > 1 && (
                             <div className="flex flex-col col-span-2">
@@ -179,13 +200,22 @@ const OperandInput = ({ value, onChange, label }) => {
                             <div className="flex flex-col col-span-2">
                                 <label className="text-[10px] text-gray-500 uppercase">Input Field</label>
                                 <select
-                                    value={value.params?.field || 'close'}
+                                    value={value.params?.field || (value.name === 'vwap' ? 'typical' : 'close')}
                                     onChange={(e) => handleStringParamChange('field', e.target.value)}
                                     className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white"
                                 >
-                                    {['close', 'open', 'high', 'low', 'volume'].map(f => (
-                                        <option key={f} value={f}>{f}</option>
-                                    ))}
+                                    {value.name === 'vwap' ? (
+                                        <>
+                                            <option value="typical">typical ((H+L+C)/3)</option>
+                                            <option value="close">close</option>
+                                            <option value="hl2">hl2 ((H+L)/2)</option>
+                                            <option value="ohlc4">ohlc4</option>
+                                        </>
+                                    ) : (
+                                        ['close', 'open', 'high', 'low', 'volume'].map(f => (
+                                            <option key={f} value={f}>{f}</option>
+                                        ))
+                                    )}
                                 </select>
                             </div>
                         )}

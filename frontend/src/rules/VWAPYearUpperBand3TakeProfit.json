@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "left": {
+        "name": "close",
+        "type": "function",
+        "params": {
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "anchor": "Year",
+          "field": "typical",
+          "output": "upper3"
+        }
+      },
+      "operator": ">=",
+      "identifier": "price_at_vwap_year_upper_band_3"
+    }
+  ],
+  "condition": "AND"
+}

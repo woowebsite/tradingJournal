@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
-import { calculateSMA } from '../indicators/movingAverages';
+import { calculateSMA, drawMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimoku';
 import { calculateVWAP, drawVWAP } from '../indicators/vwap';
@@ -168,17 +168,6 @@ const TradingViewChart = ({
         });
         candlestickSeries.setData(candleData);
 
-        // MA20 Series
-        const ma20Data = calculateSMA(candleData, 200);
-        const ma20Series = chart.addSeries(LineSeries, {
-            color: 'white', // amber-500
-            lineWidth: 2,
-            crosshairMarkerVisible: false,
-            priceLineVisible: false,
-            lastValueVisible: false,
-        });
-        ma20Series.setData(ma20Data);
-
         if (template === 'Ichimoku') {
             // Ichimoku Cloud (9, 26, 52, displacement 26)
             const ichimokuData = calculateIchimoku(candleData, {
@@ -186,12 +175,15 @@ const TradingViewChart = ({
                 basePeriod: 78,
             });
             drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
+            drawMA(chart, LineSeries, candleData);
         } else if (template === 'VWAP') {
             const vwapData = calculateVWAP(sortedData, vwapAnchor);
             drawVWAP(chart, LineSeries, vwapData);
+            drawMA(chart, LineSeries, candleData, 20, { lineWidth: 1 });
         } else {
             const supertrendData = calculateSupertrend(10, 3, sortedData);
             drawSupertrend(chart, LineSeries, supertrendData);
+            drawMA(chart, LineSeries, candleData);
         }
 
         // Volume Series 

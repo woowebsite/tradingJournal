@@ -1,0 +1,26 @@
+{
+  "rules": [
+    {
+      "left": {
+        "name": "high",
+        "type": "function",
+        "params": {
+          "output": "price",
+          "offset": 0
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "anchor": "Day",
+          "field": "typical",
+          "output": "value"
+        }
+      },
+      "operator": ">=",
+      "identifier": "exit_long_touch_vwap_high"
+    }
+  ],
+  "condition": "AND"
+}

@@ -1,4 +1,5 @@
 import { calculateSupertrend } from '../indicators/supertrend';
+import { calculateVWAP } from '../indicators/vwap';
 
 /**
  * Utility to evaluate rules against a dataset (candles).
@@ -495,6 +496,34 @@ const executeFunction = (funcNode, history, index) => {
             return lastResult.direction;
         }
         return lastResult.value;
+    }
+
+    if (name === 'vwap') {
+        const anchor = params.anchor || 'Day';
+        const priceSource = params.field || params.priceSource || 'typical';
+        const output = params.output || 'value';
+        const offset = Math.abs(params.offset || 0);
+
+        const targetIdx = index + offset;
+        if (targetIdx >= history.length) return null;
+
+        const subHistory = history.slice(targetIdx).reverse();
+
+        const formattedData = subHistory.map(candle => ({
+            date: candle.date || candle.createdAt || candle.attributes?.date || candle.attributes?.createdAt || candle.time,
+            time: candle.time || candle.date || candle.attributes?.date || candle.attributes?.time,
+            open: getValue(candle, 'open'),
+            close: getValue(candle, 'close'),
+            high: getValue(candle, 'high'),
+            low: getValue(candle, 'low'),
+            volume: getValue(candle, 'volume')
+        }));
+
+        const results = calculateVWAP(formattedData, anchor, priceSource);
+        if (results.length === 0) return null;
+
+        const lastResult = results[results.length - 1];
+        return lastResult[output] !== undefined ? lastResult[output] : lastResult.value;
     }
 
     return null;

@@ -62,3 +62,36 @@ describe('supertrend rule', () => {
         expect(evaluateRule(descendingHistory, rule, 0)).toBe(true);
     });
 });
+
+describe('vwap rule', () => {
+    it('evaluates vwap rules correctly on historical data', () => {
+        // Day 1: close = 100, volume = 10, typical = 100 -> VWAP = 100
+        // Day 2: close = 102, volume = 20, typical = 102 -> VWAP = 101.33
+        const day1 = { date: '2025-01-01T00:00:00Z', open: 100, high: 100, low: 100, close: 100, volume: 10 };
+        const day2 = { date: '2025-01-02T00:00:00Z', open: 102, high: 102, low: 102, close: 102, volume: 20 };
+        const historyDesc = [day2, day1];
+
+        const ruleAboveVWAP = {
+            condition: 'AND',
+            rules: [{
+                left: { name: 'close', type: 'function', params: {} },
+                right: { name: 'vwap', type: 'function', params: { anchor: 'Year', field: 'typical', output: 'value' } },
+                operator: '>',
+            }],
+        };
+
+        const ruleBelowVWAP = {
+            condition: 'AND',
+            rules: [{
+                left: { name: 'close', type: 'function', params: {} },
+                right: { name: 'vwap', type: 'function', params: { anchor: 'Year', field: 'typical', output: 'value' } },
+                operator: '<',
+            }],
+        };
+
+        // Day 2 close = 102, VWAP = 101.33 -> close > VWAP is true
+        expect(evaluateRule(historyDesc, ruleAboveVWAP, 0)).toBe(true);
+        expect(evaluateRule(historyDesc, ruleBelowVWAP, 0)).toBe(false);
+    });
+});
+

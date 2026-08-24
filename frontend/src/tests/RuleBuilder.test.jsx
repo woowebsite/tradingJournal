@@ -124,4 +124,30 @@ describe('RuleBuilder', () => {
         expect(arg.rules[0].left.name).toBe('highest');
         expect(arg.rules[0].left.params.field).toBe('high');
     });
+
+    it('supports vwap indicator with anchor and outputs', () => {
+        const initialValue = {
+            condition: 'AND',
+            rules: [{
+                left: { type: 'function', name: 'close', params: { output: 'price' } },
+                operator: '<=',
+                right: { type: 'function', name: 'macd', params: { fast: 12, slow: 26, signal: 9 } }
+            }]
+        };
+        const handleChange = vi.fn();
+        render(<RuleBuilder value={initialValue} onChange={handleChange} />);
+
+        // Find the right operand's indicator selector
+        const comboboxes = screen.getAllByRole('combobox');
+        const rightIndicatorSelect = comboboxes[2];
+        fireEvent.change(rightIndicatorSelect, { target: { value: 'vwap' } });
+
+        expect(handleChange).toHaveBeenCalled();
+        const arg = handleChange.mock.calls[0][0];
+        expect(arg.rules[0].right.name).toBe('vwap');
+        expect(arg.rules[0].right.params.anchor).toBe('Day');
+        expect(arg.rules[0].right.params.field).toBe('typical');
+        expect(arg.rules[0].right.params.output).toBe('value');
+    });
 });
+

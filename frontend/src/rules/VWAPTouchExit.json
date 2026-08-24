@@ -1,0 +1,68 @@
+{
+  "rules": [
+    {
+      "left": {
+        "name": "high",
+        "type": "function",
+        "params": {
+          "offset": 0,
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "output": "value"
+        }
+      },
+      "operator": ">=",
+      "identifier": "candle_high_above_vwap"
+    },
+    {
+      "left": {
+        "name": "low",
+        "type": "function",
+        "params": {
+          "offset": 0,
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "output": "value"
+        }
+      },
+      "operator": "<=",
+      "identifier": "candle_low_below_vwap"
+    },
+    {
+      "left": {
+        "name": "sma",
+        "type": "function",
+        "params": {
+          "field": "close",
+          "output": "sma",
+          "period": 20
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "output": "value"
+        }
+      },
+      "operator": "<"
+    }
+  ],
+  "condition": "AND"
+}
