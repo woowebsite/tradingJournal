@@ -49,7 +49,33 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
 
         if (!isOpen || !symbolId) return () => { cancelled = true; };
 
-        fetchPagedSymbolHistories(symbolId)
+        // Determine date range for trade to fetch relevant historical candles
+        const details = trade?.trade_details || [];
+        const tradeDates = details.map(d => new Date(d.date).getTime()).filter(Boolean);
+        if (trade?.date) {
+            tradeDates.push(new Date(trade.date).getTime());
+        }
+
+        let fromDate = undefined;
+        let toDate = undefined;
+
+        if (tradeDates.length > 0) {
+            const minTime = Math.min(...tradeDates);
+            const maxTime = Math.max(...tradeDates);
+
+            // 200 days before the earliest trade detail/date (in ms) to show preceding context
+            fromDate = new Date(minTime - 200 * 24 * 3600 * 1000).toISOString();
+
+            if (trade.trade_status === 'Open') {
+                // If trade is open, fetch candles all the way up to today
+                toDate = new Date().toISOString();
+            } else {
+                // 100 days after the latest trade detail/date to show succeeding context
+                toDate = new Date(maxTime + 100 * 24 * 3600 * 1000).toISOString();
+            }
+        }
+
+        fetchPagedSymbolHistories(symbolId, fromDate, toDate)
             .then(data => {
                 if (!cancelled) setChartState({ symbolId, data, error: '' });
             })
@@ -61,7 +87,7 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
             });
 
         return () => { cancelled = true; };
-    }, [isOpen, trade?.symbol?.documentId, trade?.symbol?.id]);
+    }, [isOpen, trade, trade?.symbol?.documentId, trade?.symbol?.id]);
 
     const activeSymbolId = trade?.symbol?.documentId || trade?.symbol?.id;
     const chartLoading = Boolean(isOpen && activeSymbolId && chartState.symbolId !== activeSymbolId);

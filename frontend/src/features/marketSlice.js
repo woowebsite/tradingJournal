@@ -8,7 +8,7 @@ import { getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, update
 const HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_CANDLES = 500;
 
-export const fetchPagedSymbolHistories = async (filterSymbolId) => {
+export const fetchPagedSymbolHistories = async (filterSymbolId, fromDate, toDate) => {
     const histories = [];
     const maxPages = Math.ceil(MAX_HISTORY_CANDLES / HISTORY_PAGE_SIZE);
 
@@ -16,6 +16,12 @@ export const fetchPagedSymbolHistories = async (filterSymbolId) => {
         let url = `/symbol-histories?populate=symbol&sort=date:desc&pagination[page]=${page}&pagination[pageSize]=${HISTORY_PAGE_SIZE}`;
         if (filterSymbolId) {
             url += `&filters[symbol][documentId][$eq]=${encodeURIComponent(filterSymbolId)}`;
+        }
+        if (fromDate) {
+            url += `&filters[date][$gte]=${encodeURIComponent(fromDate)}`;
+        }
+        if (toDate) {
+            url += `&filters[date][$lte]=${encodeURIComponent(toDate)}`;
         }
 
         const res = await api.get(url);
