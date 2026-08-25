@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { fetchTrades, saveTrade, deleteTrade, deleteDemoTradesByStrategy } from '../features/tradeSlice';
-import { Filter, Edit2, RefreshCw } from 'lucide-react';
+import { fetchTrades, saveTrade, deleteTrade, deleteDemoTradesByStrategy, clearAllDemoTrades } from '../features/tradeSlice';
+import { Filter, Edit2, RefreshCw, Trash2 } from 'lucide-react';
 import TradeModal from '../components/TradeModal';
 import TradeDetailModal from '../components/TradeDetailModal';
 import { useAccount } from '../context/AccountContext';
@@ -11,6 +11,7 @@ import { fetchBatchLatestPrices } from '../features/marketSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { fetchRules } from '../features/ruleSlice';
 import { scanSignals } from '../features/signalSlice';
+import { fetchWatchlists } from '../features/watchlistSlice';
 import StrategySummary from '../containers/StrategySummary';
 
 const Backtest = () => {
@@ -21,23 +22,63 @@ const Backtest = () => {
     const { items: strategies } = useSelector(state => state.strategies);
     const { items: rules } = useSelector(state => state.rules);
     const { loading: scanningSignals } = useSelector(state => state.signals);
+    const { items: watchlists } = useSelector(state => state.watchlists);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedTrade, setSelectedTrade] = useState(null);
     const [tradeToEdit, setTradeToEdit] = useState(null);
     const [strategyFilter, setStrategyFilter] = useState('');
-    const [resettingDemoTrades, setResettingDemoTrades] = useState(false);
+    const [watchlistFilter, setWatchlistFilter] = useState('');
+    const [clearingDemoTrades, setClearingDemoTrades] = useState(false);
+
+    const handleClearDemoTrades = async () => {
+        if (!window.confirm('Are you sure you want to delete ALL Demo trades and their related details? This action cannot be undone.')) return;
+        try {
+            setClearingDemoTrades(true);
+            const res = await dispatch(clearAllDemoTrades()).unwrap();
+            refreshBacktestTrades();
+            alert(`Successfully deleted ${res.deletedTradeCount} demo trades and ${res.deletedTradeDetailCount} trade details.`);
+        } catch (error) {
+            refreshBacktestTrades();
+            alert(`Failed to delete demo trades: ${error?.message || error}`);
+        } finally {
+            setClearingDemoTrades(false);
+        }
+    };
+
+    const accountWatchlists = useMemo(() => {
+        if (!watchlists) return [];
+        if (!selectedAccount) return watchlists;
+        return watchlists.filter(wl => {
+            const wlAccountId = wl.account?.documentId || wl.account?.id || wl.account;
+            const currentAccountId = selectedAccount.documentId || selectedAccount.id;
+            return wlAccountId?.toString() === currentAccountId?.toString();
+        });
+    }, [watchlists, selectedAccount]);
 
     const refreshBacktestTrades = useCallback(() => {
-        dispatch(fetchTrades({ mode: 'Demo', strategyId: strategyFilter }));
+        dispatch(fetchTrades({ 
+            mode: 'Demo', 
+            strategyId: strategyFilter
+        }));
     }, [dispatch, strategyFilter]);
 
-    useEffect(() => {
-        refreshBacktestTrades();
-    }, [refreshBacktestTrades]);
+    const handleStrategyChange = (val) => {
+        setStrategyFilter(val);
+        dispatch(fetchTrades({ 
+            mode: 'Demo', 
+            strategyId: val
+        }));
+    };
+
+    const handleWatchlistChange = (val) => {
+        setWatchlistFilter(val);
+    };
 
     useEffect(() => {
         dispatch(fetchStrategies());
         dispatch(fetchRules());
+        dispatch(fetchWatchlists());
+        dispatch(fetchTrades({ mode: 'Demo', strategyId: '' }));
     }, [dispatch]);
 
     useEffect(() => {
@@ -55,7 +96,21 @@ const Backtest = () => {
 
     const trades = useMemo(() => {
         if (!rawTrades) return [];
-        return rawTrades.map(item => {
+        let list = rawTrades;
+
+        if (watchlistFilter) {
+            const selectedWatchlistObj = watchlists.find(wl => (wl.documentId || wl.id) === watchlistFilter);
+            const watchlistSymbols = selectedWatchlistObj?.symbols || [];
+            const allowedSymbolIds = new Set(
+                watchlistSymbols.map(s => (s.documentId || s.id)?.toString()).filter(Boolean)
+            );
+            list = list.filter(trade => {
+                const tradeSymId = (trade.symbol?.documentId || trade.symbol?.id)?.toString();
+                return tradeSymId && allowedSymbolIds.has(tradeSymId);
+            });
+        }
+
+        return list.map(item => {
             const details = item.trade_details || [];
             // Sort details by date
             const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -85,7 +140,7 @@ const Backtest = () => {
                 derivedPnl: pnl
             };
         }).sort((a, b) => new Date(b.derivedDate) - new Date(a.derivedDate));
-    }, [rawTrades, latestPricesMap]);
+    }, [rawTrades, latestPricesMap, watchlistFilter, watchlists]);
 
     const availableStrategies = useMemo(() => strategies || [], [strategies]);
 
@@ -128,15 +183,22 @@ const Backtest = () => {
         const selectedRuleIds = availableRules.map(rule => rule.documentId || rule.id).filter(Boolean);
         const strategyId = activeStrategy.documentId || activeStrategy.id;
 
-        try {
-            setResettingDemoTrades(true);
-            await dispatch(deleteDemoTradesByStrategy(strategyId)).unwrap();
-            setResettingDemoTrades(false);
+        let scanSymbols = undefined;
+        if (watchlistFilter) {
+            const selectedWatchlistObj = watchlists.find(wl => (wl.documentId || wl.id) === watchlistFilter);
+            scanSymbols = selectedWatchlistObj?.symbols || [];
+            if (scanSymbols.length === 0) {
+                alert('Selected watchlist has no symbols to scan.');
+                return;
+            }
+        }
 
+        try {
             const count = await dispatch(scanSignals({
                 selectedRuleIds,
                 accountId,
                 strategyId,
+                scanSymbols,
                 syncDemoTrades: true
             })).unwrap();
 
@@ -145,8 +207,6 @@ const Backtest = () => {
         } catch (err) {
             refreshBacktestTrades();
             alert(`Scan failed: ${err?.message || JSON.stringify(err) || err}`);
-        } finally {
-            setResettingDemoTrades(false);
         }
     };
 
@@ -219,7 +279,7 @@ const Backtest = () => {
                         <span className="text-sm text-gray-400">Strategy</span>
                         <select
                             value={strategyFilter}
-                            onChange={(e) => setStrategyFilter(e.target.value)}
+                            onChange={(e) => handleStrategyChange(e.target.value)}
                             className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500 min-w-[180px]"
                         >
                             <option value="">All Strategies</option>
@@ -233,19 +293,46 @@ const Backtest = () => {
                             })}
                         </select>
                     </div>
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg">
+                        <Filter size={18} />
+                        <span className="text-sm text-gray-400">Watchlist</span>
+                        <select
+                            value={watchlistFilter}
+                            onChange={(e) => handleWatchlistChange(e.target.value)}
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500 min-w-[180px]"
+                        >
+                            <option value="">All Symbols (No Watchlist)</option>
+                            {accountWatchlists.map(wl => {
+                                const wlId = wl.documentId || wl.id;
+                                return (
+                                    <option key={wlId} value={wlId}>
+                                        {wl.name || 'Untitled Watchlist'}
+                                    </option>
+                                );
+                            })}
+                        </select>
+                    </div>
                     <button
                         onClick={handleScanSignals}
-                        disabled={scanningSignals || resettingDemoTrades}
+                        disabled={scanningSignals || clearingDemoTrades}
                         className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/50 disabled:cursor-not-allowed rounded-lg transition font-medium text-white shadow-lg shadow-emerald-500/20"
                     >
-                        <RefreshCw size={18} className={scanningSignals || resettingDemoTrades ? 'animate-spin' : ''} />
-                        {resettingDemoTrades ? 'Resetting Demo Trades...' : 'Scan Signals'}
+                        <RefreshCw size={18} className={scanningSignals ? 'animate-spin' : ''} />
+                        {scanningSignals ? 'Scanning...' : 'Scan Signals'}
+                    </button>
+                    <button
+                        onClick={handleClearDemoTrades}
+                        disabled={scanningSignals || clearingDemoTrades}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 disabled:cursor-not-allowed rounded-lg transition font-medium text-white shadow-lg shadow-red-500/20"
+                    >
+                        {clearingDemoTrades ? <RefreshCw size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                        {clearingDemoTrades ? 'Clearing...' : 'Clear'}
                     </button>
                 </div>
             </div>
 
             <div className="mb-6 bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-lg">
-                <StrategySummary activeStrategy={activeStrategy} />
+                <StrategySummary activeStrategy={activeStrategy} trades={trades} />
             </div>
 
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">

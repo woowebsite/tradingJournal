@@ -218,6 +218,7 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
                                     data={chartData}
                                     symbol={trade.symbol?.Name || trade.symbol?.name}
                                     signals={chartSignals}
+                                    template={trade.strategy?.template || 'Supertrend'}
                                     disableScrollZoom
                                     disableChartMove
                                 />

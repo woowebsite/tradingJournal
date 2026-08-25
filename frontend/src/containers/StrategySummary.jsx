@@ -7,9 +7,8 @@ import { fetchRules } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 import { StrategyModal } from '../pages/ManageStrategies';
 
-const StrategySummary = ({ activeStrategy }) => {
+const StrategySummary = ({ activeStrategy, trades = [] }) => {
     const dispatch = useDispatch();
-    const { items: strategyTrades, loading: strategyTradesLoading } = useSelector(state => state.trades);
     const { items: availableRules } = useSelector(state => state.rules);
     const { items: availableWebhooks } = useSelector(state => state.webhooks);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -19,26 +18,14 @@ const StrategySummary = ({ activeStrategy }) => {
         dispatch(fetchWebhooks());
     }, [dispatch]);
 
-    useEffect(() => {
-        if (!activeStrategy) return;
-        const strategyId = activeStrategy.documentId || activeStrategy.id;
-
-        dispatch(fetchTrades({
-            strategyId,
-            tradeStatus: 'Closed',
-            mode: 'Demo',
-            pageSize: 1000
-        }));
-    }, [activeStrategy, dispatch]);
-
     const { winRate, totalFinished, winCount, lossCount, strategyStats } = useMemo(() => {
-        if (!strategyTrades || strategyTrades.length === 0) {
+        if (!trades || trades.length === 0) {
             return {
                 winRate: 0,
                 totalFinished: 0,
                 winCount: 0,
                 lossCount: 0,
-                strategyStats: { rewardRisk: 0, avgWin: 0, avgLoss: 0, loading: strategyTradesLoading }
+                strategyStats: { rewardRisk: 0, avgWin: 0, avgLoss: 0, loading: false }
             };
         }
 
@@ -47,9 +34,9 @@ const StrategySummary = ({ activeStrategy }) => {
         let grossProfit = 0;
         let grossLoss = 0;
 
-        strategyTrades.forEach(trade => {
-            const pnl = Number(trade.pnl);
-            if (trade.trade_status !== 'Closed' || trade.mode !== 'Demo' || !Number.isFinite(pnl)) return;
+        trades.forEach(trade => {
+            const pnl = Number(trade.pnl !== null && trade.pnl !== undefined ? trade.pnl : trade.derivedPnl);
+            if (trade.trade_status !== 'Closed' || !Number.isFinite(pnl)) return;
 
             if (pnl > 0) {
                 wins++;
@@ -75,10 +62,10 @@ const StrategySummary = ({ activeStrategy }) => {
                 rewardRisk: rewardRisk.toFixed(2),
                 avgWin: avgWin.toFixed(2),
                 avgLoss: avgLoss.toFixed(2),
-                loading: strategyTradesLoading
+                loading: false
             }
         };
-    }, [strategyTrades, strategyTradesLoading]);
+    }, [trades]);
 
     const handleUpdateStrategy = async (strategyData) => {
         const strategyId = activeStrategy?.documentId || activeStrategy?.id;

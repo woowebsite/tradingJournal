@@ -133,11 +133,6 @@ export const scanSignals = createAsyncThunk(
                 } else {
                     url += `&filters[strategy][id][$eq]=${strategyId}`;
                 }
-                if (typeof accountId === 'string') {
-                    url += `&filters[account][documentId][$eq]=${accountId}`;
-                } else {
-                    url += `&filters[account][id][$eq]=${accountId}`;
-                }
                 return `${url}&sort=date:desc&populate=trade_details`;
             };
 
