@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, createSymbol, updateSymbol, deleteSymbol } from '../features/symbolSlice';
-import { Save, X, Edit2, Trash2, Tag } from 'lucide-react';
+import { Save, X, Edit2, Trash2, Tag, History } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import { deleteAllHistories } from '../features/marketSlice';
 
 const ManageSymbols = () => {
     const dispatch = useDispatch();
@@ -88,6 +89,18 @@ const ManageSymbols = () => {
             if (editingId === id) handleCancel();
         } catch (error) {
             alert(`Failed to delete symbol: ${error}`);
+        }
+    };
+
+    const handleClearHistory = async (symbol) => {
+        const symbolId = symbol.id || symbol.documentId;
+        if (!symbolId) return;
+        if (!window.confirm(`Are you sure you want to CLEAR ALL history records for ${symbol.Name}? This action cannot be undone.`)) return;
+        try {
+            await dispatch(deleteAllHistories(symbolId)).unwrap();
+            alert(`Successfully cleared history for ${symbol.Name}`);
+        } catch (error) {
+            alert(`Failed to clear history: ${error}`);
         }
     };
 
@@ -220,6 +233,13 @@ const ManageSymbols = () => {
                                                     title="Edit"
                                                 >
                                                     <Edit2 size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleClearHistory(symbol)}
+                                                    className="p-1.5 text-amber-400 hover:bg-amber-900/30 rounded transition cursor-pointer"
+                                                    title="Clear History"
+                                                >
+                                                    <History size={16} />
                                                 </button>
                                                 <button
                                                     onClick={() => handleDelete(symbol.id || symbol.documentId)}

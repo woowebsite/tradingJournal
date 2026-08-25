@@ -1,8 +1,9 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { getCryptoHistory } from '../services/binance';
+import { getStockHistory } from '../services/24hmoney';
 
-import { getStockHistory, getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
+import { getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
 const HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_CANDLES = 500;

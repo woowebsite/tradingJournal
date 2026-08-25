@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories } from '../features/marketSlice';
 import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { deleteTrade, fetchOpenTrades, fetchTrades, saveTrade } from '../features/tradeSlice';
@@ -15,7 +15,7 @@ import WatchlistSelector from '../components/WatchlistSelector';
 import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
-import { Search, RefreshCw, Plus } from 'lucide-react';
+import { Search, RefreshCw, Plus, History } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { upsertSymbolTechnicalAnalysis } from '../services/tcbs';
@@ -318,6 +318,18 @@ const TradeStation = () => {
         }
     }, [defaultWatchlist, dispatch, selectedSymbol]);
 
+    const handleClearHistory = useCallback(async () => {
+        if (!selectedSymbol || !selectedSymbolId) return;
+        if (!window.confirm(`Are you sure you want to CLEAR ALL history records for ${selectedSymbol.Name}? This action cannot be undone.`)) return;
+        try {
+            await dispatch(deleteAllHistories(selectedSymbolId)).unwrap();
+            alert(`Successfully cleared history for ${selectedSymbol.Name}`);
+            dispatch(fetchHistories(selectedSymbolId));
+        } catch (error) {
+            alert(`Failed to clear history: ${error}`);
+        }
+    }, [dispatch, selectedSymbol, selectedSymbolId]);
+
     useEffect(() => {
         const loadTcbsInsights = async () => {
             const ticker = selectedSymbol?.Name?.trim().toUpperCase();
@@ -547,11 +559,20 @@ const TradeStation = () => {
                                         type="button"
                                         onClick={handleAddCurrentSymbolToWatchlist}
                                         disabled={addingToWatchlist || !defaultWatchlist}
-                                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                                        title={defaultWatchlist ? 'Add current symbol to default watchlist' : 'No default watchlist available'}
+                                        className="inline-flex items-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                        title={addingToWatchlist ? 'Adding...' : (defaultWatchlist ? 'Add symbol to default watchlist' : 'No default watchlist available')}
                                     >
-                                        <Plus size={16} />
-                                        {addingToWatchlist ? 'Adding...' : 'AddTo Watchlist'}
+                                        <Plus size={18} />
+                                    </button>
+                                )}
+                                {selectedSymbol && (
+                                    <button
+                                        type="button"
+                                        onClick={handleClearHistory}
+                                        className="inline-flex items-center rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-amber-300 transition hover:bg-amber-500/20"
+                                        title="Clear all price history records for this symbol"
+                                    >
+                                        <History size={18} />
                                     </button>
                                 )}
                                 {selectedSymbol && (
@@ -559,11 +580,10 @@ const TradeStation = () => {
                                         type="button"
                                         onClick={handleRefresh}
                                         disabled={loading}
-                                        className="refresh-btn inline-flex items-center gap-2 rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-blue-400 transition hover:bg-gray-600 disabled:opacity-50"
-                                        title="Refresh Data"
+                                        className="refresh-btn inline-flex items-center rounded-lg bg-gray-700 p-2 text-blue-400 transition hover:bg-gray-600 disabled:opacity-50"
+                                        title={loading ? 'Refreshing...' : 'Refresh data'}
                                     >
                                         <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-                                        Refresh
                                     </button>
                                 )}
                             </div>

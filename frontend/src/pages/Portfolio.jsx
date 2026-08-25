@@ -5,7 +5,7 @@ import TradingViewChart from '../components/TradingViewChart';
 import WatchlistSelector from '../components/WatchlistSelector';
 import { fetchPagedSymbolHistories } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
-import { getStockHistory } from '../services/tcbs';
+import { getStockHistory } from '../services/24hmoney';
 import { buildMarketCapWeightedIndex, normalizeChartHistory } from '../utils/watchlistIndex';
 import allocationRules from '../config/technicalAllocationRules.json';
 import { fetchSignals } from '../features/signalSlice';
