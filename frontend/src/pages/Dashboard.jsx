@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { Link } from 'react-router-dom';
 import { Edit } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import api from '../services/api';
@@ -8,6 +9,7 @@ import { getStrategyId, resolveSetting } from '../utils/roadmapCalculations';
 import { fetchStrategies, updateStrategy } from '../features/strategySlice';
 import { fetchRules } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
+import { fetchSignals } from '../features/signalSlice';
 import { StrategyModal } from './ManageStrategies';
 import SettingsModal from '../components/SettingsModal';
 
@@ -17,6 +19,7 @@ const Dashboard = () => {
     const { items: strategies } = useSelector(state => state.strategies);
     const { items: rules } = useSelector(state => state.rules);
     const { items: webhooks } = useSelector(state => state.webhooks);
+    const { items: signals } = useSelector(state => state.signals);
     const [stats, setStats] = useState({
         totalPnl: 0,
         winRate: 0,
@@ -42,10 +45,81 @@ const Dashboard = () => {
         ? (activeStrategy.description || activeStrategy.Description || '')
         : '';
 
+    const rulePurposeConfig = {
+        entryRules: { label: 'Entry', className: 'bg-blue-500/20 text-blue-400' },
+        stoplossRules: { label: 'Stoploss', className: 'bg-red-500/20 text-red-400' },
+        takeProfitRules: { label: 'Take Profit', className: 'bg-green-500/20 text-green-400' },
+        exitRules: { label: 'Exit', className: 'bg-yellow-500/20 text-yellow-400' }
+    };
+
+    const getRulePurpose = (rule) => {
+        const ruleId = (rule.documentId || rule.id)?.toString();
+        if (!ruleId || !activeStrategy) return null;
+
+        for (const [fieldName, config] of Object.entries(rulePurposeConfig)) {
+            const hasRule = activeStrategy[fieldName]?.some(strategyRule =>
+                (strategyRule.documentId || strategyRule.id)?.toString() === ruleId
+            );
+            if (hasRule) return config;
+        }
+        return null;
+    };
+
+    const formatSignalTime = (dateString) => {
+        if (!dateString) return '-';
+        const d = new Date(dateString);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    };
+
+    const activeAccountSignals = useMemo(() => {
+        if (!selectedAccount || !signals || !activeStrategy) return [];
+
+        const currentAccountId = selectedAccount.documentId || selectedAccount.id;
+
+        let list = signals.filter(signal => {
+            const signalAccountId = signal.account?.documentId || signal.account?.id;
+            return signalAccountId && currentAccountId &&
+                signalAccountId.toString() === currentAccountId.toString();
+        });
+
+        const strategyRuleIdentifiers = new Set();
+        [
+            ...(activeStrategy.rules || []),
+            ...(activeStrategy.entryRules || []),
+            ...(activeStrategy.takeProfitRules || []),
+            ...(activeStrategy.stoplossRules || []),
+            ...(activeStrategy.exitRules || [])
+        ].forEach(r => {
+            if (r.id) strategyRuleIdentifiers.add(r.id.toString());
+            if (r.documentId) strategyRuleIdentifiers.add(r.documentId.toString());
+        });
+
+        list = list.filter(signal => {
+            if (!signal.rules || signal.rules.length === 0) return false;
+            return signal.rules.some(r => {
+                const idMatch = r.id && strategyRuleIdentifiers.has(r.id.toString());
+                const docIdMatch = r.documentId && strategyRuleIdentifiers.has(r.documentId.toString());
+                return idMatch || docIdMatch;
+            });
+        });
+
+        const today = new Date();
+        list = list.filter(signal => {
+            if (!signal.date) return false;
+            const d = new Date(signal.date);
+            return d.getDate() === today.getDate() &&
+                d.getMonth() === today.getMonth() &&
+                d.getFullYear() === today.getFullYear();
+        });
+
+        return list;
+    }, [selectedAccount, signals, activeStrategy]);
+
     useEffect(() => {
         dispatch(fetchStrategies());
         dispatch(fetchRules());
         dispatch(fetchWebhooks());
+        dispatch(fetchSignals());
     }, [dispatch]);
 
     const handleUpdateStrategy = async (strategyData) => {
@@ -341,7 +415,76 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Signal Suggestions (Today) */}
+            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-sm">
+                <h3 className="text-xl font-semibold mb-4 text-white">Signal Suggestions (Today)</h3>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-900/50 text-gray-400 text-sm uppercase">
+                            <tr>
+                                <th className="p-4">Time</th>
+                                <th className="p-4">Symbol</th>
+                                <th className="p-4">Action</th>
+                                <th className="p-4">Triggered Rule</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700/50">
+                            {loading ? (
+                                <tr>
+                                    <td colSpan="4" className="p-8 text-center text-gray-500">Loading signal suggestions...</td>
+                                </tr>
+                            ) : activeAccountSignals.length === 0 ? (
+                                <tr>
+                                    <td colSpan="4" className="p-8 text-center text-gray-500 italic text-sm">
+                                        No signal suggestions generated today for this strategy.
+                                    </td>
+                                </tr>
+                            ) : (
+                                activeAccountSignals.map(signal => {
+                                    const signalId = signal.documentId || signal.id;
+                                    const symbolName = signal.symbol?.Name || signal.symbol?.name || signal.name || '';
+                                    return (
+                                        <tr key={signalId} className="hover:bg-gray-700/30 transition">
+                                            <td className="p-4 text-gray-300 font-mono">
+                                                {formatSignalTime(signal.date)}
+                                            </td>
+                                            <td className="p-4 font-mono font-medium text-blue-400 hover:text-blue-300 transition">
+                                                {symbolName ? (
+                                                    <Link to={`/trade-station?symbol=${encodeURIComponent(symbolName)}`}>
+                                                        {symbolName}
+                                                    </Link>
+                                                ) : (
+                                                    'N/A'
+                                                )}
+                                            </td>
+                                            <td className="p-4">
+                                                <div className="flex flex-wrap gap-1">
+                                                    {signal.rules?.map(rule => {
+                                                        const purpose = getRulePurpose(rule);
+                                                        return (
+                                                            <span
+                                                                key={rule.id || rule.documentId}
+                                                                className={`px-2.5 py-1 rounded-full text-xs font-bold ${purpose?.className || 'bg-gray-500/20 text-gray-400'}`}
+                                                            >
+                                                                {purpose?.label || 'Rule'}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-gray-300 text-sm">
+                                                {signal.rules?.map(r => r.Name).join(', ') || '-'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 min-h-[300px]">
                     <h3 className="text-xl font-semibold mb-4">Equity Curve</h3>
                     <div className="flex items-center justify-center h-full text-gray-500">
