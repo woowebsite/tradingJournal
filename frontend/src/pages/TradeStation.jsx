@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle } from '../features/marketSlice';
 import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { deleteTrade, fetchOpenTrades, fetchTrades, saveTrade } from '../features/tradeSlice';
@@ -27,7 +27,7 @@ import { getStrategyId } from '../utils/roadmapCalculations';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
-    const { symbols, histories, externalIndicators, loading } = useSelector(state => state.market);
+    const { symbols, histories, externalIndicators, loading, historyLoading } = useSelector(state => state.market);
     const { items: allSignals } = useSelector(state => state.signals);
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -94,7 +94,27 @@ const TradeStation = () => {
 
     useEffect(() => {
         if (selectedSymbolId) {
-            dispatch(fetchHistories(selectedSymbolId));
+            // Check if the history for this symbol is already loaded in Redux or localStorage
+            const isLoaded = histories && histories.some(h => {
+                const symId = h.symbol?.documentId || h.symbol?.id;
+                return symId && symId.toString() === selectedSymbolId.toString();
+            });
+
+            const hasInLocal = (() => {
+                try {
+                    const cachedStr = localStorage.getItem('watchlist_histories');
+                    if (!cachedStr) return false;
+                    const cached = JSON.parse(cachedStr);
+                    return cached.some(h => {
+                        const symId = h.symbol?.documentId || h.symbol?.id;
+                        return symId && symId.toString() === selectedSymbolId.toString();
+                    });
+                } catch { return false; }
+            })();
+
+            if (!isLoaded && !hasInLocal) {
+                dispatch(fetchHistories(selectedSymbolId));
+            }
 
             // Also fetch external indicators
             const sym = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
@@ -102,7 +122,50 @@ const TradeStation = () => {
                 dispatch(fetchExternalIndicators(sym.Name));
             }
         }
-    }, [dispatch, selectedSymbolId, symbols]); // 'symbols' dependency keeps the selected symbol lookup stable
+    }, [dispatch, selectedSymbolId, symbols, histories]);
+
+    // 1. Thực hiện handleWatchlistRefresh để tải toàn bộ data cho symbol ngày mới nhất.
+    // 2. Load toàn bộ symbol-history có symbol nằm trong watchlist vào localStorage vào key watchlist_histories và set watchlist_updated_latest = true.
+    const handleWatchlistRefresh = useCallback(async () => {
+        if (!defaultWatchlist || !defaultWatchlist.symbols || defaultWatchlist.symbols.length === 0) return;
+
+        const symbolsList = defaultWatchlist.symbols;
+        const symbolIds = symbolsList.map(s => s.documentId || s.id).filter(Boolean);
+        if (symbolIds.length === 0) return;
+
+        const isUpdatedLatest = localStorage.getItem('watchlist_updated_latest') === 'true' && localStorage.getItem('watchlist_histories');
+
+        if (isUpdatedLatest) {
+            console.log('Watchlist histories already in localStorage. Loading from cache...');
+            dispatch(fetchHistories({ symbolIds, forceRefresh: false }));
+            return;
+        }
+
+        console.log('1. Performing handleWatchlistRefresh to fetch latest data for all symbols in watchlist...');
+        // 1. Fetch external history for all symbols in parallel
+        const refreshPromises = symbolsList.map(s => {
+            const symName = s.Name || s.name;
+            const symId = s.documentId || s.id;
+            if (!symName || !symId) return Promise.resolve();
+            return dispatch(loadExternalHistory({
+                symbol: symName,
+                symbolId: symId,
+                marketType: selectedAccount?.market?.Name
+            })).unwrap().catch(err => {
+                console.warn(`Failed external refresh for ${symName}:`, err);
+            });
+        });
+
+        await Promise.all(refreshPromises);
+
+        console.log('2. Loading all symbol-history for watchlist into localStorage and setting watchlist_updated_latest = true...');
+        // 2. Load all symbol-history into localStorage & Redux
+        await dispatch(fetchHistories({ symbolIds, forceRefresh: true })).unwrap();
+    }, [defaultWatchlist, dispatch, selectedAccount?.market?.Name]);
+
+    useEffect(() => {
+        handleWatchlistRefresh();
+    }, [handleWatchlistRefresh]);
 
     useEffect(() => {
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
@@ -131,6 +194,14 @@ const TradeStation = () => {
 
     const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
 
+    const activeSymbolHistories = useMemo(() => {
+        if (!selectedSymbolId || !histories) return [];
+        return histories.filter(h => {
+            const symId = h.symbol?.documentId || h.symbol?.id;
+            return symId && selectedSymbolId && symId.toString() === selectedSymbolId.toString();
+        });
+    }, [histories, selectedSymbolId]);
+
     useEffect(() => {
         if (!selectedSymbolId || !selectedSymbol?.Name) return;
         if (metadataSyncedSymbolRef.current === selectedSymbolId) return;
@@ -149,9 +220,9 @@ const TradeStation = () => {
     }, [dispatch, selectedSymbol?.Name, selectedSymbolId]);
 
     useEffect(() => {
-        if (!selectedSymbolId || !histories || histories.length === 0) return;
+        if (!selectedSymbolId || !activeSymbolHistories || activeSymbolHistories.length === 0) return;
 
-        const sortedHistory = [...histories]
+        const sortedHistory = [...activeSymbolHistories]
             .sort((a, b) => new Date(a.date) - new Date(b.date))
             .reduce((unique, candle) => {
                 const date = String(candle.date || '').split('T')[0];
@@ -186,7 +257,7 @@ const TradeStation = () => {
         }).catch(error => {
             console.error(`Failed to save technical analysis for ${selectedSymbol.Name}:`, error);
         });
-    }, [histories, selectedSymbol?.Name, selectedSymbolId]);
+    }, [activeSymbolHistories, selectedSymbol?.Name, selectedSymbolId]);
 
     const refreshSelectedAccountTrades = useCallback(() => {
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
@@ -485,15 +556,42 @@ const TradeStation = () => {
 
     }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId]);
 
+    // 3. Mỗi lần change symbol từ watchlist, hãy kiểm tra từ localStorage xem symbol đó đã có data của ngày hôm nay chưa.
+    // Nếu chưa thì get data mới nhất từ API và lưu vào symbol-history, đồng thời cập nhật vào localStorage.
     useEffect(() => {
         if (!symbolParam || !selectedSymbol || !selectedSymbolId) return;
 
+        let symbolCandles = [];
+        const cachedStr = localStorage.getItem('watchlist_histories');
+        if (cachedStr) {
+            try {
+                const cached = JSON.parse(cachedStr);
+                symbolCandles = cached.filter(h => {
+                    const symId = h.symbol?.documentId || h.symbol?.id;
+                    return symId && symId.toString() === selectedSymbolId.toString();
+                });
+            } catch (e) {
+                console.error('Error parsing watchlist_histories from localStorage:', e);
+            }
+        }
+
+        if (symbolCandles.length === 0 && activeSymbolHistories && activeSymbolHistories.length > 0) {
+            symbolCandles = activeSymbolHistories;
+        }
+
+        const hasToday = hasTodayCandle(symbolCandles);
+        if (hasToday) {
+            console.log(`Symbol ${selectedSymbol.Name} already has today's candle. Skipping refresh.`);
+            return;
+        }
+
+        console.log(`Symbol ${selectedSymbol.Name} does NOT have today's candle. Getting latest data from API...`);
         const refreshKey = `${selectedSymbolId}:${symbolParam}`;
         if (lastAutoRefreshedSymbolRef.current === refreshKey) return;
 
         lastAutoRefreshedSymbolRef.current = refreshKey;
         handleRefresh();
-    }, [handleRefresh, selectedSymbol, selectedSymbolId, symbolParam]);
+    }, [activeSymbolHistories, handleRefresh, selectedSymbol, selectedSymbolId, symbolParam]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
@@ -579,17 +677,17 @@ const TradeStation = () => {
                                     <button
                                         type="button"
                                         onClick={handleRefresh}
-                                        disabled={loading}
+                                        disabled={historyLoading}
                                         className="refresh-btn inline-flex items-center rounded-lg bg-gray-700 p-2 text-blue-400 transition hover:bg-gray-600 disabled:opacity-50"
-                                        title={loading ? 'Refreshing...' : 'Refresh data'}
+                                        title={historyLoading ? 'Refreshing...' : 'Refresh data'}
                                     >
-                                        <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                                        <RefreshCw size={18} className={historyLoading ? 'animate-spin' : ''} />
                                     </button>
                                 )}
                             </div>
                         </div>
                         <div className="flex-1 min-h-0">
-                            <TradingViewChart data={histories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} vwapAnchor={vwapAnchor} />
+                            <TradingViewChart data={activeSymbolHistories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} vwapAnchor={vwapAnchor} />
                         </div>
                     </div>
 

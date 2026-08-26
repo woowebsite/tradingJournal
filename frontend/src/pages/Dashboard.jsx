@@ -10,16 +10,19 @@ import { fetchStrategies, updateStrategy } from '../features/strategySlice';
 import { fetchRules } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 import { fetchSignals } from '../features/signalSlice';
+import { fetchWatchlists } from '../features/watchlistSlice';
 import { StrategyModal } from './ManageStrategies';
 import SettingsModal from '../components/SettingsModal';
 
 const Dashboard = () => {
     const dispatch = useDispatch();
-    const { selectedAccount, setSelectedAccount } = useAccount();
+    const { selectedAccount, setSelectedAccount, defaultWatchlist } = useAccount();
     const { items: strategies } = useSelector(state => state.strategies);
     const { items: rules } = useSelector(state => state.rules);
     const { items: webhooks } = useSelector(state => state.webhooks);
-    const { items: signals } = useSelector(state => state.signals);
+    const { items: signals, loading: signalsLoading } = useSelector(state => state.signals);
+    const { items: watchlists } = useSelector(state => state.watchlists);
+    const [watchlistFilter, setWatchlistFilter] = useState('');
     const [stats, setStats] = useState({
         totalPnl: 0,
         winRate: 0,
@@ -44,6 +47,16 @@ const Dashboard = () => {
     const activeStrategyDescription = activeStrategy && typeof activeStrategy === 'object'
         ? (activeStrategy.description || activeStrategy.Description || '')
         : '';
+
+    const accountWatchlists = useMemo(() => {
+        if (!watchlists) return [];
+        if (!selectedAccount) return watchlists;
+        return watchlists.filter(wl => {
+            const wlAccountId = wl.account?.documentId || wl.account?.id || wl.account;
+            const currentAccountId = selectedAccount.documentId || selectedAccount.id;
+            return wlAccountId?.toString() === currentAccountId?.toString();
+        });
+    }, [watchlists, selectedAccount]);
 
     const rulePurposeConfig = {
         entryRules: { label: 'Entry', className: 'bg-blue-500/20 text-blue-400' },
@@ -103,24 +116,57 @@ const Dashboard = () => {
             });
         });
 
+        if (watchlistFilter) {
+            const selectedWatchlistObj = watchlists.find(wl => (wl.documentId || wl.id) === watchlistFilter);
+            const watchlistSymbols = selectedWatchlistObj?.symbols || [];
+            const allowedSymbolIds = new Set(
+                watchlistSymbols.map(s => (s.documentId || s.id)?.toString()).filter(Boolean)
+            );
+            list = list.filter(signal => {
+                const sigSymId = (signal.symbol?.documentId || signal.symbol?.id)?.toString();
+                return sigSymId && allowedSymbolIds.has(sigSymId);
+            });
+        }
+
         const today = new Date();
+        const todayLocalStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+        const todayUtcStr = today.toISOString().split('T')[0]; // YYYY-MM-DD in UTC
+
         list = list.filter(signal => {
             if (!signal.date) return false;
             const d = new Date(signal.date);
-            return d.getDate() === today.getDate() &&
-                d.getMonth() === today.getMonth() &&
-                d.getFullYear() === today.getFullYear();
+            
+            const signalLocalStr = d.toLocaleDateString('en-CA');
+            const signalUtcStr = d.toISOString().split('T')[0];
+            
+            const dateMatches = (signalLocalStr === todayLocalStr) || 
+                                (signalUtcStr === todayUtcStr) ||
+                                (signalUtcStr === todayLocalStr) ||
+                                (signalLocalStr === todayUtcStr);
+
+            const diffMs = Math.abs(d.getTime() - today.getTime());
+            // Filter: dates match OR the signal was generated within the last 24 hours
+            const within24h = diffMs <= 24 * 3600 * 1000;
+
+            return dateMatches || within24h;
         });
 
         return list;
-    }, [selectedAccount, signals, activeStrategy]);
+    }, [selectedAccount, signals, activeStrategy, watchlistFilter, watchlists]);
 
     useEffect(() => {
         dispatch(fetchStrategies());
         dispatch(fetchRules());
         dispatch(fetchWebhooks());
-        dispatch(fetchSignals());
+        dispatch(fetchSignals({ todayOnly: true }));
+        dispatch(fetchWatchlists());
     }, [dispatch]);
+
+    useEffect(() => {
+        if (defaultWatchlist) {
+            setWatchlistFilter(defaultWatchlist.documentId || defaultWatchlist.id || '');
+        }
+    }, [defaultWatchlist]);
 
     const handleUpdateStrategy = async (strategyData) => {
         if (!activeStrategy || typeof activeStrategy !== 'object') return;
@@ -416,8 +462,34 @@ const Dashboard = () => {
             </div>
 
             {/* Signal Suggestions (Today) */}
-            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-sm">
-                <h3 className="text-xl font-semibold mb-4 text-white">Signal Suggestions (Today)</h3>
+            <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-sm relative overflow-hidden">
+                {signalsLoading && (
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gray-950 overflow-hidden">
+                        <div className="h-full bg-blue-500 animate-pulse w-full"></div>
+                    </div>
+                )}
+                <div className="p-6">
+                    <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-semibold text-white">Signal Suggestions (Today)</h3>
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg">
+                        <span className="text-xs text-gray-400 font-medium">Watchlist:</span>
+                        <select
+                            value={watchlistFilter}
+                            onChange={(e) => setWatchlistFilter(e.target.value)}
+                            className="bg-transparent text-xs text-gray-200 outline-none focus:ring-0 cursor-pointer min-w-[150px]"
+                        >
+                            <option value="" className="bg-gray-900 text-gray-200">All Symbols (No Watchlist)</option>
+                            {accountWatchlists.map(wl => {
+                                const wlId = wl.documentId || wl.id;
+                                return (
+                                    <option key={wlId} value={wlId} className="bg-gray-900 text-gray-200">
+                                        {wl.name || 'Untitled Watchlist'}
+                                    </option>
+                                );
+                            })}
+                        </select>
+                    </div>
+                </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead className="bg-gray-900/50 text-gray-400 text-sm uppercase">
@@ -429,7 +501,7 @@ const Dashboard = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700/50">
-                            {loading ? (
+                            {signalsLoading ? (
                                 <tr>
                                     <td colSpan="4" className="p-8 text-center text-gray-500">Loading signal suggestions...</td>
                                 </tr>
@@ -482,6 +554,7 @@ const Dashboard = () => {
                         </tbody>
                     </table>
                 </div>
+            </div>
             </div>
 
             <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">

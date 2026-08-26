@@ -6,38 +6,58 @@ import { getStockHistory } from '../services/24hmoney';
 import { getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
 const HISTORY_PAGE_SIZE = 100;
-const MAX_HISTORY_CANDLES = 500;
+const MAX_HISTORY_CANDLES = 50000;
 
 export const fetchPagedSymbolHistories = async (filterSymbolId, fromDate, toDate) => {
     const histories = [];
-    const maxPages = Math.ceil(MAX_HISTORY_CANDLES / HISTORY_PAGE_SIZE);
 
-    for (let page = 1; page <= maxPages; page++) {
-        let url = `/symbol-histories?populate=symbol&sort=date:desc&pagination[page]=${page}&pagination[pageSize]=${HISTORY_PAGE_SIZE}`;
-        if (filterSymbolId) {
-            url += `&filters[symbol][documentId][$eq]=${encodeURIComponent(filterSymbolId)}`;
+    let urlTemplate = `/symbol-histories?populate=symbol&sort=date:desc&pagination[pageSize]=${HISTORY_PAGE_SIZE}`;
+    if (filterSymbolId) {
+        if (typeof filterSymbolId === 'string' && filterSymbolId.length > 5) {
+            urlTemplate += `&filters[symbol][documentId][$eq]=${encodeURIComponent(filterSymbolId)}`;
+        } else {
+            urlTemplate += `&filters[symbol][id][$eq]=${encodeURIComponent(filterSymbolId)}`;
         }
-        if (fromDate) {
-            url += `&filters[date][$gte]=${encodeURIComponent(fromDate)}`;
-        }
-        if (toDate) {
-            url += `&filters[date][$lte]=${encodeURIComponent(toDate)}`;
-        }
+    }
+    if (fromDate) {
+        urlTemplate += `&filters[date][$gte]=${encodeURIComponent(fromDate)}`;
+    }
+    if (toDate) {
+        urlTemplate += `&filters[date][$lte]=${encodeURIComponent(toDate)}`;
+    }
 
-        const res = await api.get(url);
-        const pageItems = res.data?.data || [];
-        histories.push(...pageItems);
+    // Load first page
+    const firstRes = await api.get(`${urlTemplate}&pagination[page]=1`);
+    const firstItems = firstRes.data?.data || [];
+    histories.push(...firstItems);
 
-        const pagination = res.data?.meta?.pagination;
-        const isLastPage = pagination?.pageCount
-            ? page >= pagination.pageCount
-            : pageItems.length < HISTORY_PAGE_SIZE;
-        if (isLastPage || histories.length >= MAX_HISTORY_CANDLES) break;
+    const pageCount = firstRes.data?.meta?.pagination?.pageCount || 1;
+    if (pageCount > 1) {
+        const pagePromises = [];
+        const maxPages = Math.min(pageCount, Math.ceil(MAX_HISTORY_CANDLES / HISTORY_PAGE_SIZE));
+        for (let p = 2; p <= maxPages; p++) {
+            pagePromises.push(api.get(`${urlTemplate}&pagination[page]=${p}`));
+        }
+        const responses = await Promise.all(pagePromises);
+        responses.forEach(res => {
+            histories.push(...(res.data?.data || []));
+        });
     }
 
     return histories
         .slice(0, MAX_HISTORY_CANDLES)
         .sort((a, b) => new Date(b.date) - new Date(a.date));
+};
+
+export const fetchSymbolHistoriesInWatchlist = async (symbolIds) => {
+    if (!symbolIds || symbolIds.length === 0) return [];
+
+    console.log(`Preloading histories for ${symbolIds.length} watchlist symbols in parallel...`);
+    const results = await Promise.all(
+        symbolIds.map(id => fetchPagedSymbolHistories(id))
+    );
+
+    return results.flat();
 };
 
 // Async Thunks
@@ -63,11 +83,126 @@ export const fetchSymbols = createAsyncThunk(
     }
 );
 
+export const hasTodayCandle = (candleList) => {
+    if (!candleList || candleList.length === 0) return false;
+    const today = new Date();
+    const todayLocalStr = today.toLocaleDateString('en-CA');
+    const todayUtcStr = today.toISOString().split('T')[0];
+
+    return candleList.some(candle => {
+        if (!candle || !candle.date) return false;
+        const candleDate = new Date(candle.date);
+        const candleLocalStr = candleDate.toLocaleDateString('en-CA');
+        const candleUtcStr = candleDate.toISOString().split('T')[0];
+        return (candleLocalStr === todayLocalStr) || (candleUtcStr === todayUtcStr);
+    });
+};
+
+const checkSymbolsHaveTodayCandle = (symbolIds, historiesList) => {
+    return symbolIds.every(symbolId => {
+        const symbolHistories = historiesList.filter(h => {
+            const symId = h.symbol?.documentId || h.symbol?.id;
+            return symId && symbolId && symId.toString() === symbolId.toString();
+        });
+        return hasTodayCandle(symbolHistories);
+    });
+};
+
+const sanitizeHistoriesForStorage = (items) => {
+    if (!Array.isArray(items)) return [];
+    return items.map(h => ({
+        id: h.id || h.documentId,
+        documentId: h.documentId,
+        date: h.date,
+        open: h.open,
+        high: h.high,
+        low: h.low,
+        close: h.close,
+        volume: h.volume,
+        symbol: h.symbol ? {
+            id: h.symbol.id,
+            documentId: h.symbol.documentId,
+            Name: h.symbol.Name || h.symbol.name
+        } : null
+    }));
+};
+
 export const fetchHistories = createAsyncThunk(
     'market/fetchHistories',
-    async (filterSymbolId, { rejectWithValue }) => {
+    async (arg, { rejectWithValue }) => {
         try {
-            return await fetchPagedSymbolHistories(filterSymbolId);
+            let filterSymbolId = arg;
+            let forceRefresh = false;
+
+            if (arg && typeof arg === 'object' && !Array.isArray(arg)) {
+                filterSymbolId = arg.symbolIds || arg.symbolId;
+                forceRefresh = arg.forceRefresh;
+            }
+
+            // If it's a batch load (array of IDs)
+            if (Array.isArray(filterSymbolId)) {
+                const cachedHistoriesStr = localStorage.getItem('watchlist_histories');
+                const updatedLatest = localStorage.getItem('watchlist_updated_latest') === 'true';
+
+                if (!forceRefresh && cachedHistoriesStr && updatedLatest) {
+                    console.log('Loading watchlist histories from localStorage cache...');
+                    return JSON.parse(cachedHistoriesStr);
+                }
+
+                // Otherwise, fetch from database
+                const histories = await fetchSymbolHistoriesInWatchlist(filterSymbolId);
+
+                // Save to localStorage and set watchlist_updated_latest = 'true'
+                try {
+                    const sanitized = sanitizeHistoriesForStorage(histories);
+                    localStorage.setItem('watchlist_histories', JSON.stringify(sanitized));
+                    localStorage.setItem('watchlist_updated_latest', 'true');
+                } catch (e) {
+                    console.error('Failed to save to localStorage:', e);
+                }
+
+                return histories;
+            }
+
+            // If it's a single symbol fetch
+            const cachedHistoriesStr = localStorage.getItem('watchlist_histories');
+
+            if (!forceRefresh && cachedHistoriesStr) {
+                try {
+                    const cached = JSON.parse(cachedHistoriesStr);
+                    const symbolHistory = cached.filter(h => {
+                        const symId = h.symbol?.documentId || h.symbol?.id;
+                        return symId && filterSymbolId && symId.toString() === filterSymbolId.toString();
+                    });
+
+                    if (symbolHistory.length > 0) {
+                        console.log(`Loading history for symbol ${filterSymbolId} from localStorage cache...`);
+                        return symbolHistory;
+                    }
+                } catch (e) {
+                    console.error('Failed reading from localStorage:', e);
+                }
+            }
+
+            // Fallback to fetch from database
+            const singleHistory = await fetchPagedSymbolHistories(filterSymbolId);
+
+            // Merge into localStorage if present
+            if (cachedHistoriesStr) {
+                try {
+                    const cached = JSON.parse(cachedHistoriesStr);
+                    const filtered = cached.filter(h => {
+                        const symId = h.symbol?.documentId || h.symbol?.id;
+                        return !symId || symId.toString() !== filterSymbolId.toString();
+                    });
+                    const merged = [...filtered, ...sanitizeHistoriesForStorage(singleHistory)];
+                    localStorage.setItem('watchlist_histories', JSON.stringify(merged));
+                } catch (e) {
+                    console.error('Failed to update localStorage:', e);
+                }
+            }
+
+            return singleHistory;
         } catch (error) {
             console.error(error);
             return rejectWithValue(error.response?.data || error.message);
@@ -155,7 +290,7 @@ export const loadExternalHistory = createAsyncThunk(
             await Promise.all(promises);
 
             // 3. Refresh list
-            dispatch(fetchHistories(symbolId));
+            dispatch(fetchHistories({ symbolId, forceRefresh: true }));
             return count;
 
         } catch (error) {
@@ -267,8 +402,8 @@ export const fetchBatchLatestMinutePrices = createAsyncThunk(
                     const minuteBars = isCrypto
                         ? await getCryptoHistory(ticker, '1m', 2)
                         : isDerivative
-                        ? await getFuturesHistory(ticker, 'derivative', '1')
-                        : await getStockHistory(ticker, 'stock', '1');
+                            ? await getFuturesHistory(ticker, 'derivative', '1')
+                            : await getStockHistory(ticker, 'stock', '1');
 
                     if (!Array.isArray(minuteBars) || minuteBars.length === 0) return;
 
@@ -388,13 +523,24 @@ export const syncSymbolMetadata = createAsyncThunk(
     }
 );
 
+const getInitialHistories = () => {
+    try {
+        const cached = localStorage.getItem('watchlist_histories');
+        if (cached) return JSON.parse(cached);
+    } catch (e) {
+        console.error(e);
+    }
+    return [];
+};
+
 const marketSlice = createSlice({
     name: 'market',
     initialState: {
         symbols: [],
-        histories: [],
+        histories: getInitialHistories(),
         latestPricesMap: {},
         loading: false,
+        historyLoading: false,
         error: null,
         selectedSymbolFilter: '',
         externalIndicators: [],
@@ -432,17 +578,39 @@ const marketSlice = createSlice({
         // Fetch Histories
         builder.addCase(fetchHistories.pending, (state) => {
             state.loading = true;
+            state.historyLoading = true;
             state.error = null;
         });
         builder.addCase(fetchHistories.fulfilled, (state, action) => {
             state.loading = false;
-            state.histories = action.payload.map(item => ({
+            state.historyLoading = false;
+            const newHistories = action.payload.map(item => ({
                 id: item.id || item.documentId,
                 ...item
             }));
+
+            const isBatch = Array.isArray(action.meta.arg) || 
+                            (action.meta.arg && Array.isArray(action.meta.arg.symbolIds));
+
+            if (isBatch) {
+                // Batch load: replace completely
+                state.histories = newHistories;
+            } else {
+                // Single symbol load: merge/update existing histories for this symbol
+                let singleSymbolId = action.meta.arg;
+                if (singleSymbolId && typeof singleSymbolId === 'object') {
+                    singleSymbolId = singleSymbolId.symbolId;
+                }
+                const filteredHistories = state.histories.filter(h => {
+                    const symId = h.symbol?.documentId || h.symbol?.id;
+                    return !symId || !singleSymbolId || symId.toString() !== singleSymbolId.toString();
+                });
+                state.histories = [...filteredHistories, ...newHistories];
+            }
         });
         builder.addCase(fetchHistories.rejected, (state, action) => {
             state.loading = false;
+            state.historyLoading = false;
             state.error = action.payload;
         });
 
@@ -461,13 +629,16 @@ const marketSlice = createSlice({
         // Load External
         builder.addCase(loadExternalHistory.pending, (state) => {
             state.loading = true;
+            state.historyLoading = true;
         });
         builder.addCase(loadExternalHistory.fulfilled, (state) => {
             // Histories re-fetched by thunk dispatch
             state.loading = false;
+            state.historyLoading = false;
         });
         builder.addCase(loadExternalHistory.rejected, (state, action) => {
             state.loading = false;
+            state.historyLoading = false;
             state.error = action.payload;
         });
 

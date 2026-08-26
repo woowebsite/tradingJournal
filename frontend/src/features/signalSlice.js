@@ -36,25 +36,41 @@ export const fetchHistoryForSignalScan = async (symbolId) => {
 
 export const fetchSignals = createAsyncThunk(
     'signals/fetchSignals',
-    async (_, { rejectWithValue }) => {
+    async (params = {}, { rejectWithValue }) => {
         try {
-            const pageSize = 100;
-            let page = 1;
-            let pageCount = 1;
+            const pageSize = params.pageSize || 100;
             const signals = [];
 
-            // Strapi caps REST responses at 100 records. Fetch every page so
-            // historical signals are not lost when the list is sorted by date.
-            do {
+            if (params.todayOnly) {
+                // Fetch only today's signals (last 30 hours) in a single request with no page limit
+                const today = new Date();
+                const sinceDate = new Date(today.getTime() - 30 * 3600 * 1000).toISOString();
                 const res = await api.get(
-                    `/signals?populate=*&sort=date:desc&pagination[page]=${page}&pagination[pageSize]=${pageSize}`
+                    `/signals?populate=*&sort=date:desc&filters[date][$gte]=${encodeURIComponent(sinceDate)}&pagination[limit]=-1`
                 );
-                const responseData = res.data;
+                return res.data?.data || [];
+            }
 
-                signals.push(...(responseData.data || []));
-                pageCount = responseData.meta?.pagination?.pageCount || page;
-                page += 1;
-            } while (page <= pageCount);
+            // Fetch first page to discover pageCount
+            const firstRes = await api.get(
+                `/signals?populate=*&sort=date:desc&pagination[page]=1&pagination[pageSize]=${pageSize}`
+            );
+            signals.push(...(firstRes.data?.data || []));
+            const pageCount = firstRes.data?.meta?.pagination?.pageCount || 1;
+
+            // Fetch remaining pages in parallel
+            if (pageCount > 1) {
+                const pagePromises = [];
+                for (let p = 2; p <= pageCount; p++) {
+                    pagePromises.push(
+                        api.get(`/signals?populate=*&sort=date:desc&pagination[page]=${p}&pagination[pageSize]=${pageSize}`)
+                    );
+                }
+                const responses = await Promise.all(pagePromises);
+                responses.forEach(res => {
+                    signals.push(...(res.data?.data || []));
+                });
+            }
 
             return signals;
         } catch (error) {

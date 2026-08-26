@@ -60,13 +60,15 @@ const WatchlistSelector = ({
         });
 
         await Promise.all(promises);
+
+        // Fetch all symbol histories with forceRefresh: true to update database -> Redux -> localStorage!
+        const symbolIds = filteredSymbols.map(s => s.documentId || s.id).filter(Boolean);
+        if (symbolIds.length > 0) {
+            await dispatch(fetchHistories({ symbolIds, forceRefresh: true })).unwrap();
+        }
+
         setIsRefreshing(false);
         alert(`Watchlist refresh complete.\nUpdated symbols: ${updatedCount}\nErrors: ${errors}`);
-
-        // Refresh chart if selected symbol was part of it
-        if (selectedSymbolId) {
-            dispatch(fetchHistories(selectedSymbolId));
-        }
     }, [dispatch, filteredSymbols, selectedAccount?.market?.Name, selectedSymbolId]);
 
     return (
