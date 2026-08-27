@@ -44,6 +44,7 @@ const TradeStation = () => {
     const [addingToWatchlist, setAddingToWatchlist] = useState(false);
     const [chartTemplate, setChartTemplate] = useState('Supertrend');
     const [vwapAnchor, setVwapAnchor] = useState('Year');
+    const [timeframe, setTimeframe] = useState('D1');
     const lastAutoRefreshedSymbolRef = useRef(null);
     const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
@@ -92,37 +93,52 @@ const TradeStation = () => {
     // Select first symbol by default if likely?
     // Or just wait for user.
 
+    const fetchedHistoryKeyRef = useRef(new Set());
+
     useEffect(() => {
-        if (selectedSymbolId) {
-            // Check if the history for this symbol is already loaded in Redux or localStorage
-            const isLoaded = histories && histories.some(h => {
-                const symId = h.symbol?.documentId || h.symbol?.id;
-                return symId && symId.toString() === selectedSymbolId.toString();
-            });
+        if (!selectedSymbolId) return;
 
-            const hasInLocal = (() => {
-                try {
-                    const cachedStr = localStorage.getItem('watchlist_histories');
-                    if (!cachedStr) return false;
-                    const cached = JSON.parse(cachedStr);
-                    return cached.some(h => {
-                        const symId = h.symbol?.documentId || h.symbol?.id;
-                        return symId && symId.toString() === selectedSymbolId.toString();
-                    });
-                } catch { return false; }
-            })();
+        const reqKey = `${selectedSymbolId}:${timeframe}`;
+        if (fetchedHistoryKeyRef.current.has(reqKey)) return;
 
-            if (!isLoaded && !hasInLocal) {
-                dispatch(fetchHistories(selectedSymbolId));
-            }
+        // Check if the history for this symbol and timeframe is already loaded in Redux or localStorage
+        const isLoaded = histories && histories.some(h => {
+            const symId = h.symbol?.documentId || h.symbol?.id;
+            const itemTf = h.tf || 'D1';
+            const isSameTf = itemTf === timeframe || (timeframe === 'D1' && !h.tf);
+            return symId && symId.toString() === selectedSymbolId.toString() && isSameTf;
+        });
 
-            // Also fetch external indicators
-            const sym = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
-            if (sym && sym.Name) {
-                dispatch(fetchExternalIndicators(sym.Name));
+        const hasInLocal = (() => {
+            try {
+               const cachedStr = localStorage.getItem('watchlist_histories');
+               if (!cachedStr) return false;
+               const cached = JSON.parse(cachedStr);
+               return cached.some(h => {
+                   const symId = h.symbol?.documentId || h.symbol?.id;
+                   const itemTf = h.tf || 'D1';
+                   const isSameTf = itemTf === timeframe || (timeframe === 'D1' && !h.tf);
+                   return symId && symId.toString() === selectedSymbolId.toString() && isSameTf;
+               });
+            } catch { return false; }
+        })();
+
+        fetchedHistoryKeyRef.current.add(reqKey);
+        if (!isLoaded && !hasInLocal) {
+            dispatch(fetchHistories({ symbolId: selectedSymbolId, tf: timeframe }));
+        }
+    }, [dispatch, selectedSymbolId, timeframe]);
+
+    useEffect(() => {
+        const sym = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
+        if (sym && sym.Name) {
+            const symName = sym.Name.trim().toUpperCase();
+            const isNonStock = symName.startsWith('VN30') || symName.startsWith('VNINDEX') || symName.includes(':') || symName.length > 4;
+            if (!isNonStock) {
+                dispatch(fetchExternalIndicators(symName));
             }
         }
-    }, [dispatch, selectedSymbolId, symbols, histories]);
+    }, [dispatch, selectedSymbolId, symbols]);
 
     // 1. Thực hiện handleWatchlistRefresh để tải toàn bộ data cho symbol ngày mới nhất.
     // 2. Load toàn bộ symbol-history có symbol nằm trong watchlist vào localStorage vào key watchlist_histories và set watchlist_updated_latest = true.
@@ -198,29 +214,35 @@ const TradeStation = () => {
         if (!selectedSymbolId || !histories) return [];
         return histories.filter(h => {
             const symId = h.symbol?.documentId || h.symbol?.id;
-            return symId && selectedSymbolId && symId.toString() === selectedSymbolId.toString();
+            const isSameSymbol = symId && selectedSymbolId && symId.toString() === selectedSymbolId.toString();
+            const itemTf = h.tf || 'D1';
+            const isSameTf = itemTf === timeframe || (timeframe === 'D1' && !h.tf);
+            return isSameSymbol && isSameTf;
         });
-    }, [histories, selectedSymbolId]);
+    }, [histories, selectedSymbolId, timeframe]);
 
     useEffect(() => {
         if (!selectedSymbolId || !selectedSymbol?.Name) return;
         if (metadataSyncedSymbolRef.current === selectedSymbolId) return;
         metadataSyncedSymbolRef.current = selectedSymbolId;
 
+        const symName = selectedSymbol.Name.trim().toUpperCase();
+        const isNonStock = symName.startsWith('VN30') || symName.startsWith('VNINDEX') || symName.includes(':') || symName.length > 4;
+        if (isNonStock) return;
+
         dispatch(syncSymbolMetadata({
-            ticker: selectedSymbol.Name,
+            ticker: symName,
             symbolId: selectedSymbolId,
         }))
         .unwrap()
-        .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
+        .then(() => console.log(`Metadata and stock ratio synced for ${symName}`))
         .catch(err => {
-            metadataSyncedSymbolRef.current = null;
-            console.error(`Failed to sync metadata and stock ratio: ${err}`);
+            console.warn(`Failed to sync metadata for ${symName}:`, err);
         });
     }, [dispatch, selectedSymbol?.Name, selectedSymbolId]);
 
     useEffect(() => {
-        if (!selectedSymbolId || !activeSymbolHistories || activeSymbolHistories.length === 0) return;
+        if (!selectedSymbolId || !activeSymbolHistories || activeSymbolHistories.length === 0 || timeframe !== 'D1') return;
 
         const sortedHistory = [...activeSymbolHistories]
             .sort((a, b) => new Date(a.date) - new Date(b.date))
@@ -529,11 +551,12 @@ const TradeStation = () => {
         dispatch(loadExternalHistory({
             symbol: ticker,
             symbolId: selectedSymbolId,
-            marketType: selectedAccount?.market?.Name // Pass Account Market Type
+            marketType: selectedAccount?.market?.Name, // Pass Account Market Type
+            tf: timeframe || 'D1'
         }))
             .unwrap()
             .then(count => {
-                if (count > 0) console.log(`Updated ${count} new records for ${ticker}`);
+                if (count > 0) console.log(`Updated ${count} new records for ${ticker} (${timeframe})`);
                 else if (count === 0) console.log('No new records');
 
                 if (selectedRuleIds.length > 0) {
@@ -554,12 +577,12 @@ const TradeStation = () => {
             })
             .catch(err => console.error(`Failed to refresh history: ${err}`));
 
-    }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId]);
+    }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId, timeframe]);
 
-    // 3. Mỗi lần change symbol từ watchlist, hãy kiểm tra từ localStorage xem symbol đó đã có data của ngày hôm nay chưa.
+    // 3. Mỗi lần change symbol từ watchlist, hãy kiểm tra từ localStorage xem symbol đó đã có data của ngày hôm nay chưa (cho D1).
     // Nếu chưa thì get data mới nhất từ API và lưu vào symbol-history, đồng thời cập nhật vào localStorage.
     useEffect(() => {
-        if (!symbolParam || !selectedSymbol || !selectedSymbolId) return;
+        if (!symbolParam || !selectedSymbol || !selectedSymbolId || timeframe !== 'D1') return;
 
         let symbolCandles = [];
         const cachedStr = localStorage.getItem('watchlist_histories');
@@ -568,7 +591,8 @@ const TradeStation = () => {
                 const cached = JSON.parse(cachedStr);
                 symbolCandles = cached.filter(h => {
                     const symId = h.symbol?.documentId || h.symbol?.id;
-                    return symId && symId.toString() === selectedSymbolId.toString();
+                    const itemTf = h.tf || 'D1';
+                    return symId && symId.toString() === selectedSymbolId.toString() && itemTf === 'D1';
                 });
             } catch (e) {
                 console.error('Error parsing watchlist_histories from localStorage:', e);
@@ -586,12 +610,12 @@ const TradeStation = () => {
         }
 
         console.log(`Symbol ${selectedSymbol.Name} does NOT have today's candle. Getting latest data from API...`);
-        const refreshKey = `${selectedSymbolId}:${symbolParam}`;
+        const refreshKey = `${selectedSymbolId}:${symbolParam}:${timeframe}`;
         if (lastAutoRefreshedSymbolRef.current === refreshKey) return;
 
         lastAutoRefreshedSymbolRef.current = refreshKey;
         handleRefresh();
-    }, [activeSymbolHistories, handleRefresh, selectedSymbol, selectedSymbolId, symbolParam]);
+    }, [activeSymbolHistories, handleRefresh, selectedSymbol, selectedSymbolId, symbolParam, timeframe]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
@@ -620,6 +644,21 @@ const TradeStation = () => {
                             {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
 
                             <div className="ml-auto flex items-end justify-end gap-2">
+                                <label className="inline-flex items-center gap-2 text-sm text-gray-400">
+                                    <span>Timeframe</span>
+                                    <select
+                                        aria-label="Timeframe"
+                                        value={timeframe}
+                                        onChange={event => setTimeframe(event.target.value)}
+                                        className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    >
+                                        <option value="M1">M1</option>
+                                        <option value="M5">M5</option>
+                                        <option value="M30">M30</option>
+                                        <option value="D1">D1</option>
+                                        <option value="W1">W1</option>
+                                    </select>
+                                </label>
                                 <label className="inline-flex items-center gap-2 text-sm text-gray-400">
                                     <span>Template</span>
                                     <select
@@ -687,7 +726,7 @@ const TradeStation = () => {
                             </div>
                         </div>
                         <div className="flex-1 min-h-0">
-                            <TradingViewChart data={activeSymbolHistories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} vwapAnchor={vwapAnchor} />
+                            <TradingViewChart data={activeSymbolHistories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} vwapAnchor={vwapAnchor} timeframe={timeframe} />
                         </div>
                     </div>
 
@@ -730,6 +769,7 @@ const TradeStation = () => {
                 onClose={() => setSelectedTrade(null)}
                 trade={selectedTrade}
                 onEdit={handleEditTrade}
+                timeframe={timeframe}
             />
             <TradeModal
                 isOpen={isTradeModalOpen}

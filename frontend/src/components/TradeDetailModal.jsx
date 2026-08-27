@@ -4,18 +4,18 @@ import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../utils/formatNumber';
 import { useAccount } from '../context/AccountContext';
 import { useDispatch } from 'react-redux';
-import { fetchLatestHistory, fetchPagedSymbolHistories } from '../features/marketSlice';
+import { fetchLatestHistory, fetchPagedSymbolHistories, loadExternalHistory } from '../features/marketSlice';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
 import useEscapeKey from '../hooks/useEscapeKey';
 import TradingViewChart from './TradingViewChart';
 
-const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
+const TradeDetailModal = ({ isOpen, onClose, trade, onEdit, timeframe = 'D1' }) => {
     const { selectedAccount } = useAccount();
     const dispatch = useDispatch();
     const navigate = useNavigate();
     const [currentPrice, setCurrentPrice] = useState('');
-    const [chartState, setChartState] = useState({ symbolId: null, data: [], error: '' });
+    const [chartState, setChartState] = useState({ symbolId: null, tf: null, data: [], error: '' });
 
     useEffect(() => {
         const fetchPrice = async () => {
@@ -49,7 +49,7 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
 
         if (!isOpen || !symbolId) return () => { cancelled = true; };
 
-        // Determine date range for trade to fetch relevant historical candles
+        // Determine date range for trade to fetch relevant historical candles covering all signals
         const details = trade?.trade_details || [];
         const tradeDates = details.map(d => new Date(d.date).getTime()).filter(Boolean);
         if (trade?.date) {
@@ -63,56 +63,88 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
             const minTime = Math.min(...tradeDates);
             const maxTime = Math.max(...tradeDates);
 
-            // 200 days before the earliest trade detail/date (in ms) to show preceding context
-            fromDate = new Date(minTime - 200 * 24 * 3600 * 1000).toISOString();
+            const isIntraday = ['M1', 'M5', 'M30'].includes(timeframe);
+            const daysBefore = isIntraday ? 5 : 200;
+            const daysAfter = isIntraday ? 5 : 100;
 
-            if (trade.trade_status === 'Open') {
-                // If trade is open, fetch candles all the way up to today
-                toDate = new Date().toISOString();
-            } else {
-                // 100 days after the latest trade detail/date to show succeeding context
-                toDate = new Date(maxTime + 100 * 24 * 3600 * 1000).toISOString();
-            }
+            fromDate = new Date(minTime - daysBefore * 24 * 3600 * 1000).toISOString();
+            toDate = new Date(Math.min(Date.now(), maxTime + daysAfter * 24 * 3600 * 1000)).toISOString();
         }
 
-        fetchPagedSymbolHistories(symbolId, fromDate, toDate)
-            .then(data => {
-                if (!cancelled) setChartState({ symbolId, data, error: '' });
+        fetchPagedSymbolHistories(symbolId, fromDate, toDate, timeframe)
+            .then(async (data) => {
+                if (data.length === 0 && (trade?.symbol?.Name || trade?.symbol?.name)) {
+                    const ticker = trade.symbol?.Name || trade.symbol?.name;
+                    try {
+                        await dispatch(loadExternalHistory({
+                            symbol: ticker,
+                            symbolId,
+                            tf: timeframe
+                        })).unwrap();
+                        const refreshed = await fetchPagedSymbolHistories(symbolId, fromDate, toDate, timeframe);
+                        if (!cancelled) setChartState({ symbolId, tf: timeframe, data: refreshed, error: '' });
+                        return;
+                    } catch (e) {
+                        console.warn('Auto-load history in TradeDetailModal failed:', e);
+                    }
+                }
+                if (!cancelled) setChartState({ symbolId, tf: timeframe, data, error: '' });
             })
             .catch(error => {
                 console.error('Failed to fetch chart history:', error);
                 if (!cancelled) {
-                    setChartState({ symbolId, data: [], error: 'Unable to load chart data.' });
+                    setChartState({ symbolId, tf: timeframe, data: [], error: 'Unable to load chart data.' });
                 }
             });
 
         return () => { cancelled = true; };
-    }, [isOpen, trade, trade?.symbol?.documentId, trade?.symbol?.id]);
+    }, [isOpen, trade, trade?.symbol?.documentId, trade?.symbol?.id, timeframe, dispatch]);
 
     const activeSymbolId = trade?.symbol?.documentId || trade?.symbol?.id;
-    const chartLoading = Boolean(isOpen && activeSymbolId && chartState.symbolId !== activeSymbolId);
-    const chartData = chartState.symbolId === activeSymbolId ? chartState.data : [];
-    const chartError = chartState.symbolId === activeSymbolId ? chartState.error : '';
+    const chartLoading = Boolean(isOpen && activeSymbolId && (chartState.symbolId !== activeSymbolId || chartState.tf !== timeframe));
+    const chartData = (chartState.symbolId === activeSymbolId && chartState.tf === timeframe) ? chartState.data : [];
+    const chartError = (chartState.symbolId === activeSymbolId && chartState.tf === timeframe) ? chartState.error : '';
 
-    const chartSignals = useMemo(() => (trade?.trade_details || [])
-        .filter(detail => detail.date && detail.signal)
-        .map(detail => {
-            const normalizedSignal = String(detail.signal).toLowerCase().replace(/[\s_-]/g, '');
+    const chartSignals = useMemo(() => {
+        const signals = [];
+        const details = trade?.trade_details || [];
+
+        const hasEntryDetail = details.some(d => {
+            const sig = String(d.signal || d.type || '').toLowerCase();
+            return sig.includes('entry') || sig.includes('buy');
+        });
+
+        if (!hasEntryDetail && trade?.date) {
+            signals.push({
+                date: trade.date,
+                rules: [{
+                    documentId: `trade-entry-${trade.documentId || trade.id}`,
+                    Name: 'Entry',
+                    Type: 'entry'
+                }]
+            });
+        }
+
+        details.filter(detail => detail.date && (detail.signal || detail.type)).forEach(detail => {
+            const normalizedSignal = String(detail.signal || detail.type || '').toLowerCase().replace(/[\s_-]/g, '');
             let type = 'unknown';
             if (normalizedSignal.includes('entry') || normalizedSignal.includes('buy')) type = 'entry';
             else if (normalizedSignal.includes('takeprofit') || normalizedSignal === 'tp') type = 'takeprofit';
             else if (normalizedSignal.includes('stoploss') || normalizedSignal === 'sl') type = 'stoploss';
             else if (normalizedSignal.includes('exit') || normalizedSignal.includes('sell')) type = 'exit';
 
-            return {
+            signals.push({
                 date: detail.date,
                 rules: [{
                     documentId: `trade-detail-${detail.documentId || detail.id || detail.date}`,
-                    Name: detail.signal,
+                    Name: detail.signal || detail.type || 'Signal',
                     Type: type
                 }]
-            };
-        }), [trade?.trade_details]);
+            });
+        });
+
+        return signals;
+    }, [trade?.trade_details, trade?.date, trade?.documentId, trade?.id]);
 
     useEscapeKey(onClose, isOpen);
 
@@ -245,6 +277,7 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
                                     symbol={trade.symbol?.Name || trade.symbol?.name}
                                     signals={chartSignals}
                                     template={trade.strategy?.template || 'Supertrend'}
+                                    timeframe={timeframe}
                                     disableScrollZoom
                                     disableChartMove
                                 />

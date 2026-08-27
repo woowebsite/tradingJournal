@@ -3,19 +3,30 @@ import api from '../services/api';
 import { evaluateRule } from '../utils/ruleEngine';
 import { createBlocksFromText } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
+import { loadExternalHistory } from './marketSlice';
 
 const HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_CANDLES = 365;
 
 const getHistoryDate = (candle) => candle?.date || candle?.attributes?.date;
 
-export const fetchHistoryForSignalScan = async (symbolId) => {
+export const fetchHistoryForSignalScan = async (symbolId, tf = 'D1') => {
     const history = [];
     const maxPages = Math.ceil(MAX_HISTORY_CANDLES / HISTORY_PAGE_SIZE);
 
+    let tfFilter = '';
+    if (tf === 'D1') {
+        tfFilter = '&filters[$or][0][tf][$eq]=D1&filters[$or][1][tf][$null]=true';
+    } else if (tf) {
+        tfFilter = `&filters[tf][$eq]=${encodeURIComponent(tf)}`;
+    }
+
+    const isDocId = typeof symbolId === 'string' && symbolId.length > 5;
+    const symFilter = `filters[symbol][${isDocId ? 'documentId' : 'id'}][$eq]=${encodeURIComponent(symbolId)}`;
+
     for (let page = 1; page <= maxPages; page++) {
         const historyRes = await api.get(
-            `/symbol-histories?filters[symbol][documentId][$eq]=${encodeURIComponent(symbolId)}` +
+            `/symbol-histories?${symFilter}${tfFilter}` +
             `&pagination[page]=${page}&pagination[pageSize]=${HISTORY_PAGE_SIZE}&sort=date:desc`
         );
         const pageItems = historyRes.data?.data || [];
@@ -81,7 +92,7 @@ export const fetchSignals = createAsyncThunk(
 
 export const scanSignals = createAsyncThunk(
     'signals/scanSignals',
-    async ({ selectedRuleId, selectedRuleIds, scanSymbols, accountId, strategyId, syncDemoTrades = true }, { dispatch, getState, rejectWithValue }) => {
+    async ({ selectedRuleId, selectedRuleIds, scanSymbols, accountId, strategyId, syncDemoTrades = true, tf = 'D1' }, { dispatch, getState, rejectWithValue }) => {
         try {
             const state = getState();
             const ruleIds = selectedRuleIds?.length ? selectedRuleIds : [selectedRuleId];
@@ -311,9 +322,24 @@ export const scanSignals = createAsyncThunk(
             const scanPromises = symbols.map(async (symbol) => {
                 try {
                     const symId = symbol.documentId || symbol.id;
+                    const ticker = symbol.Name || symbol.name;
                     // Strapi caps each response at 100 records. Fetch enough pages to warm up
                     // recursive indicators such as EMA, MACD, RSI and Supertrend reliably.
-                    const history = await fetchHistoryForSignalScan(symId);
+                    let history = await fetchHistoryForSignalScan(symId, tf);
+
+                    // If no history in database for this timeframe, auto-fetch from external API
+                    if ((!history || history.length === 0) && ticker) {
+                        try {
+                            await dispatch(loadExternalHistory({
+                                symbol: ticker,
+                                symbolId: symId,
+                                tf
+                            })).unwrap();
+                            history = await fetchHistoryForSignalScan(symId, tf);
+                        } catch (loadErr) {
+                            console.warn(`Could not load external history for ${ticker} (${tf}):`, loadErr);
+                        }
+                    }
 
                     if (!history || history.length === 0) return;
 

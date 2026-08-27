@@ -103,4 +103,16 @@ describe('calculateVWAP', () => {
         expect(result[1].upper3).toBe(120);
         expect(result[1].lower3).toBe(90);
     });
+
+    it('handles numeric intraday timestamps without error', () => {
+        const data = [
+            { time: 1744588800, open: 100, high: 105, low: 95, close: 102, volume: 100 },
+            { time: 1744589100, open: 102, high: 108, low: 101, close: 106, volume: 150 },
+        ];
+
+        const result = calculateVWAP(data, 'Day');
+        expect(result).toHaveLength(2);
+        expect(result[0].time).toBe(1744588800);
+        expect(typeof result[0].value).toBe('number');
+    });
 });

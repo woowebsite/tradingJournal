@@ -5,6 +5,10 @@
 const parseToUTCDate = (dateStr) => {
     if (!dateStr) return null;
     if (dateStr instanceof Date) return dateStr;
+    if (typeof dateStr === 'number') {
+        const ms = dateStr < 1e11 ? dateStr * 1000 : dateStr;
+        return new Date(ms);
+    }
 
     const str = String(dateStr).trim();
     const isoMatch = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[T ](\d{1,2}):(\d{1,2}):(\d{1,2}))?/);
@@ -41,7 +45,7 @@ export const calculateVWAP = (data, anchor = 'Day', priceSource = 'typical') => 
     let lastAnchorKey = null;
 
     const getAnchorKey = (item, anchorType) => {
-        const d = parseToUTCDate(item.time || item.date);
+        const d = parseToUTCDate(item.time !== undefined ? item.time : item.date);
         if (!d) return '';
 
         const year = d.getUTCFullYear();
@@ -103,7 +107,7 @@ export const calculateVWAP = (data, anchor = 'Day', priceSource = 'typical') => 
         const stdDev = Math.sqrt(Math.max(0, variance));
 
         result.push({
-            time: item.time || (item.date ? String(item.date).split('T')[0] : ''),
+            time: item.time !== undefined ? item.time : (item.date ? String(item.date).split('T')[0] : ''),
             value: +vwapValue.toFixed(2),
             upper1: +(vwapValue + stdDev).toFixed(2),
             lower1: +(vwapValue - stdDev).toFixed(2),
@@ -135,10 +139,17 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
         ...options
     };
 
+    const formatTime = (timeVal) => {
+        if (typeof timeVal === 'string' && timeVal.includes('T')) {
+            return timeVal.split('T')[0];
+        }
+        return timeVal;
+    };
+
     const mainSeries = chart.addSeries(LineSeries, defaultOptions);
     
     const formattedData = vwapData.map(item => ({
-        time: item.time.split('T')[0],
+        time: formatTime(item.time),
         value: item.value
     }));
 
@@ -169,7 +180,7 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
                     lastValueVisible: false,
                 });
                 upperSeries.setData(vwapData.map(item => ({
-                    time: item.time.split('T')[0],
+                    time: formatTime(item.time),
                     value: item[upperKey]
                 })));
                 createdSeries.push(upperSeries);
@@ -184,7 +195,7 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
                     lastValueVisible: false,
                 });
                 lowerSeries.setData(vwapData.map(item => ({
-                    time: item.time.split('T')[0],
+                    time: formatTime(item.time),
                     value: item[lowerKey]
                 })));
                 createdSeries.push(lowerSeries);

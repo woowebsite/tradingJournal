@@ -28,6 +28,7 @@ const Backtest = () => {
     const [tradeToEdit, setTradeToEdit] = useState(null);
     const [strategyFilter, setStrategyFilter] = useState('');
     const [watchlistFilter, setWatchlistFilter] = useState('');
+    const [timeframe, setTimeframe] = useState('D1');
     const [clearingDemoTrades, setClearingDemoTrades] = useState(false);
 
     const handleClearDemoTrades = async () => {
@@ -199,7 +200,8 @@ const Backtest = () => {
                 accountId,
                 strategyId,
                 scanSymbols,
-                syncDemoTrades: true
+                syncDemoTrades: true,
+                tf: timeframe
             })).unwrap();
 
             refreshBacktestTrades();
@@ -269,6 +271,7 @@ const Backtest = () => {
                 onClose={() => setSelectedTrade(null)}
                 trade={selectedTrade}
                 onEdit={handleEditTrade}
+                timeframe={timeframe}
             />
 
             <div className="flex justify-between items-center mb-6">
@@ -310,6 +313,22 @@ const Backtest = () => {
                                     </option>
                                 );
                             })}
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg">
+                        <Filter size={18} />
+                        <span className="text-sm text-gray-400">Timeframe</span>
+                        <select
+                            aria-label="Timeframe"
+                            value={timeframe}
+                            onChange={(e) => setTimeframe(e.target.value)}
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500 min-w-[80px]"
+                        >
+                            <option value="M1">M1</option>
+                            <option value="M5">M5</option>
+                            <option value="M30">M30</option>
+                            <option value="D1">D1</option>
+                            <option value="W1">W1</option>
                         </select>
                     </div>
                     <button

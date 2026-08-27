@@ -17,30 +17,24 @@ const fetchTcbs = async (resource, params = {}) => {
     return response.data;
 };
 
-export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') => {
-    // Current timestamp for 'to' parameter (approximation for "now" or future to cover all)
-    // 1767052800 is roughly year 2026, safe enough.
-    const to = Math.floor(Date.now() / 1000); // or Math.floor(Date.now() / 1000);
-    const countBack = 301; // Reasonable default, user asked for 598.
+export const normalizeTcbsResolution = (resolution = 'D') => {
+    const raw = String(resolution || 'D').trim().toUpperCase();
+    if (raw === 'M1' || raw === '1') return '1';
+    if (raw === 'M5' || raw === '5') return '5';
+    if (raw === 'M30' || raw === '30') return '30';
+    if (raw === 'W1' || raw === 'W' || raw === '1W') return 'W';
+    return 'D';
+};
 
-    // URL: https://apiextaws.tcbs.com.vn/stock-insight/v2/stock/bars-long-term?ticker=GEE&type=stock&resolution=D&to=1767052800&countBack=598
-    // URL: https://apiextaws.tcbs.com.vn/stock-insight/v2/stock/bars-long-term?ticker=GEE&type=stock&resolution=D&to=1767052800&countBack=598
-    // USE PROXY: /api-tcbs/... to avoid CORS
+export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') => {
+    const to = Math.floor(Date.now() / 1000);
+    const countBack = 500;
+    const normalizedResolution = normalizeTcbsResolution(resolution);
     const url = 'stock-history';
 
     try {
-        const jsonData = await fetchTcbs(url, { ticker, type, resolution, to, countBack });
-
-        // Transform data map if necessary
-        // TCBS response example needed? Assuming standard array of objects based on URL params.
-        // Usually returns structure like: { data: [...] } or just [...]
-        // Based on typical TCBS:
-        // { "data": [ { "open": ..., "high": ..., "low": ..., "close": ..., "volume": ..., "tradingDate": "..." }, ... ] }
-
-        // Let's assume standard response and return the array.
-        // We might need to inspect the response if it fails.
+        const jsonData = await fetchTcbs(url, { ticker, type, resolution: normalizedResolution, to, countBack });
         return jsonData.data || jsonData || [];
-
     } catch (error) {
         console.error("Failed to fetch from TCBS:", error);
         throw error;
@@ -50,13 +44,11 @@ export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') 
 export const getFuturesHistory = async (ticker, type = 'derivative', resolution = '1') => {
     const to = Math.floor(Date.now() / 1000);
     const countBack = 598;
-
-    // https://apiextaws.tcbs.com.vn/futures-insight/v2/stock/bars?ticker=41I1G4000&type=derivative&resolution=1&to=1774337040&countBack=347
-
+    const normalizedResolution = normalizeTcbsResolution(resolution);
     const url = 'futures-history';
 
     try {
-        const jsonData = await fetchTcbs(url, { ticker, type, resolution, to, countBack });
+        const jsonData = await fetchTcbs(url, { ticker, type, resolution: normalizedResolution, to, countBack });
 
         // Transform data map if necessary
         // TCBS response example needed? Assuming standard array of objects based on URL params.
@@ -120,23 +112,39 @@ export const getTechnicalIndicators = async (ticker) => {
 
 
 export const getTickerOverview = async (ticker) => {
-    const normalizedTicker = String(ticker || '')
-        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
-        .trim()
-        .toUpperCase();
-    const url = 'ticker-overview';
-    const data = await fetchTcbs(url, { ticker: normalizedTicker });
-    return data?.data || data || {};
+    try {
+        const normalizedTicker = String(ticker || '')
+            .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+            .trim()
+            .toUpperCase();
+        if (!normalizedTicker || normalizedTicker.length > 4 || normalizedTicker.startsWith('VN30') || normalizedTicker.startsWith('VNINDEX')) {
+            return {};
+        }
+        const url = 'ticker-overview';
+        const data = await fetchTcbs(url, { ticker: normalizedTicker });
+        return data?.data || data || {};
+    } catch (err) {
+        console.warn(`Could not get ticker overview for ${ticker}:`, err?.message || err);
+        return {};
+    }
 };
 
 export const getStockRatio = async (ticker) => {
-    const normalizedTicker = String(ticker || '')
-        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
-        .trim()
-        .toUpperCase();
-    const url = 'stock-ratio';
-    const data = await fetchTcbs(url, { ticker: normalizedTicker });
-    return data?.data || data || {};
+    try {
+        const normalizedTicker = String(ticker || '')
+            .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+            .trim()
+            .toUpperCase();
+        if (!normalizedTicker || normalizedTicker.length > 4 || normalizedTicker.startsWith('VN30') || normalizedTicker.startsWith('VNINDEX')) {
+            return {};
+        }
+        const url = 'stock-ratio';
+        const data = await fetchTcbs(url, { ticker: normalizedTicker });
+        return data?.data || data || {};
+    } catch (err) {
+        console.warn(`Could not get stock ratio for ${ticker}:`, err?.message || err);
+        return {};
+    }
 };
 
 const upsertStockRatio = async (symbolId, ratio) => {
@@ -181,23 +189,38 @@ export const upsertSymbolTechnicalAnalysis = async (symbolId, analysis) => {
 
 export const updateMarketInfo = async (ticker, symbolId) => {
     try {
+        const normalizedTicker = String(ticker || '')
+            .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+            .trim()
+            .toUpperCase();
+        if (!normalizedTicker || normalizedTicker.length > 4 || normalizedTicker.startsWith('VN30') || normalizedTicker.startsWith('VNINDEX')) {
+            return null;
+        }
+
         const [overview, ratio] = await Promise.all([
-            getTickerOverview(ticker),
-            getStockRatio(ticker),
+            getTickerOverview(normalizedTicker),
+            getStockRatio(normalizedTicker),
         ]);
+
+        if (!overview || Object.keys(overview).length === 0) {
+            return null;
+        }
+
         const payload = {
             data: {
                 ...overview,
-                Name: overview.ticker || String(ticker).replace(/:(HOSE|HNX|UPCOM)$/i, ''),
+                Name: overview.ticker || normalizedTicker,
                 sector: overview.industry,
             }
         };
 
         const res = await api.put(`/symbols/${symbolId}`, payload);
-        await upsertStockRatio(symbolId, ratio);
+        if (ratio && Object.keys(ratio).length > 0) {
+            await upsertStockRatio(symbolId, ratio);
+        }
         return res.data.data;
     } catch (error) {
-        console.error("Failed to update market info:", error);
-        throw error;
+        console.warn("Skipping market info update for non-stock or error:", error?.message || error);
+        return null;
     }
 };

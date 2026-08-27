@@ -16,7 +16,8 @@ const TradingViewChart = ({
     disableScrollZoom = false,
     disableChartMove = false,
     focusDate = null,
-    vwapAnchor = 'Year'
+    vwapAnchor = 'Year',
+    timeframe = 'D1'
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
@@ -76,31 +77,43 @@ const TradingViewChart = ({
     useEffect(() => {
         if (!data || data.length === 0) return;
 
+        const isIntraday = ['M1', 'M5', 'M30'].includes(timeframe);
+
+        const parseCandleTime = (dateVal) => {
+            if (!dateVal) return null;
+            if (isIntraday) {
+                const d = new Date(dateVal);
+                if (isNaN(d.getTime())) return null;
+                return Math.floor(d.getTime() / 1000);
+            }
+            return String(dateVal).split('T')[0];
+        };
+
         // lightweight-charts requires strictly ascending, unique times.
-        // Strapi pagination or multiple intraday records can produce duplicate days.
         const sortedData = [...data]
+            .filter(item => item && item.date && !isNaN(new Date(item.date).getTime()))
             .sort((a, b) => new Date(a.date) - new Date(b.date))
             .reduce((unique, item) => {
-                const time = String(item.date || '').split('T')[0];
+                const time = parseCandleTime(item.date);
                 const previous = unique[unique.length - 1];
-                const previousTime = previous ? String(previous.date || '').split('T')[0] : '';
+                const previousTime = previous ? parseCandleTime(previous.date) : '';
                 if (time && time !== previousTime) unique.push(item);
                 return unique;
             }, []);
 
         // Format data for lightweight-charts
         const candleData = sortedData.map(item => ({
-            time: item.date.split('T')[0], // YYYY-MM-DD
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            close: item.close,
+            time: parseCandleTime(item.date),
+            open: Number(item.open),
+            high: Number(item.high),
+            low: Number(item.low),
+            close: Number(item.close),
         }));
 
         const volumeData = sortedData.map(item => ({
-            time: item.date.split('T')[0],
-            value: item.volume,
-            color: item.close >= item.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            time: parseCandleTime(item.date),
+            value: Number(item.volume),
+            color: Number(item.close) >= Number(item.open) ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
         }));
 
         const commonChartOptions = {
@@ -115,6 +128,8 @@ const TradingViewChart = ({
             timeScale: {
                 borderColor: '#4b5563',
                 rightOffset: 20,
+                timeVisible: isIntraday,
+                secondsVisible: false,
             },
             rightPriceScale: {
                 borderColor: '#4b5563',
@@ -177,11 +192,11 @@ const TradingViewChart = ({
             drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
             drawMA(chart, LineSeries, candleData);
         } else if (template === 'VWAP') {
-            const vwapData = calculateVWAP(sortedData, vwapAnchor);
+            const vwapData = calculateVWAP(candleData, vwapAnchor);
             drawVWAP(chart, LineSeries, vwapData);
             drawMA(chart, LineSeries, candleData, 20, { lineWidth: 1 });
         } else {
-            const supertrendData = calculateSupertrend(10, 3, sortedData);
+            const supertrendData = calculateSupertrend(10, 3, candleData);
             drawSupertrend(chart, LineSeries, supertrendData);
             drawMA(chart, LineSeries, candleData);
         }
@@ -205,56 +220,126 @@ const TradingViewChart = ({
             minimumWidth: 80,
         });
 
+        const findMatchingCandle = (sigDateVal) => {
+            if (!sigDateVal) return null;
+            const sigTime = parseCandleTime(sigDateVal);
+            if (sigTime == null) return null;
+
+            // 1. Exact match
+            const exact = sortedData.find(d => parseCandleTime(d.date) === sigTime);
+            if (exact) return exact;
+
+            if (isIntraday && typeof sigTime === 'number') {
+                const tolerance = timeframe === 'M1' ? 60 : (timeframe === 'M30' ? 1800 : 300);
+                let closest = null;
+                let minDiff = Infinity;
+                for (const d of sortedData) {
+                    const cTime = parseCandleTime(d.date);
+                    if (typeof cTime === 'number') {
+                        const diff = Math.abs(cTime - sigTime);
+                        if (diff <= tolerance && diff < minDiff) {
+                            minDiff = diff;
+                            closest = d;
+                        }
+                    }
+                }
+                return closest;
+            }
+
+            const sigDateStr = String(sigDateVal).split('T')[0];
+            return sortedData.find(d => String(d.date).split('T')[0] === sigDateStr);
+        };
+
         // Markers (Signals and an optional externally-selected candle)
         if ((signals && signals.length > 0) || focusDate) {
-            const markerGapRatio = 0.02;
-            const markers = signals.map(sig => {
-                const sigDate = sig.date.split('T')[0];
-                const exists = sortedData.find(d => d.date.split('T')[0] === sigDate);
-                if (!exists) return null;
+            const markerData = [];
+            const markers = [];
 
+            (signals || []).forEach(sig => {
+                const exists = findMatchingCandle(sig.date);
+                if (!exists) return;
+
+                const candleTime = parseCandleTime(exists.date);
                 const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
                 const ruleId = String(getRuleId(rule));
                 const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || 'unknown';
 
                 const colors = {
-                    entry: '#60a5fa', // blue
-                    takeprofit: '#4ade80', // green
-                    stoploss: '#f87171', // red
-                    exit: '#fb923c', // orange
+                    entry: '#3b82f6', // blue
+                    takeprofit: '#22c55e', // green
+                    stoploss: '#ef4444', // red
+                    exit: '#f97316', // orange
                     unknown: '#9ca3af'
                 };
 
                 const isEntry = type === 'entry';
-                const price = isEntry
-                    ? Number(exists.low) * (1 - markerGapRatio)
-                    : Number(exists.high) * (1 + markerGapRatio);
+                const high = Number(exists.high);
+                const low = Number(exists.low);
+                const candleRange = Math.abs(high - low);
+                const basePrice = Number(exists.close) || low || 1;
+                // Increased gap: 85% of candle range or 0.4% of price to clearly separate arrows from candles
+                const gap = Math.max(candleRange * 0.85, basePrice * 0.004);
+                const targetPrice = isEntry ? low - gap : high + gap;
 
-                return {
-                    time: sigDate,
-                    position: isEntry ? 'atPriceBottom' : 'atPriceTop',
-                    price,
+                markerData.push({
+                    time: candleTime,
+                    value: targetPrice
+                });
+
+                markers.push({
+                    time: candleTime,
+                    position: isEntry ? 'belowBar' : 'aboveBar',
                     color: colors[type] || colors.unknown,
                     shape: isEntry ? 'arrowUp' : 'arrowDown',
                     text: '', // Only show symbol icon, hide text from chart
-                    size: 2
-                };
-            }).filter(Boolean);
-
-            const normalizedFocusDate = String(focusDate || '').split('T')[0];
-            if (normalizedFocusDate && candleData.some(candle => candle.time === normalizedFocusDate)) {
-                markers.push({
-                    time: normalizedFocusDate,
-                    position: 'belowBar',
-                    color: '#fbbf24',
-                    shape: 'arrowUp',
-                    text: 'Pattern',
-                    size: 2.5,
+                    size: 1.5
                 });
+            });
+
+            if (focusDate) {
+                const focusCandle = findMatchingCandle(focusDate);
+                const focusTime = focusCandle ? parseCandleTime(focusCandle.date) : null;
+                if (focusTime && candleData.some(candle => candle.time === focusTime)) {
+                    markerData.push({
+                        time: focusTime,
+                        value: Number(focusCandle.low)
+                    });
+                    markers.push({
+                        time: focusTime,
+                        position: 'belowBar',
+                        color: '#fbbf24',
+                        shape: 'arrowUp',
+                        text: 'Pattern',
+                        size: 2,
+                    });
+                }
             }
 
-            markers.sort((a, b) => (a.time > b.time ? 1 : -1));
-            createSeriesMarkers(candlestickSeries, markers);
+            if (markerData.length > 0) {
+                const markerSeries = chart.addSeries(LineSeries, {
+                    color: 'transparent',
+                    lineWidth: 1,
+                    crosshairMarkerVisible: false,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                    lineVisible: false,
+                });
+
+                const uniqueMarkerData = [];
+                const seenTime = new Set();
+                markerData
+                    .sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0))
+                    .forEach(pt => {
+                        if (!seenTime.has(pt.time)) {
+                            seenTime.add(pt.time);
+                            uniqueMarkerData.push(pt);
+                        }
+                    });
+
+                markerSeries.setData(uniqueMarkerData);
+                markers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+                createSeriesMarkers(markerSeries, markers);
+            }
         }
 
         // Sync TimeScale
@@ -269,16 +354,25 @@ const TradingViewChart = ({
             if (timeRange) timeScale1.setVisibleLogicalRange(timeRange);
         });
 
-        const normalizedFocusDate = String(focusDate || '').split('T')[0];
-        const focusIndex = candleData.findIndex(candle => candle.time === normalizedFocusDate);
-        if (focusIndex >= 0) {
-            const visibleRadius = 18;
-            const visibleRange = {
-                from: Math.max(-0.5, focusIndex - visibleRadius),
-                to: Math.min(candleData.length - 0.5, focusIndex + visibleRadius),
-            };
-            timeScale1.setVisibleLogicalRange(visibleRange);
-            timeScale2.setVisibleLogicalRange(visibleRange);
+        if (focusDate) {
+            const focusCandle = findMatchingCandle(focusDate);
+            const focusTime = focusCandle ? parseCandleTime(focusCandle.date) : null;
+            const focusIndex = focusTime != null ? candleData.findIndex(candle => candle.time === focusTime) : -1;
+            if (focusIndex >= 0) {
+                const visibleRadius = 60;
+                const visibleRange = {
+                    from: Math.max(-0.5, focusIndex - visibleRadius),
+                    to: Math.min(candleData.length - 0.5, focusIndex + visibleRadius),
+                };
+                timeScale1.setVisibleLogicalRange(visibleRange);
+                timeScale2.setVisibleLogicalRange(visibleRange);
+            } else {
+                timeScale1.fitContent();
+                timeScale2.fitContent();
+            }
+        } else {
+            timeScale1.fitContent();
+            timeScale2.fitContent();
         }
 
         // Sync Crosshairs & Tooltip
@@ -292,9 +386,14 @@ const TradingViewChart = ({
                     volumeChart.setCrosshairPosition(volData.value, param.time, volumeSeries);
                 }
 
-                const dateStr = typeof param.time === 'string'
-                    ? param.time
-                    : (param.time?.year ? `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}` : null);
+                let dateStr = null;
+                if (typeof param.time === 'string') {
+                    dateStr = param.time;
+                } else if (typeof param.time === 'number') {
+                    dateStr = new Date(param.time * 1000).toISOString().split('T')[0];
+                } else if (param.time?.year) {
+                    dateStr = `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}`;
+                }
 
                 const activeSignals = dateStr ? signalsByDate.get(dateStr) : null;
                 if (activeSignals && activeSignals.length > 0) {

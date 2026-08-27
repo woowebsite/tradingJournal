@@ -1099,6 +1099,7 @@ export interface ApiSymbolHistorySymbolHistory
     open: Schema.Attribute.Float;
     publishedAt: Schema.Attribute.DateTime;
     symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    tf: Schema.Attribute.String & Schema.Attribute.DefaultTo<'D1'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

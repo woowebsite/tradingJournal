@@ -50,9 +50,18 @@ function normalizeInvestorDate(value: unknown): string | null {
 export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy' as any, ({ strapi }) => ({
   async tcbsData(ctx) {
     const resource = String(ctx.params.resource || '');
-    const template = resource === 'futures-history' && String(ctx.query.resolution || '').toUpperCase() === 'D'
-      ? '/futures-insight/v2/stock/bars-long-term'
-      : TCBS_ENDPOINTS[resource];
+    const resUpper = String(ctx.query.resolution || '').toUpperCase();
+    let template = TCBS_ENDPOINTS[resource];
+    if (resource === 'futures-history') {
+      template = (resUpper === 'D' || resUpper === '1D' || resUpper === 'D1' || resUpper === 'W' || resUpper === '1W' || resUpper === 'W1')
+        ? '/futures-insight/v2/stock/bars-long-term'
+        : '/futures-insight/v2/stock/bars';
+    } else if (resource === 'stock-history') {
+      const isMinute = ['1', '5', '15', '30', '60', 'M1', 'M5', 'M15', 'M30', 'M60', '1M', '5M', '15M', '30M', '60M'].includes(resUpper);
+      template = isMinute
+        ? '/stock-insight/v2/stock/bars'
+        : '/stock-insight/v2/stock/bars-long-term';
+    }
     if (!template) return ctx.badRequest('Unsupported TCBS resource');
 
     const ticker = String(ctx.query.ticker || '').trim().toUpperCase();

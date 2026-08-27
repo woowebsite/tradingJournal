@@ -109,7 +109,7 @@ export const drawSupertrend = (chart, LineSeries, supertrendData) => {
 
     for (let i = 0; i < supertrendData.length; i++) {
         const item = supertrendData[i];
-        const formattedTime = item.time.split('T')[0];
+        const formattedTime = item.time !== undefined ? item.time : (item.date ? String(item.date).split('T')[0] : '');
 
         if (!currentSegment) {
             currentSegment = {

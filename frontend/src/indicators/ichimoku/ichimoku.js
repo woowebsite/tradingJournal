@@ -31,7 +31,7 @@ export const calculateIchimoku = (
         const conversionValue = midpoint(data, index, conversionPeriod);
         const baseValue = midpoint(data, index, basePeriod);
         const spanBValue = midpoint(data, index, spanBPeriod);
-        const time = String(candle.time || candle.date || '').split('T')[0];
+        const time = candle.time !== undefined ? candle.time : String(candle.date || '').split('T')[0];
 
         if (conversionValue != null) conversion.push({ time, value: conversionValue });
         if (baseValue != null) base.push({ time, value: baseValue });
@@ -40,13 +40,13 @@ export const calculateIchimoku = (
         const displacedCandle = data[index + displacement];
         if (displacedCandle && conversionValue != null && baseValue != null) {
             spanA.push({
-                time: String(displacedCandle.time || displacedCandle.date || '').split('T')[0],
+                time: displacedCandle.time !== undefined ? displacedCandle.time : String(displacedCandle.date || '').split('T')[0],
                 value: (conversionValue + baseValue) / 2,
             });
         }
         if (displacedCandle && spanBValue != null) {
             spanB.push({
-                time: String(displacedCandle.time || displacedCandle.date || '').split('T')[0],
+                time: displacedCandle.time !== undefined ? displacedCandle.time : String(displacedCandle.date || '').split('T')[0],
                 value: spanBValue,
             });
         }

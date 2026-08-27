@@ -11,6 +11,10 @@ vi.mock('../services/api', () => ({
     },
 }));
 
+vi.mock('./marketSlice', () => ({
+    loadExternalHistory: vi.fn(),
+}));
+
 describe('fetchHistoryForSignalScan', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -39,5 +43,16 @@ describe('fetchHistoryForSignalScan', () => {
         expect(api.get).toHaveBeenCalledWith(expect.stringContaining('symbol%2F1'));
         expect(result).toHaveLength(101);
         expect(new Date(result[0].date).getTime()).toBeGreaterThanOrEqual(new Date(result.at(-1).date).getTime());
+    });
+
+    it('filters by tf when timeframe is specified', async () => {
+        api.get.mockResolvedValueOnce({
+            data: { data: [{ id: 1, date: '2026-08-27T09:30:00.000Z', tf: 'M5' }], meta: { pagination: { page: 1, pageCount: 1 } } },
+        });
+
+        const result = await fetchHistoryForSignalScan('sym-1', 'M5');
+
+        expect(api.get).toHaveBeenCalledWith(expect.stringContaining('filters[tf][$eq]=M5'));
+        expect(result).toHaveLength(1);
     });
 });
