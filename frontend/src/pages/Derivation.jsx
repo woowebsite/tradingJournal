@@ -3,14 +3,17 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchStrategies } from '../features/strategySlice';
 import { getTCBSToken, getTCBSDerivatives, placeTCBSConditionOrder } from '../services/tcbsJournal';
 import RealtimeChart from '../components/RealtimeChart';
-import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key } from 'lucide-react';
+import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key, Activity, BarChart2, Layers } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import OtpModal from '../components/otpModal';
+import IntradayBSAPanel from '../components/IntradayBSAPanel';
 
 const Derivation = () => {
     const dispatch = useDispatch();
     const { items: strategies } = useSelector(state => state.strategies);
     const { selectedAccount } = useAccount();
+
+    const [leftTab, setLeftTab] = useState('both'); // 'chart' | 'bsa' | 'both'
 
     const [entryPrice, setEntryPrice] = useState('');
     const [strategy, setStrategy] = useState('');
@@ -290,94 +293,149 @@ const Derivation = () => {
     };
 
     return (
-        <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
-
-
-            <div className="flex flex-1 gap-4 min-h-0 flex-col lg:flex-row pb-2">
-                {/* Left Column: Chart */}
-                <div className="flex flex-col flex-1 gap-4 min-h-0">
-                    <div className="flex-1 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col min-h-[400px]">
-                        <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/50 flex flex-wrap justify-between items-center shrink-0 gap-4">
-                            <div className="flex items-center gap-3 shrink-0">
-                                <h2 className="text-xl font-bold text-white">
-                                    {activeSymbol || 'Select a Symbol'}
-                                </h2>
-                                <span className="text-sm text-gray-400 border-l border-gray-700 pl-3">Derivative Intraday</span>
+        <div className="flex flex-col min-h-[calc(100vh-6rem)] gap-4 pb-12">
+            <div className="flex flex-1 gap-4 flex-col lg:flex-row items-start">
+                {/* Left Column: Chart & Intraday BSA */}
+                <div className="flex flex-col flex-1 gap-4 w-full min-w-0">
+                    {/* View Mode Switcher Header */}
+                    <div className="flex items-center justify-between bg-gray-800/80 border border-gray-700/80 px-4 py-2.5 rounded-xl shrink-0">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Chế độ hiển thị:</span>
+                            <div className="flex items-center bg-gray-900 border border-gray-700 rounded-lg p-0.5">
                                 <button
-                                    onClick={handleFetchPrice}
-                                    disabled={loadingPrice}
-                                    className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 disabled:opacity-50 transition shadow-sm ml-2 border border-gray-700"
-                                    title="Refresh Price"
+                                    type="button"
+                                    onClick={() => setLeftTab('chart')}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
+                                        leftTab === 'chart'
+                                            ? 'bg-blue-600 text-white shadow'
+                                            : 'text-gray-400 hover:text-white'
+                                    }`}
                                 >
-                                    <RefreshCw size={14} className={loadingPrice ? "animate-spin" : ""} />
+                                    <BarChart2 size={13} /> Biểu Đồ Nến
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLeftTab('bsa')}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
+                                        leftTab === 'bsa'
+                                            ? 'bg-blue-600 text-white shadow'
+                                            : 'text-gray-400 hover:text-white'
+                                    }`}
+                                >
+                                    <Activity size={13} /> Cung Cầu BSA (41I1G9000)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLeftTab('both')}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
+                                        leftTab === 'both'
+                                            ? 'bg-blue-600 text-white shadow'
+                                            : 'text-gray-400 hover:text-white'
+                                    }`}
+                                >
+                                    <Layers size={13} /> Song Song (Chia Đôi)
                                 </button>
                             </div>
-
-                            {/* Realtime API Data Header */}
-                            {derivativeData && (() => {
-                                const info = Array.isArray(derivativeData) && derivativeData.length > 0
-                                    ? derivativeData[0]
-                                    : typeof derivativeData === 'object' ? derivativeData : null;
-
-                                if (!info) return null;
-
-                                return (
-                                    <div className="flex items-center gap-5 sm:gap-8 flex-wrap">
-                                        {/* Price / Change */}
-                                        <div className="flex flex-col text-right">
-                                            <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-0.5">Price</span>
-                                            <div className="flex items-baseline gap-2 justify-end">
-                                                <span className="font-bold text-white text-base">{info.matchPrice || info.price || info.lastPrice || '0'}</span>
-                                                <span className={`text-xs font-medium ${Number(info.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                    {Number(info.change) > 0 ? '+' : ''}{Number(info.change || 0).toFixed(1)} ({Number(info.changePercent || 0).toFixed(2)}%)
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="h-8 w-px bg-gray-700 hidden sm:block"></div>
-
-                                        {/* Bid / Offer */}
-                                        <div className="flex gap-4 sm:gap-6">
-                                            <div className="flex flex-col w-20 sm:w-24">
-                                                <span className="text-[10px] text-green-400 uppercase tracking-wider font-semibold mb-0.5">Best Bid</span>
-                                                <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
-                                                    <span className="font-bold text-white text-sm">{info.bidPrice01 || info.bestBidPrice || info.bidPrice1 || '0'}</span>
-                                                    <span className="text-[10px] text-gray-500">x{info.bidQtty01 || info.bestBidQtty || info.bidVol1 || '0'}</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-col w-20 sm:w-24">
-                                                <span className="text-[10px] text-red-400 uppercase tracking-wider font-semibold mb-0.5">Best Offer</span>
-                                                <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
-                                                    <span className="font-bold text-white text-sm">{info.offerPrice01 || info.bestOfferPrice || info.askPrice1 || '0'}</span>
-                                                    <span className="text-[10px] text-gray-500">x{info.offerQtty01 || info.bestOfferQtty || info.askVol1 || '0'}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })()}
                         </div>
-                        <div className="flex-1 min-h-0 relative">
-                            {activeSymbol ? (
-                                <RealtimeChart
-                                    symbol={activeSymbol}
-                                    jwtToken={jwtToken}
-                                    setShowOtpModal={setShowOtpModal}
-                                    strategyRules={strategyRules}
-                                    wsTick={wsTick}
-                                    wsStatus={wsStatus}
-                                />
-                            ) : (
-                                <div className="flex items-center justify-center h-full text-gray-500 italic text-sm absolute inset-0">
-                                    Chart will appear when symbol is loaded
-                                </div>
-                            )}
-                        </div>
+
+                        <span className="text-xs text-gray-400 font-medium hidden sm:inline-block">
+                            Ticker BSA: <strong className="text-blue-400 font-mono">41I1G9000</strong>
+                        </span>
                     </div>
+
+                    {/* Chart Container */}
+                    {(leftTab === 'chart' || leftTab === 'both') && (
+                        <div className={`bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col ${leftTab === 'both' ? 'h-[500px] min-h-[500px]' : 'h-[620px] min-h-[620px]'}`}>
+                            <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/50 flex flex-wrap justify-between items-center shrink-0 gap-4">
+                                <div className="flex items-center gap-3 shrink-0">
+                                    <h2 className="text-xl font-bold text-white">
+                                        {activeSymbol || 'Select a Symbol'}
+                                    </h2>
+                                    <span className="text-sm text-gray-400 border-l border-gray-700 pl-3">Derivative Intraday</span>
+                                    <button
+                                        onClick={handleFetchPrice}
+                                        disabled={loadingPrice}
+                                        className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 disabled:opacity-50 transition shadow-sm ml-2 border border-gray-700"
+                                        title="Refresh Price"
+                                    >
+                                        <RefreshCw size={14} className={loadingPrice ? "animate-spin" : ""} />
+                                    </button>
+                                </div>
+
+                                {/* Realtime API Data Header */}
+                                {derivativeData && (() => {
+                                    const info = Array.isArray(derivativeData) && derivativeData.length > 0
+                                        ? derivativeData[0]
+                                        : typeof derivativeData === 'object' ? derivativeData : null;
+
+                                    if (!info) return null;
+
+                                    return (
+                                        <div className="flex items-center gap-5 sm:gap-8 flex-wrap">
+                                            {/* Price / Change */}
+                                            <div className="flex flex-col text-right">
+                                                <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-0.5">Price</span>
+                                                <div className="flex items-baseline gap-2 justify-end">
+                                                    <span className="font-bold text-white text-base">{info.matchPrice || info.price || info.lastPrice || '0'}</span>
+                                                    <span className={`text-xs font-medium ${Number(info.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                        {Number(info.change) > 0 ? '+' : ''}{Number(info.change || 0).toFixed(1)} ({Number(info.changePercent || 0).toFixed(2)}%)
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="h-8 w-px bg-gray-700 hidden sm:block"></div>
+
+                                            {/* Bid / Offer */}
+                                            <div className="flex gap-4 sm:gap-6">
+                                                <div className="flex flex-col w-20 sm:w-24">
+                                                    <span className="text-[10px] text-green-400 uppercase tracking-wider font-semibold mb-0.5">Best Bid</span>
+                                                    <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
+                                                        <span className="font-bold text-white text-sm">{info.bidPrice01 || info.bestBidPrice || info.bidPrice1 || '0'}</span>
+                                                        <span className="text-[10px] text-gray-500">x{info.bidQtty01 || info.bestBidQtty || info.bidVol1 || '0'}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col w-20 sm:w-24">
+                                                    <span className="text-[10px] text-red-400 uppercase tracking-wider font-semibold mb-0.5">Best Offer</span>
+                                                    <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
+                                                        <span className="font-bold text-white text-sm">{info.offerPrice01 || info.bestOfferPrice || info.askPrice1 || '0'}</span>
+                                                        <span className="text-[10px] text-gray-500">x{info.offerQtty01 || info.bestOfferQtty || info.askVol1 || '0'}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                            <div className="flex-1 min-h-0 relative">
+                                {activeSymbol ? (
+                                    <RealtimeChart
+                                        symbol={activeSymbol}
+                                        jwtToken={jwtToken}
+                                        setShowOtpModal={setShowOtpModal}
+                                        strategyRules={strategyRules}
+                                        wsTick={wsTick}
+                                        wsStatus={wsStatus}
+                                    />
+                                ) : (
+                                    <div className="flex items-center justify-center h-full text-gray-500 italic text-sm absolute inset-0">
+                                        Chart will appear when symbol is loaded
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Intraday BSA Panel */}
+                    {(leftTab === 'bsa' || leftTab === 'both') && (
+                        <IntradayBSAPanel
+                            defaultTicker="41I1G9000"
+                            className={leftTab === 'both' ? 'min-h-[680px]' : 'min-h-[750px]'}
+                        />
+                    )}
                 </div>
 
-                {/* Right Column: Symbol Info & Order Form */}
-                <div className="lg:w-96 flex flex-col gap-4 h-full shrink-0 overflow-y-auto pr-1">
+                {/* Right Column: Symbol Info & Order Form (Sticky on desktop) */}
+                <div className="lg:w-96 w-full flex flex-col gap-4 shrink-0 lg:sticky lg:top-20 self-start">
 
 
                     {/* Order Form */}

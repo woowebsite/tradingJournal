@@ -201,3 +201,16 @@ export const updateMarketInfo = async (ticker, symbolId) => {
         throw error;
     }
 };
+
+export const getIntradayBSA = async (ticker, { timeWindow = '5', tWindow = '60m', type = 'all', symbolHistoryId } = {}) => {
+    try {
+        const response = await api.get('/intraday-bsas/sync', {
+            params: { ticker, timeWindow, tWindow, type, symbolHistoryId },
+            headers: getTcbsHeaders(),
+        });
+        return response.data;
+    } catch (error) {
+        console.error(`Failed to fetch Intraday BSA for ${ticker}:`, error);
+        throw error;
+    }
+};

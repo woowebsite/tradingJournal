@@ -21,6 +21,7 @@ const TCBS_ENDPOINTS: Record<string, string> = {
   'futures-intraday-history': '/futures-insight/v1/intraday/:ticker/his/paging',
   'futures-investor': '/futures-insight/v1/intraday/:ticker/investor',
   'stock-investor': '/stock-insight/v1/intraday/:ticker/investor',
+  'futures-bsa-ext': '/futures-insight/v1/intraday/:ticker/bsa-ext',
   'backtest-conclusion': '/tcbs-hfc-data/v2/digital/backtest-conclusion',
 };
 
@@ -71,6 +72,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       'futures-intraday-history': [],
       'futures-investor': ['wsize'],
       'stock-investor': ['wsize'],
+      'futures-bsa-ext': ['timeWindow', 'tWindow', 'type'],
       'backtest-conclusion': ['ticker'],
     };
     const params = Object.fromEntries(allowedParams[resource]

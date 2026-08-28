@@ -34,6 +34,12 @@
       "relation": "manyToOne",
       "target": "api::symbol.symbol",
       "inversedBy": "symbol_histories"
+    },
+    "intraday_bsas": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::intraday-bsa.intraday-bsa",
+      "mappedBy": "symbol_history"
     }
   }
 }

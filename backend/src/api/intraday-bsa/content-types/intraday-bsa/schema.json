@@ -1,0 +1,57 @@
+{
+  "kind": "collectionType",
+  "collectionName": "intraday_bsas",
+  "info": {
+    "singularName": "intraday-bsa",
+    "pluralName": "intraday-bsas",
+    "displayName": "IntradayBSA"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "ticker": {
+      "type": "string"
+    },
+    "bu": {
+      "type": "integer"
+    },
+    "bms": {
+      "type": "integer"
+    },
+    "bup": {
+      "type": "float"
+    },
+    "sd": {
+      "type": "integer"
+    },
+    "sms": {
+      "type": "integer"
+    },
+    "sdp": {
+      "type": "float"
+    },
+    "bsr": {
+      "type": "float"
+    },
+    "t": {
+      "type": "string"
+    },
+    "s": {
+      "type": "biginteger"
+    },
+    "timeWindow": {
+      "type": "string"
+    },
+    "tWindow": {
+      "type": "string"
+    },
+    "symbol_history": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol-history.symbol-history",
+      "inversedBy": "intraday_bsas"
+    }
+  }
+}

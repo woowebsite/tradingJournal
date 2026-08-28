@@ -503,6 +503,49 @@ export interface ApiIndustryIndustry extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiIntradayBsaIntradayBsa extends Struct.CollectionTypeSchema {
+  collectionName: 'intraday_bsas';
+  info: {
+    displayName: 'IntradayBSA';
+    pluralName: 'intraday-bsas';
+    singularName: 'intraday-bsa';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bms: Schema.Attribute.Integer;
+    bsr: Schema.Attribute.Float;
+    bu: Schema.Attribute.Integer;
+    bup: Schema.Attribute.Float;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bsa.intraday-bsa'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    s: Schema.Attribute.BigInteger;
+    sd: Schema.Attribute.Integer;
+    sdp: Schema.Attribute.Float;
+    sms: Schema.Attribute.Integer;
+    symbol_history: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::symbol-history.symbol-history'
+    >;
+    t: Schema.Attribute.String;
+    ticker: Schema.Attribute.String;
+    timeWindow: Schema.Attribute.String;
+    tWindow: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiInvestorInvestor extends Struct.CollectionTypeSchema {
   collectionName: 'investors';
   info: {
@@ -1089,6 +1132,10 @@ export interface ApiSymbolHistorySymbolHistory
       Schema.Attribute.Private;
     date: Schema.Attribute.DateTime;
     high: Schema.Attribute.Float;
+    intraday_bsas: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bsa.intraday-bsa'
+    >;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -2072,6 +2119,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::account.account': ApiAccountAccount;
       'api::industry.industry': ApiIndustryIndustry;
+      'api::intraday-bsa.intraday-bsa': ApiIntradayBsaIntradayBsa;
       'api::investor.investor': ApiInvestorInvestor;
       'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
