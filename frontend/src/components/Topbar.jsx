@@ -3,9 +3,11 @@ import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
 import { Search, Bell, Settings, Clock3, NotebookPen, Plus, Workflow } from 'lucide-react';
 import GlobalWatchlist from './GlobalWatchlist';
+import { useSidebar } from '../context/SidebarContext';
 
 const Topbar = ({ onNewTrade }) => {
     const location = useLocation();
+    const { isCollapsed } = useSidebar();
 
     const topNavItems = [
         { label: 'Today', path: '/today-trades', icon: Clock3 },
@@ -14,7 +16,10 @@ const Topbar = ({ onNewTrade }) => {
     ];
 
     return (
-        <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 fixed top-0 right-0 left-64 z-20">
+        <div className={clsx(
+            'h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 fixed top-0 right-0 z-20 transition-all duration-300 ease-in-out',
+            isCollapsed ? 'left-16' : 'left-64'
+        )}>
             <div className="flex bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 items-center w-64">
                 <Search size={16} className="text-gray-500 mr-2" />
                 <input

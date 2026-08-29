@@ -40,6 +40,12 @@
       "relation": "oneToMany",
       "target": "api::intraday-bsa.intraday-bsa",
       "mappedBy": "symbol_history"
+    },
+    "intraday_bid_asks": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::intraday-bid-ask.intraday-bid-ask",
+      "mappedBy": "symbol_history"
     }
   }
 }

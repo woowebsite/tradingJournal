@@ -503,6 +503,54 @@ export interface ApiIndustryIndustry extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiIntradayBidAskIntradayBidAsk
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'intraday_bid_asks';
+  info: {
+    displayName: 'IntradayBidAsk';
+    pluralName: 'intraday-bid-asks';
+    singularName: 'intraday-bid-ask';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    aobp: Schema.Attribute.Float;
+    ap: Schema.Attribute.Float;
+    av: Schema.Attribute.Float;
+    avsp: Schema.Attribute.Float;
+    bp: Schema.Attribute.Float;
+    bs: Schema.Attribute.Float;
+    bv: Schema.Attribute.Float;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bid-ask.intraday-bid-ask'
+    > &
+      Schema.Attribute.Private;
+    mode: Schema.Attribute.String;
+    oa: Schema.Attribute.Float;
+    obp: Schema.Attribute.Float;
+    osp: Schema.Attribute.Float;
+    publishedAt: Schema.Attribute.DateTime;
+    raw: Schema.Attribute.JSON;
+    s: Schema.Attribute.BigInteger;
+    sp: Schema.Attribute.Float;
+    symbol_history: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::symbol-history.symbol-history'
+    >;
+    t: Schema.Attribute.String;
+    ticker: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiIntradayBsaIntradayBsa extends Struct.CollectionTypeSchema {
   collectionName: 'intraday_bsas';
   info: {
@@ -1132,6 +1180,10 @@ export interface ApiSymbolHistorySymbolHistory
       Schema.Attribute.Private;
     date: Schema.Attribute.DateTime;
     high: Schema.Attribute.Float;
+    intraday_bid_asks: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bid-ask.intraday-bid-ask'
+    >;
     intraday_bsas: Schema.Attribute.Relation<
       'oneToMany',
       'api::intraday-bsa.intraday-bsa'
@@ -2119,6 +2171,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::account.account': ApiAccountAccount;
       'api::industry.industry': ApiIndustryIndustry;
+      'api::intraday-bid-ask.intraday-bid-ask': ApiIntradayBidAskIntradayBidAsk;
       'api::intraday-bsa.intraday-bsa': ApiIntradayBsaIntradayBsa;
       'api::investor.investor': ApiInvestorInvestor;
       'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;

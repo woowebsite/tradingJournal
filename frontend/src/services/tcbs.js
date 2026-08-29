@@ -214,3 +214,16 @@ export const getIntradayBSA = async (ticker, { timeWindow = '5', tWindow = '60m'
         throw error;
     }
 };
+
+export const getIntradayBidAsk = async (ticker, { mode = 'baAll', symbolHistoryId } = {}) => {
+    try {
+        const response = await api.get('/intraday-bid-asks/sync', {
+            params: { ticker, mode, symbolHistoryId },
+            headers: getTcbsHeaders(),
+        });
+        return response.data;
+    } catch (error) {
+        console.error(`Failed to fetch Intraday Bid-Ask for ${ticker}:`, error);
+        throw error;
+    }
+};

@@ -37,13 +37,15 @@ import TCBSRecommendations from './pages/TCBSRecommendations';
 import Vietnam from './pages/Vietnam';
 import Global from './pages/Global';
 import { AccountProvider } from './context/AccountContext';
+import { SidebarProvider } from './context/SidebarContext';
 
 function App() {
   return (
     <AccountProvider>
-      <Router>
-        <Routes>
-          <Route path="/" element={<MainLayout />}>
+      <SidebarProvider>
+        <Router>
+          <Routes>
+            <Route path="/" element={<MainLayout />}>
             <Route index element={<Dashboard />} />
             <Route path="vietnam" element={<Vietnam />} />
             <Route path="global" element={<Global />} />
@@ -85,7 +87,8 @@ function App() {
           </Route>
         </Routes>
       </Router>
-    </AccountProvider>
+    </SidebarProvider>
+  </AccountProvider>
   );
 }
 

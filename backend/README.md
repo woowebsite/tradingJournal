@@ -64,7 +64,28 @@ npx ngrok http 1337
 ## 📚 TCBS API
 ### Dư mua / Dư bán - limit order
 https://apiextaws.tcbs.com.vn/futures-insight/v1/intraday/41I1G9000/bid-ask?mode=baAll
-Khối lượng khớp theo giá https://apiextaws.tcbs.com.vn/futures-insight/v1/intraday/41I1G9000/investor/match-vol?type=all
+```json
+{
+  "avgOBPercent": [
+    {
+      "aobp": 0.509, // Trung bình 5 ngày dư mua % (5-day Average Over-Bid %)
+      "avsp": 0.22,  // Trung bình spread (Average Spread)
+      "t": "09:00"   // Thời gian hiện tại (HH:MM)
+    }
+  ],
+  "overBidAskLog": [
+    {
+      "bs": 17421,  // Khối lượng dư mua (Buy Size / Bid Volume)
+      "oa": 39631,  // Khối lượng dư bán (Over Ask / Ask Volume)
+      "obp": 0.305, // Tỷ lệ dư mua % (Over-Bid %)
+      "osp": 0.695, // Tỷ lệ dư bán % (Over-Ask %)
+      "sp": 0.2,    // Spread giữa giá mua và giá bán (Price Spread)
+      "t": "09:00"   // Thời gian hiện tại (HH:MM)
+    }
+  ],
+  "ticker": "41I1G9000"
+}
+```
  {
     n: số lệnh khớp,
     tv: Khối lượng,

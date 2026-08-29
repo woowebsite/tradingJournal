@@ -3,17 +3,17 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchStrategies } from '../features/strategySlice';
 import { getTCBSToken, getTCBSDerivatives, placeTCBSConditionOrder } from '../services/tcbsJournal';
 import RealtimeChart from '../components/RealtimeChart';
-import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key, Activity, BarChart2, Layers } from 'lucide-react';
+import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import OtpModal from '../components/otpModal';
 import IntradayBSAPanel from '../components/IntradayBSAPanel';
+import IntradayBidAskPanel from '../components/IntradayBidAskPanel';
+import MarketPressureGauge from '../components/MarketPressureGauge';
 
 const Derivation = () => {
     const dispatch = useDispatch();
     const { items: strategies } = useSelector(state => state.strategies);
     const { selectedAccount } = useAccount();
-
-    const [leftTab, setLeftTab] = useState('both'); // 'chart' | 'bsa' | 'both'
 
     const [entryPrice, setEntryPrice] = useState('');
     const [strategy, setStrategy] = useState('');
@@ -293,255 +293,221 @@ const Derivation = () => {
     };
 
     return (
-        <div className="flex flex-col min-h-[calc(100vh-6rem)] gap-4 pb-12">
-            <div className="flex flex-1 gap-4 flex-col lg:flex-row items-start">
-                {/* Left Column: Chart & Intraday BSA */}
-                <div className="flex flex-col flex-1 gap-4 w-full min-w-0">
-                    {/* View Mode Switcher Header */}
-                    <div className="flex items-center justify-between bg-gray-800/80 border border-gray-700/80 px-4 py-2.5 rounded-xl shrink-0">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Chế độ hiển thị:</span>
-                            <div className="flex items-center bg-gray-900 border border-gray-700 rounded-lg p-0.5">
-                                <button
-                                    type="button"
-                                    onClick={() => setLeftTab('chart')}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
-                                        leftTab === 'chart'
-                                            ? 'bg-blue-600 text-white shadow'
-                                            : 'text-gray-400 hover:text-white'
-                                    }`}
-                                >
-                                    <BarChart2 size={13} /> Biểu Đồ Nến
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setLeftTab('bsa')}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
-                                        leftTab === 'bsa'
-                                            ? 'bg-blue-600 text-white shadow'
-                                            : 'text-gray-400 hover:text-white'
-                                    }`}
-                                >
-                                    <Activity size={13} /> Cung Cầu BSA (41I1G9000)
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setLeftTab('both')}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
-                                        leftTab === 'both'
-                                            ? 'bg-blue-600 text-white shadow'
-                                            : 'text-gray-400 hover:text-white'
-                                    }`}
-                                >
-                                    <Layers size={13} /> Song Song (Chia Đôi)
-                                </button>
-                            </div>
-                        </div>
-
-                        <span className="text-xs text-gray-400 font-medium hidden sm:inline-block">
-                            Ticker BSA: <strong className="text-blue-400 font-mono">41I1G9000</strong>
+        <div className="flex flex-col min-h-[calc(100vh-6rem)] gap-4 pb-12 w-full">
+            {/* Top Horizontal Place Order Bar */}
+            <div className="bg-gray-800/95 backdrop-blur border border-gray-700/80 rounded-xl p-3.5 shadow-lg flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                        <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                            ⚡ Đặt Lệnh Phái Sinh (Place Order)
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 font-mono font-bold">
+                            {activeSymbol || 'VN30F1M'}
                         </span>
                     </div>
 
-                    {/* Chart Container */}
-                    {(leftTab === 'chart' || leftTab === 'both') && (
-                        <div className={`bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col ${leftTab === 'both' ? 'h-[500px] min-h-[500px]' : 'h-[620px] min-h-[620px]'}`}>
-                            <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/50 flex flex-wrap justify-between items-center shrink-0 gap-4">
-                                <div className="flex items-center gap-3 shrink-0">
-                                    <h2 className="text-xl font-bold text-white">
-                                        {activeSymbol || 'Select a Symbol'}
-                                    </h2>
-                                    <span className="text-sm text-gray-400 border-l border-gray-700 pl-3">Derivative Intraday</span>
-                                    <button
-                                        onClick={handleFetchPrice}
-                                        disabled={loadingPrice}
-                                        className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 disabled:opacity-50 transition shadow-sm ml-2 border border-gray-700"
-                                        title="Refresh Price"
-                                    >
-                                        <RefreshCw size={14} className={loadingPrice ? "animate-spin" : ""} />
-                                    </button>
-                                </div>
-
-                                {/* Realtime API Data Header */}
-                                {derivativeData && (() => {
-                                    const info = Array.isArray(derivativeData) && derivativeData.length > 0
-                                        ? derivativeData[0]
-                                        : typeof derivativeData === 'object' ? derivativeData : null;
-
-                                    if (!info) return null;
-
-                                    return (
-                                        <div className="flex items-center gap-5 sm:gap-8 flex-wrap">
-                                            {/* Price / Change */}
-                                            <div className="flex flex-col text-right">
-                                                <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-0.5">Price</span>
-                                                <div className="flex items-baseline gap-2 justify-end">
-                                                    <span className="font-bold text-white text-base">{info.matchPrice || info.price || info.lastPrice || '0'}</span>
-                                                    <span className={`text-xs font-medium ${Number(info.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                        {Number(info.change) > 0 ? '+' : ''}{Number(info.change || 0).toFixed(1)} ({Number(info.changePercent || 0).toFixed(2)}%)
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div className="h-8 w-px bg-gray-700 hidden sm:block"></div>
-
-                                            {/* Bid / Offer */}
-                                            <div className="flex gap-4 sm:gap-6">
-                                                <div className="flex flex-col w-20 sm:w-24">
-                                                    <span className="text-[10px] text-green-400 uppercase tracking-wider font-semibold mb-0.5">Best Bid</span>
-                                                    <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
-                                                        <span className="font-bold text-white text-sm">{info.bidPrice01 || info.bestBidPrice || info.bidPrice1 || '0'}</span>
-                                                        <span className="text-[10px] text-gray-500">x{info.bidQtty01 || info.bestBidQtty || info.bidVol1 || '0'}</span>
-                                                    </div>
-                                                </div>
-                                                <div className="flex flex-col w-20 sm:w-24">
-                                                    <span className="text-[10px] text-red-400 uppercase tracking-wider font-semibold mb-0.5">Best Offer</span>
-                                                    <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
-                                                        <span className="font-bold text-white text-sm">{info.offerPrice01 || info.bestOfferPrice || info.askPrice1 || '0'}</span>
-                                                        <span className="text-[10px] text-gray-500">x{info.offerQtty01 || info.bestOfferQtty || info.askVol1 || '0'}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
-                            <div className="flex-1 min-h-0 relative">
-                                {activeSymbol ? (
-                                    <RealtimeChart
-                                        symbol={activeSymbol}
-                                        jwtToken={jwtToken}
-                                        setShowOtpModal={setShowOtpModal}
-                                        strategyRules={strategyRules}
-                                        wsTick={wsTick}
-                                        wsStatus={wsStatus}
-                                    />
-                                ) : (
-                                    <div className="flex items-center justify-center h-full text-gray-500 italic text-sm absolute inset-0">
-                                        Chart will appear when symbol is loaded
-                                    </div>
-                                )}
-                            </div>
+                    {/* Inline alerts */}
+                    {error && (
+                        <div className="text-xs text-rose-400 flex items-center gap-1.5 font-medium bg-rose-950/40 border border-rose-500/30 px-2.5 py-1 rounded-md">
+                            <AlertCircle size={14} className="shrink-0" />
+                            <span>{error}</span>
                         </div>
                     )}
-
-                    {/* Intraday BSA Panel */}
-                    {(leftTab === 'bsa' || leftTab === 'both') && (
-                        <IntradayBSAPanel
-                            defaultTicker="41I1G9000"
-                            className={leftTab === 'both' ? 'min-h-[680px]' : 'min-h-[750px]'}
-                        />
+                    {successMessage && (
+                        <div className="text-xs text-emerald-400 font-medium bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1 rounded-md">
+                            {successMessage}
+                        </div>
                     )}
                 </div>
 
-                {/* Right Column: Symbol Info & Order Form (Sticky on desktop) */}
-                <div className="lg:w-96 w-full flex flex-col gap-4 shrink-0 lg:sticky lg:top-20 self-start">
+                {/* Horizontal Form Controls */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Strategy Selector */}
+                    <div className="flex-1 min-w-[200px]">
+                        <select
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={strategy}
+                            onChange={(e) => setStrategy(e.target.value)}
+                        >
+                            <option value="">Chọn Chiến Lược (Strategy)...</option>
+                            {strategies.map((strat) => (
+                                <option key={strat.id || strat.documentId} value={strat.id || strat.documentId} className="bg-gray-900 text-white">
+                                    {strat.name || strat.Name || 'Unnamed Strategy'}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
+                    {/* Entry Price */}
+                    <div className="w-32">
+                        <input
+                            type="number"
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-mono"
+                            placeholder="Giá Mở (Entry)..."
+                            value={entryPrice}
+                            onChange={(e) => setEntryPrice(e.target.value)}
+                            step="0.1"
+                        />
+                    </div>
 
-                    {/* Order Form */}
-                    <div className="flex-1 bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg flex flex-col min-h-0 overflow-y-auto">
-                        <h2 className="text-lg font-semibold text-white mb-4">Place Order</h2>
+                    {/* Volume */}
+                    <div className="w-24">
+                        <input
+                            type="number"
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-mono"
+                            placeholder="KL (1)"
+                            value={volume}
+                            onChange={(e) => setVolume(e.target.value)}
+                            min="1"
+                        />
+                    </div>
 
-                        {error && (
-                            <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded-lg flex items-start gap-2.5 text-red-200">
-                                <AlertCircle className="shrink-0 mt-0.5" size={16} />
-                                <p className="text-xs leading-relaxed">{error}</p>
-                            </div>
-                        )}
-                        {successMessage && (
-                            <div className="mb-4 p-3 bg-green-900/50 border border-green-500 rounded-lg text-green-200 text-xs leading-relaxed">
-                                {successMessage}
-                            </div>
-                        )}
+                    {/* Stoploss */}
+                    <div className="w-32">
+                        <input
+                            type="number"
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-rose-300 placeholder-gray-500 focus:ring-1 focus:ring-rose-500 outline-none font-mono"
+                            placeholder="Cắt Lỗ (SL)..."
+                            value={stoploss}
+                            onChange={(e) => setStoploss(e.target.value)}
+                            step="0.1"
+                        />
+                    </div>
 
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="col-span-2">
-                                    <label className="block text-xs font-medium text-gray-400 mb-1.5 tracking-wide uppercase">Strategy</label>
-                                    <select
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-blue-500 outline-none"
-                                        value={strategy}
-                                        onChange={(e) => setStrategy(e.target.value)}
-                                    >
-                                        <option value="">Select a Strategy...</option>
-                                        {strategies.map((strat) => (
-                                            <option key={strat.id || strat.documentId} value={strat.id || strat.documentId}>
-                                                {strat.name || strat.Name || 'Unnamed Strategy'}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
+                    {/* Take Profit */}
+                    <div className="w-32">
+                        <input
+                            type="number"
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-emerald-300 placeholder-gray-500 focus:ring-1 focus:ring-emerald-500 outline-none font-mono"
+                            placeholder="Chốt Lời (TP)..."
+                            value={takeProfit}
+                            onChange={(e) => setTakeProfit(e.target.value)}
+                            step="0.1"
+                        />
+                    </div>
 
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-400 mb-1.5 tracking-wide uppercase">Entry Price</label>
-                                    <input
-                                        type="number"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-blue-500 outline-none"
-                                        placeholder="API Price..."
-                                        value={entryPrice}
-                                        onChange={(e) => setEntryPrice(e.target.value)}
-                                        step="0.1"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-400 mb-1.5 tracking-wide uppercase">Volume</label>
-                                    <input
-                                        type="number"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-blue-500 outline-none"
-                                        placeholder="1"
-                                        value={volume}
-                                        onChange={(e) => setVolume(e.target.value)}
-                                        min="1"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-400 mb-1.5 tracking-wide uppercase">Stoploss</label>
-                                    <input
-                                        type="number"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-blue-500 outline-none"
-                                        placeholder="E.g. 1200.5"
-                                        value={stoploss}
-                                        onChange={(e) => setStoploss(e.target.value)}
-                                        step="0.1"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-400 mb-1.5 tracking-wide uppercase">Take Profit</label>
-                                    <input
-                                        type="number"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-blue-500 outline-none"
-                                        placeholder="E.g. 1250.0"
-                                        value={takeProfit}
-                                        onChange={(e) => setTakeProfit(e.target.value)}
-                                        step="0.1"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex gap-3 pt-3 mt-1">
-                                <button
-                                    onClick={() => handlePlaceOrder('Long')}
-                                    disabled={submitting || !strategy || !entryPrice}
-                                    className="flex-1 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold text-sm rounded-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition"
-                                >
-                                    <TrendingUp size={18} />
-                                    {submitting ? 'Placing...' : 'LONG'}
-                                </button>
-                                <button
-                                    onClick={() => handlePlaceOrder('Short')}
-                                    disabled={submitting || !strategy || !entryPrice}
-                                    className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white font-bold text-sm rounded-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition"
-                                >
-                                    <TrendingDown size={18} />
-                                    {submitting ? 'Placing...' : 'SHORT'}
-                                </button>
-                            </div>
-                        </div>
+                    {/* Action Buttons: LONG / SHORT */}
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handlePlaceOrder('Long')}
+                            disabled={submitting || !strategy || !entryPrice}
+                            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow-sm"
+                        >
+                            <TrendingUp size={14} />
+                            <span>{submitting ? 'Đang gửi...' : 'LONG'}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handlePlaceOrder('Short')}
+                            disabled={submitting || !strategy || !entryPrice}
+                            className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow-sm"
+                        >
+                            <TrendingDown size={14} />
+                            <span>{submitting ? 'Đang gửi...' : 'SHORT'}</span>
+                        </button>
                     </div>
                 </div>
+            </div>
+
+            {/* Top Row: Candle Chart (2/3) & Market Pressure Gauge (1/3) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 w-full">
+                {/* 2/3: Candle Chart Container */}
+                <div className="lg:col-span-2 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col h-[520px] min-h-[520px] w-full">
+                    <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/50 flex flex-wrap justify-between items-center shrink-0 gap-4">
+                        <div className="flex items-center gap-3 shrink-0">
+                            <h2 className="text-xl font-bold text-white">
+                                {activeSymbol || 'Select a Symbol'}
+                            </h2>
+                            <span className="text-sm text-gray-400 border-l border-gray-700 pl-3">Derivative Intraday</span>
+                            <button
+                                onClick={handleFetchPrice}
+                                disabled={loadingPrice}
+                                className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 disabled:opacity-50 transition shadow-sm ml-2 border border-gray-700"
+                                title="Refresh Price"
+                            >
+                                <RefreshCw size={14} className={loadingPrice ? "animate-spin" : ""} />
+                            </button>
+                        </div>
+
+                        {/* Realtime API Data Header */}
+                        {derivativeData && (() => {
+                            const info = Array.isArray(derivativeData) && derivativeData.length > 0
+                                ? derivativeData[0]
+                                : typeof derivativeData === 'object' ? derivativeData : null;
+
+                            if (!info) return null;
+
+                            return (
+                                <div className="flex items-center gap-5 sm:gap-8 flex-wrap">
+                                    {/* Price / Change */}
+                                    <div className="flex flex-col text-right">
+                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold mb-0.5">Price</span>
+                                        <div className="flex items-baseline gap-2 justify-end">
+                                            <span className="font-bold text-white text-base">{info.matchPrice || info.price || info.lastPrice || '0'}</span>
+                                            <span className={`text-xs font-medium ${Number(info.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {Number(info.change) > 0 ? '+' : ''}{Number(info.change || 0).toFixed(1)} ({Number(info.changePercent || 0).toFixed(2)}%)
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="h-8 w-px bg-gray-700 hidden sm:block"></div>
+
+                                    {/* Bid / Offer */}
+                                    <div className="flex gap-4 sm:gap-6">
+                                        <div className="flex flex-col w-20 sm:w-24">
+                                            <span className="text-[10px] text-green-400 uppercase tracking-wider font-semibold mb-0.5">Best Bid</span>
+                                            <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
+                                                <span className="font-bold text-white text-sm">{info.bidPrice01 || info.bestBidPrice || info.bidPrice1 || '0'}</span>
+                                                <span className="text-[10px] text-gray-500">x{info.bidQtty01 || info.bestBidQtty || info.bidVol1 || '0'}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col w-20 sm:w-24">
+                                            <span className="text-[10px] text-red-400 uppercase tracking-wider font-semibold mb-0.5">Best Offer</span>
+                                            <div className="flex items-baseline gap-1.5 justify-start tabular-nums">
+                                                <span className="font-bold text-white text-sm">{info.offerPrice01 || info.bestOfferPrice || info.askPrice1 || '0'}</span>
+                                                <span className="text-[10px] text-gray-500">x{info.offerQtty01 || info.bestOfferQtty || info.askVol1 || '0'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                    </div>
+                    <div className="flex-1 min-h-0 relative">
+                        {activeSymbol ? (
+                            <RealtimeChart
+                                symbol={activeSymbol}
+                                jwtToken={jwtToken}
+                                setShowOtpModal={setShowOtpModal}
+                                strategyRules={strategyRules}
+                                wsTick={wsTick}
+                                wsStatus={wsStatus}
+                            />
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-gray-500 italic text-sm absolute inset-0">
+                                Chart will appear when symbol is loaded
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* 1/3: Market Pressure Gauge Container */}
+                <div className="lg:col-span-1 flex flex-col h-[520px] min-h-[520px] w-full">
+                    <MarketPressureGauge defaultTicker="41I1G9000" className="h-full w-full" />
+                </div>
+            </div>
+
+            {/* Intraday BSA Panel & Intraday Bid-Ask Panel (Same Row) */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 w-full">
+                <IntradayBSAPanel
+                    defaultTicker="41I1G9000"
+                    className="min-h-[650px] w-full"
+                />
+                <IntradayBidAskPanel
+                    defaultTicker="41I1G9000"
+                    className="min-h-[650px] w-full"
+                />
             </div>
 
             <OtpModal

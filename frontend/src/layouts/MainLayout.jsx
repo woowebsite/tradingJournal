@@ -5,11 +5,14 @@ import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
 import TradeModal from '../components/TradeModal';
 import { useAccount } from '../context/AccountContext';
+import { useSidebar } from '../context/SidebarContext';
 import { fetchTrades, saveTrade } from '../features/tradeSlice';
+import clsx from 'clsx';
 
 const MainLayout = () => {
     const dispatch = useDispatch();
     const { selectedAccount } = useAccount();
+    const { isCollapsed } = useSidebar();
     const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
 
     const handleOpenNewTrade = () => {
@@ -40,7 +43,10 @@ const MainLayout = () => {
         <div className="flex bg-gray-900 min-h-screen text-gray-100">
             <Sidebar />
             <Topbar onNewTrade={handleOpenNewTrade} />
-            <div className="flex-1 mt-16 ml-64 p-8 overflow-y-auto h-[calc(100vh-4rem)]">
+            <div className={clsx(
+                'flex-1 mt-16 p-6 sm:p-8 overflow-y-auto h-[calc(100vh-4rem)] transition-all duration-300 ease-in-out',
+                isCollapsed ? 'ml-16' : 'ml-64'
+            )}>
                 <Outlet />
             </div>
             <TradeModal
