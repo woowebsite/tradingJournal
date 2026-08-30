@@ -105,6 +105,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         const currentRules = strategyRulesRef.current;
         if (!currentRules || currentRules.length === 0) {
             try { createSeriesMarkers(seriesRef.current, []); } catch (e) { }
+            lastMarkersStrRef.current = '';
             return;
         }
 
@@ -122,18 +123,26 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         const generatedSignals = [];
 
         currentRules.forEach(rule => {
-            if (!rule.Rule) return;
+            let ruleDefinition = rule.Rule || rule.rule;
+            if (typeof ruleDefinition === 'string') {
+                try { ruleDefinition = JSON.parse(ruleDefinition); } catch (e) { }
+            }
+            if (!ruleDefinition) return;
 
-            // Loop through history to find the first match (most recent interaction)
+            // Scan through candles to identify match signals
             for (let i = 0; i < descHistory.length; i++) {
                 try {
-                    const isMatch = evaluateRule(descHistory, rule.Rule, i);
+                    const isMatch = evaluateRule(descHistory, ruleDefinition, i);
                     if (isMatch) {
-                        generatedSignals.push({
-                            time: descHistory[i].time,
-                            rule: rule
-                        });
-                        break; // Stop after finding the most recent match for this rule
+                        // Check if previous candle in time (i + 1 in DESC array) also matched
+                        const prevMatch = (i + 1 < descHistory.length) ? evaluateRule(descHistory, ruleDefinition, i + 1) : false;
+                        // Trigger on signal onset (crossover/change) or single isolated signal
+                        if (!prevMatch || i === 0) {
+                            generatedSignals.push({
+                                time: descHistory[i].time,
+                                rule: rule
+                            });
+                        }
                     }
                 } catch (e) {
                     // Ignore errors for individual rule evaluations
@@ -143,22 +152,23 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
 
         // Map to lightweight-charts markers
         const markers = generatedSignals.map(sig => {
-            const type = sig.rule.Type ? sig.rule.Type.toLowerCase() : 'unknown';
+            const rawType = (sig.rule.Type || sig.rule.type || '').toLowerCase();
             const colors = {
-                entry: '#60a5fa', // blue
-                takeprofit: '#4ade80', // green
-                stoploss: '#f87171', // red
+                entry: '#38bdf8', // bright sky blue
+                takeprofit: '#34d399', // bright emerald green
+                stoploss: '#f87171', // bright red
                 exit: '#fb923c', // orange
+                rule: '#a78bfa', // purple
                 unknown: '#9ca3af'
             };
-            const isEntry = type === 'entry';
+            const isEntry = rawType === 'entry';
             return {
                 time: sig.time,
                 position: isEntry ? 'belowBar' : 'aboveBar',
-                color: colors[type] || colors.unknown,
+                color: colors[rawType] || colors.unknown,
                 shape: isEntry ? 'arrowUp' : 'arrowDown',
-                text: sig.rule.Name || type,
-                size: 1
+                text: sig.rule.Name || sig.rule.name || rawType.toUpperCase(),
+                size: 2
             };
         });
 
@@ -166,7 +176,10 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         const uniqueTimes = new Map();
         markers.forEach(m => {
             if (uniqueTimes.has(m.time)) {
-                uniqueTimes.get(m.time).text += ', ' + m.text;
+                const existing = uniqueTimes.get(m.time);
+                if (!existing.text.includes(m.text)) {
+                    existing.text += ', ' + m.text;
+                }
             } else {
                 uniqueTimes.set(m.time, { ...m });
             }
@@ -223,6 +236,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                     }
                     current = {
                         time: timeStamp,
+                        date: new Date(timeStamp * 1000).toISOString(),
                         open: current ? current.close : price,
                         high: price,
                         low: price,
@@ -314,6 +328,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                             const date = new Date(item.tradingDate);
                             return {
                                 time: Math.floor(date.getTime() / 1000),
+                                date: item.tradingDate,
                                 open: Number(item.open),
                                 high: Number(item.high),
                                 low: Number(item.low),

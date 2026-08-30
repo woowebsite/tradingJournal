@@ -86,8 +86,10 @@ const getValue = (candle, field) => {
 };
 
 const getCandleDate = (candle) => {
-    const rawDate = candle?.date || candle?.createdAt || candle?.attributes?.date || candle?.attributes?.createdAt;
-    const date = new Date(rawDate);
+    if (!candle) return null;
+    const rawDate = candle.date || candle.createdAt || candle.attributes?.date || candle.attributes?.createdAt || (typeof candle.time === 'number' ? candle.time * 1000 : candle.time);
+    if (!rawDate) return null;
+    const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
     return Number.isNaN(date.getTime()) ? null : date;
 };
 

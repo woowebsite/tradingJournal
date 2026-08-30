@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchStrategies } from '../features/strategySlice';
+import { fetchRules } from '../features/ruleSlice';
 import { getTCBSToken, getTCBSDerivatives, placeTCBSConditionOrder } from '../services/tcbsJournal';
 import RealtimeChart from '../components/RealtimeChart';
 import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key } from 'lucide-react';
@@ -16,6 +17,7 @@ import IntradayBidAskRatioMiniChart from '../components/IntradayBidAskRatioMiniC
 const Derivation = () => {
     const dispatch = useDispatch();
     const { items: strategies } = useSelector(state => state.strategies);
+    const { items: rules } = useSelector(state => state.rules);
     const { selectedAccount } = useAccount();
 
     const [entryPrice, setEntryPrice] = useState('');
@@ -66,19 +68,67 @@ const Derivation = () => {
 
     useEffect(() => {
         dispatch(fetchStrategies());
+        dispatch(fetchRules());
     }, [dispatch]);
 
-    // Derive rules directly from the selected strategy for Derivatives
+    // Derive full rule objects directly from the selected strategy for Derivatives
     const strategyRules = React.useMemo(() => {
-        if (!strategy || !strategies) return [];
+        if (!strategy || !strategies || strategies.length === 0) return [];
         const selectedStrat = strategies.find(s => (s.id || s.documentId)?.toString() === strategy.toString());
-        if (!selectedStrat || !selectedStrat.rules) return [];
+        if (!selectedStrat) return [];
 
-        return selectedStrat.rules.filter(r => {
-            const type = r.Type?.toLowerCase();
-            return type === 'entry' || type === 'stoploss' || type === 'takeprofit';
+        // Build lookup map from Redux rules items to ensure full rule details exist
+        const ruleMap = new Map();
+        (rules || []).forEach(r => {
+            if (r.id) ruleMap.set(r.id.toString(), r);
+            if (r.documentId) ruleMap.set(r.documentId.toString(), r);
         });
-    }, [strategy, strategies]);
+
+        const ruleCategories = [
+            { field: 'entryRules', defaultType: 'entry' },
+            { field: 'takeProfitRules', defaultType: 'takeprofit' },
+            { field: 'stoplossRules', defaultType: 'stoploss' },
+            { field: 'exitRules', defaultType: 'exit' },
+            { field: 'rules', defaultType: 'entry' }
+        ];
+
+        const extracted = [];
+        const seenIds = new Set();
+
+        ruleCategories.forEach(({ field, defaultType }) => {
+            const list = selectedStrat[field];
+            if (!Array.isArray(list)) return;
+
+            list.forEach(item => {
+                const id = (item?.documentId || item?.id || item)?.toString();
+                if (!id || seenIds.has(id)) return;
+                seenIds.add(id);
+
+                const baseRule = ruleMap.get(id) || (typeof item === 'object' ? item : null);
+                if (!baseRule) return;
+
+                let parsedRule = baseRule.Rule || baseRule.rule;
+                if (typeof parsedRule === 'string') {
+                    try {
+                        parsedRule = JSON.parse(parsedRule);
+                    } catch (e) {
+                        console.warn('Failed to parse rule JSON:', e);
+                    }
+                }
+
+                if (parsedRule) {
+                    extracted.push({
+                        ...baseRule,
+                        Rule: parsedRule,
+                        Type: (baseRule.Type || baseRule.type || defaultType).toLowerCase(),
+                        Name: baseRule.Name || baseRule.name || 'Signal'
+                    });
+                }
+            });
+        });
+
+        return extracted;
+    }, [strategy, strategies, rules]);
 
     useEffect(() => {
         if (jwtToken && !derivativeData) {
