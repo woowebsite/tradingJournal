@@ -103,13 +103,17 @@ export const calculateSupertrend = (period, multiplier, data) => {
     }));
 };
 
-export const drawSupertrend = (chart, LineSeries, supertrendData) => {
+export const drawSupertrend = (chart, LineSeries, supertrendData, options = {}) => {
     const segments = [];
     let currentSegment = null;
 
     for (let i = 0; i < supertrendData.length; i++) {
         const item = supertrendData[i];
-        const formattedTime = item.time.split('T')[0];
+        if (!item || item.value === undefined || item.value === null) continue;
+
+        const formattedTime = typeof item.time === 'number'
+            ? item.time
+            : (typeof item.time === 'string' && item.time.includes('T') ? item.time.split('T')[0] : item.time);
 
         if (!currentSegment) {
             currentSegment = {
@@ -133,15 +137,21 @@ export const drawSupertrend = (chart, LineSeries, supertrendData) => {
         segments.push(currentSegment);
     }
 
+    const createdSeries = [];
     segments.forEach(segment => {
         const color = segment.direction === 1 ? '#10b981' : '#ef4444'; // Emerald for Up, Red for Down
-        chart.addSeries(LineSeries, {
+        const series = chart.addSeries(LineSeries, {
             color: color,
-            lineWidth: 2,
+            lineWidth: options.lineWidth || 2,
             crosshairMarkerVisible: false,
             priceLineVisible: false,
             lastValueVisible: false,
-        }).setData(segment.data);
+            ...options
+        });
+        series.setData(segment.data);
+        createdSeries.push(series);
     });
+
+    return createdSeries;
 };
 

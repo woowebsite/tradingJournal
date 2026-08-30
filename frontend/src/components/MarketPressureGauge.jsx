@@ -256,33 +256,6 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
                             strokeLinecap="round"
                         />
 
-                        {/* Labels: Lực Bán (Left) & Lực Mua (Right) */}
-                        <text
-                            x="20"
-                            y="110"
-                            textAnchor="middle"
-                            fill="#FF4D4D"
-                            fontSize="18"
-                            fontWeight="bold"
-                            fontFamily="system-ui, sans-serif"
-                        >
-                            <tspan x="22" dy="0">Lực</tspan>
-                            <tspan x="22" dy="24">bán</tspan>
-                        </text>
-
-                        <text
-                            x="278"
-                            y="110"
-                            textAnchor="middle"
-                            fill="#00E676"
-                            fontSize="18"
-                            fontWeight="bold"
-                            fontFamily="system-ui, sans-serif"
-                        >
-                            <tspan x="278" dy="0">Lực</tspan>
-                            <tspan x="278" dy="24">mua</tspan>
-                        </text>
-
                         {/* Animated Pointer / Needle */}
                         <g
                             style={{

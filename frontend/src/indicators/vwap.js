@@ -5,6 +5,9 @@
 const parseToUTCDate = (dateStr) => {
     if (!dateStr) return null;
     if (dateStr instanceof Date) return dateStr;
+    if (typeof dateStr === 'number') {
+        return new Date(dateStr > 1e11 ? dateStr : dateStr * 1000);
+    }
 
     const str = String(dateStr).trim();
     const isoMatch = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[T ](\d{1,2}):(\d{1,2}):(\d{1,2}))?/);
@@ -137,8 +140,14 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
 
     const mainSeries = chart.addSeries(LineSeries, defaultOptions);
     
+    const formatTime = (time) => {
+        if (typeof time === 'number') return time;
+        if (typeof time === 'string' && time.includes('T')) return time.split('T')[0];
+        return time;
+    };
+
     const formattedData = vwapData.map(item => ({
-        time: item.time.split('T')[0],
+        time: formatTime(item.time),
         value: item.value
     }));
 
@@ -146,11 +155,11 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
 
     const createdSeries = [mainSeries];
 
-    // Config for standard deviation bands
+    // Config for standard deviation bands (±1 SD, ±2 SD, ±3 SD)
     const bandConfigs = [
-        { key: '1', color: 'rgba(59, 130, 246, 0.25)', title: 'SD 1' }, // light blue
-        { key: '2', color: 'rgba(245, 158, 11, 0.25)', title: 'SD 2' }, // orange
-        { key: '3', color: 'rgba(239, 68, 68, 0.25)', title: 'SD 3' },  // red
+        { key: '1', color: 'rgba(56, 189, 248, 0.4)', title: 'SD 1' }, // cyan / sky blue dashed
+        { key: '2', color: 'rgba(251, 191, 36, 0.45)', title: 'SD 2' }, // amber dashed
+        { key: '3', color: 'rgba(244, 63, 94, 0.5)', title: 'SD 3' },  // rose dashed
     ];
 
     if (options.showBands !== false) {
@@ -169,7 +178,7 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
                     lastValueVisible: false,
                 });
                 upperSeries.setData(vwapData.map(item => ({
-                    time: item.time.split('T')[0],
+                    time: formatTime(item.time),
                     value: item[upperKey]
                 })));
                 createdSeries.push(upperSeries);
@@ -184,7 +193,7 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
                     lastValueVisible: false,
                 });
                 lowerSeries.setData(vwapData.map(item => ({
-                    time: item.time.split('T')[0],
+                    time: formatTime(item.time),
                     value: item[lowerKey]
                 })));
                 createdSeries.push(lowerSeries);

@@ -126,7 +126,7 @@ const BSATable = React.memo(({ bsaData, loading, error }) => {
     );
 });
 
-const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '' }) => {
+const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '', onDataChange = null }) => {
     const [ticker, setTicker] = useState(defaultTicker);
     const [timeWindow, setTimeWindow] = useState('5');
     const [tWindow, setTWindow] = useState('60m');
@@ -147,13 +147,14 @@ const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '' }) => {
             // Sort by timestamp or time descending for latest on top (table view)
             const sorted = [...list].sort((a, b) => (Number(b.s) || 0) - (Number(a.s) || 0));
             setBsaData(sorted);
+            if (onDataChange) onDataChange(sorted);
         } catch (err) {
             console.error('Failed to fetch Intraday BSA:', err);
             setError(err.message || 'Không thể tải dữ liệu BSA');
         } finally {
             setLoading(false);
         }
-    }, [ticker, timeWindow, tWindow, type]);
+    }, [ticker, timeWindow, tWindow, type, onDataChange]);
 
     useEffect(() => {
         fetchData();
@@ -290,9 +291,29 @@ const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '' }) => {
             yMax = Math.min(100, Math.ceil(yMax));
         }
 
-        const totalSpan = yMax - yMin;
-        let baselineRatio = totalSpan > 0 ? (yMax - baseline) / totalSpan : 0.5;
-        baselineRatio = Math.max(0.001, Math.min(0.999, baselineRatio));
+        // Calculate exact color stops for the gradient based on data bounding box (maxVal to minVal)
+        let colorStops = [];
+        if (minVal >= baseline) {
+            colorStops = [
+                { offset: 0, color: COLOR_BUY },
+                { offset: 1, color: COLOR_BUY }
+            ];
+        } else if (maxVal <= baseline) {
+            colorStops = [
+                { offset: 0, color: COLOR_SELL },
+                { offset: 1, color: COLOR_SELL }
+            ];
+        } else {
+            const dataSpan = maxVal - minVal;
+            const baselineRatio = dataSpan > 0 ? (maxVal - baseline) / dataSpan : 0.5;
+            const clampedRatio = Math.max(0.001, Math.min(0.999, baselineRatio));
+            colorStops = [
+                { offset: 0, color: COLOR_BUY },
+                { offset: Math.max(0, clampedRatio - 0.001), color: COLOR_BUY },
+                { offset: Math.min(1, clampedRatio + 0.001), color: COLOR_SELL },
+                { offset: 1, color: COLOR_SELL }
+            ];
+        }
 
         return {
             backgroundColor: '#111827',
@@ -433,12 +454,7 @@ const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '' }) => {
                             y: 0,
                             x2: 0,
                             y2: 1,
-                            colorStops: [
-                                { offset: 0, color: COLOR_BUY },
-                                { offset: Math.max(0, baselineRatio - 0.001), color: COLOR_BUY },
-                                { offset: Math.min(1, baselineRatio + 0.001), color: COLOR_SELL },
-                                { offset: 1, color: COLOR_SELL }
-                            ],
+                            colorStops: colorStops,
                             global: false
                         },
                         shadowColor: 'rgba(0, 0, 0, 0.6)',
@@ -489,7 +505,7 @@ const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '' }) => {
                                 Cung Cầu Intraday (BSA)
                             </span>
                         </div>
-                        <p className="text-[11px] text-gray-400">Khớp lệnh Mua / Bán chủ động & Độ lệch mất cân bằng cung cầu</p>
+                        <p className="text-[11px] text-gray-400">Khớp lệnh Mua / Bán chủ động</p>
                     </div>
                 </div>
 

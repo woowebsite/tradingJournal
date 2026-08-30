@@ -104,5 +104,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/news-analyses/ai/intraday-decision',
+      handler: 'news-analysis.intradayDecision',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

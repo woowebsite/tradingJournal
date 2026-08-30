@@ -142,7 +142,7 @@ const BidAskTable = React.memo(({ bidAskData, loading, error }) => {
     );
 });
 
-const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '' }) => {
+const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '', onDataChange = null }) => {
     const [ticker, setTicker] = useState(defaultTicker);
     const [mode, setMode] = useState('baAll');
     const [bidAskData, setBidAskData] = useState([]);
@@ -254,13 +254,17 @@ const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '' }) =>
             });
 
             setBidAskData(mergedList);
+            if (onDataChange) {
+                // Pass latest-first list for convenient consumption
+                onDataChange([...mergedList].reverse());
+            }
         } catch (err) {
             console.error('Failed to fetch Intraday Bid-Ask:', err);
             setError(err.message || 'Không thể tải dữ liệu Bid-Ask');
         } finally {
             setLoading(false);
         }
-    }, [ticker, mode]);
+    }, [ticker, mode, onDataChange]);
 
     useEffect(() => {
         fetchData();
@@ -357,9 +361,29 @@ const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '' }) =>
         let yMin = Math.max(0, Math.min(minVal, baseline) - padding);
         let yMax = Math.max(maxVal, baseline) + padding;
 
-        const totalSpan = yMax - yMin;
-        let baselineRatio = totalSpan > 0 ? (yMax - baseline) / totalSpan : 0.5;
-        baselineRatio = Math.max(0.001, Math.min(0.999, baselineRatio));
+        // Calculate exact color stops for the gradient based on data bounding box (maxVal to minVal)
+        let colorStops = [];
+        if (minVal >= baseline) {
+            colorStops = [
+                { offset: 0, color: COLOR_BUY },
+                { offset: 1, color: COLOR_BUY }
+            ];
+        } else if (maxVal <= baseline) {
+            colorStops = [
+                { offset: 0, color: COLOR_SELL },
+                { offset: 1, color: COLOR_SELL }
+            ];
+        } else {
+            const dataSpan = maxVal - minVal;
+            const baselineRatio = dataSpan > 0 ? (maxVal - baseline) / dataSpan : 0.5;
+            const clampedRatio = Math.max(0.001, Math.min(0.999, baselineRatio));
+            colorStops = [
+                { offset: 0, color: COLOR_BUY },
+                { offset: Math.max(0, clampedRatio - 0.001), color: COLOR_BUY },
+                { offset: Math.min(1, clampedRatio + 0.001), color: COLOR_SELL },
+                { offset: 1, color: COLOR_SELL }
+            ];
+        }
 
         return {
             backgroundColor: '#111827',
@@ -495,12 +519,7 @@ const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '' }) =>
                             y: 0,
                             x2: 0,
                             y2: 1,
-                            colorStops: [
-                                { offset: 0, color: COLOR_BUY },
-                                { offset: Math.max(0, baselineRatio - 0.001), color: COLOR_BUY },
-                                { offset: Math.min(1, baselineRatio + 0.001), color: COLOR_SELL },
-                                { offset: 1, color: COLOR_SELL }
-                            ],
+                            colorStops: colorStops,
                             global: false
                         },
                         shadowColor: 'rgba(0, 0, 0, 0.6)',

@@ -2203,4 +2203,172 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
       },
     };
   },
+  async intradayDecision(ctx) {
+    const requestedProvider = normalizeText(String(ctx.request.body?.provider || 'gemini')).toLowerCase();
+    const requestedModel = String(ctx.request.body?.model || '').trim();
+    const prompt = String(ctx.request.body?.prompt || '').trim();
+    const systemPrompt = String(ctx.request.body?.systemPrompt || '').trim();
+    const customApiKey = String(ctx.request.body?.apiKey || '').trim();
+    const bsaData = Array.isArray(ctx.request.body?.bsaData) ? ctx.request.body.bsaData : [];
+    const bidAskData = Array.isArray(ctx.request.body?.bidAskData) ? ctx.request.body.bidAskData : [];
+    const ticker = String(ctx.request.body?.ticker || '41I1G9000');
+    const dataScope = Number(ctx.request.body?.dataScope) || 30;
+
+    const providerConfig = resolveAIProviderConfig(requestedProvider, requestedModel);
+    if (customApiKey) {
+      providerConfig.apiKey = customApiKey;
+    }
+    const { endpoint, apiKey, model } = providerConfig;
+
+    if (providerConfig.requiresKey && !apiKey) {
+      ctx.throw(400, providerConfig.missingKeyMessage || 'Vui lòng cung cấp API Key hợp lệ.');
+    }
+    if (!endpoint) {
+      ctx.throw(400, providerConfig.missingApiMessage || 'Thiếu cấu hình AI endpoint.');
+    }
+
+    // Build rich context from BSA and Bid/Ask tables
+    const recentBsa = bsaData.slice(0, dataScope > 0 ? dataScope : 30);
+    const recentBidAsk = bidAskData.slice(0, dataScope > 0 ? dataScope : 30);
+
+    let totalBu = 0;
+    let totalBms = 0;
+    let totalSd = 0;
+    let totalSms = 0;
+    recentBsa.forEach((item: any) => {
+      totalBu += Number(item.bu) || 0;
+      totalBms += Number(item.bms) || 0;
+      totalSd += Number(item.sd) || 0;
+      totalSms += Number(item.sms) || 0;
+    });
+    const netVol = totalBms - totalSms;
+    const totalBsaVol = totalBms + totalSms;
+    const buyPct = totalBsaVol > 0 ? ((totalBms / totalBsaVol) * 100).toFixed(1) : '50.0';
+    const sellPct = totalBsaVol > 0 ? ((totalSms / totalBsaVol) * 100).toFixed(1) : '50.0';
+    const avgBsr = totalSms > 0 ? (totalBms / totalSms).toFixed(3) : '1.000';
+
+    const latestBidAsk: any = recentBidAsk[0] || {};
+    const latestBs = Number(latestBidAsk.bs ?? latestBidAsk.bv) || 0;
+    const latestOa = Number(latestBidAsk.oa ?? latestBidAsk.av) || 0;
+    const latestObp = typeof latestBidAsk.obp === 'number' ? (latestBidAsk.obp * 100).toFixed(1) : '50.0';
+    const latestOsp = typeof latestBidAsk.osp === 'number' ? (latestBidAsk.osp * 100).toFixed(1) : '50.0';
+    const latestAobp = typeof latestBidAsk.aobp === 'number' ? (latestBidAsk.aobp * 100).toFixed(1) : '50.0';
+    const latestSp = typeof latestBidAsk.sp === 'number' ? latestBidAsk.sp.toFixed(2) : '0.00';
+    const latestAvsp = typeof latestBidAsk.avsp === 'number' ? latestBidAsk.avsp.toFixed(2) : '0.00';
+
+    const bsaTableStr = recentBsa.slice(0, 20).map((r: any) => {
+      const t = r.t || '--:--';
+      const bms = Number(r.bms) || 0;
+      const sms = Number(r.sms) || 0;
+      const bup = typeof r.bup === 'number' ? (r.bup * 100).toFixed(1) : '0';
+      const sdp = typeof r.sdp === 'number' ? (r.sdp * 100).toFixed(1) : '0';
+      const bsr = typeof r.bsr === 'number' ? r.bsr.toFixed(3) : (sms > 0 ? (bms / sms).toFixed(3) : '1.0');
+      const net = bms - sms;
+      return `[${t}] Mua CĐ: ${bms.toLocaleString()} (${bup}%), Bán CĐ: ${sms.toLocaleString()} (${sdp}%), Net: ${net > 0 ? '+' : ''}${net.toLocaleString()}, BSR: ${bsr}`;
+    }).join('\n');
+
+    const bidAskTableStr = recentBidAsk.slice(0, 20).map((r: any) => {
+      const t = r.t || '--:--';
+      const bs = Number(r.bs ?? r.bv) || 0;
+      const oa = Number(r.oa ?? r.av) || 0;
+      const obp = typeof r.obp === 'number' ? (r.obp * 100).toFixed(1) : '50.0';
+      const osp = typeof r.osp === 'number' ? (r.osp * 100).toFixed(1) : '50.0';
+      const sp = typeof r.sp === 'number' ? r.sp.toFixed(2) : '0.00';
+      return `[${t}] Dư Mua: ${bs.toLocaleString()} (${obp}%), Dư Bán: ${oa.toLocaleString()} (${osp}%), Chênh lệch: ${(bs - oa).toLocaleString()}, Spread: ${sp}`;
+    }).join('\n');
+
+    const contextText = `=== DỮ LIỆU INTRADAY TỪ 2 BẢNG (${ticker}) ===
+1. Khớp Lệnh Chủ Động (BSA - ${recentBsa.length} dòng gần nhất):
+- Tổng KL Mua Chủ Động: ${totalBms.toLocaleString()} CP (${buyPct}%) / ${totalBu} lệnh
+- Tổng KL Bán Chủ Động: ${totalSms.toLocaleString()} CP (${sellPct}%) / ${totalSd} lệnh
+- Khối Lượng Ròng (Net Vol): ${netVol > 0 ? '+' : ''}${netVol.toLocaleString()} CP
+- Tỷ Lệ BSR TB (Mua/Bán): ${avgBsr}
+
+2. Sổ Lệnh Dư Mua / Dư Bán (Bid/Ask hiện tại):
+- Dư Mua (bs): ${latestBs.toLocaleString()} CP (${latestObp}%)
+- Dư Bán (oa): ${latestOa.toLocaleString()} CP (${latestOsp}%)
+- Trung Bình 5 Ngày Dư Mua (aobp): ${latestAobp}%
+- Spread Giá hiện tại: ${latestSp} (TB: ${latestAvsp})
+
+3. Chi tiết các mốc thời gian gần nhất bảng Khớp Lệnh (BSA):
+${bsaTableStr || 'Chưa có dữ liệu BSA'}
+
+4. Chi tiết các mốc thời gian gần nhất bảng Sổ Lệnh (Bid/Ask):
+${bidAskTableStr || 'Chưa có dữ liệu Bid/Ask'}`;
+
+    const effectiveSystemPrompt = systemPrompt || `Bạn là chuyên gia giao dịch phái sinh VN30F chuyên nghiệp hàng đầu (Order Flow & Sổ Lệnh Cung Cầu Intraday). Bạn phân tích kết hợp giữa Dòng Tiền Khớp Lệnh Chủ Động (BSA) và Áp Lực Chờ Khớp Sổ Lệnh (Bid/Ask) để phát hiện sớm hành vi gom/xả của tay to (Smart Money) và đưa ra quyết định giao dịch rõ ràng (LONG, SHORT, hoặc ĐỨNG NGOÀI/THEO DÕI) kèm mức giá tham khảo, Stoploss, Takeprofit và lý do kỹ thuật chi tiết.`;
+
+    const userMessageContent = `${prompt ? `YÊU CẦU CỤ THỂ CỦA TRADER:\n${prompt}\n\n` : ''}${contextText}\n\nHãy phân tích toàn diện và đưa ra quyết định giao dịch chi tiết rõ ràng, có cấu trúc dễ đọc bằng tiếng Việt.`;
+
+    const isGemini = providerConfig.provider === 'gemini';
+    const isGemma = providerConfig.provider === 'gemma';
+
+    const payload = isGemini
+      ? {
+          contents: [{
+            role: 'user',
+            parts: [{ text: `${effectiveSystemPrompt}\n\n${userMessageContent}` }]
+          }],
+          generationConfig: { temperature: 0.2 }
+        }
+      : isGemma
+        ? {
+            model,
+            prompt: userMessageContent,
+            system: effectiveSystemPrompt,
+            stream: false,
+            options: { temperature: 0.2 }
+          }
+        : {
+            model,
+            messages: [
+              { role: 'system', content: effectiveSystemPrompt },
+              { role: 'user', content: userMessageContent }
+            ],
+            temperature: 0.2
+          };
+
+    const response = await axios.post(
+      isGemini
+        ? `${endpoint}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+        : isGemma
+          ? endpoint
+          : `${endpoint}/chat/completions`,
+      payload,
+      {
+        timeout: 60000,
+        headers: isGemini
+          ? { Accept: 'application/json', 'Content-Type': 'application/json' }
+          : isGemma
+            ? { Accept: 'application/json', 'Content-Type': 'application/json' }
+            : { Authorization: `Bearer ${apiKey}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+        validateStatus: () => true,
+      }
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      strapi.log.error(`${providerConfig.provider} intraday decision failed: HTTP ${response.status}`);
+      ctx.throw(
+        response.status,
+        response.data?.error?.message || response.data?.error || response.data?.message || `${providerConfig.provider} request failed.`
+      );
+    }
+
+    ctx.body = {
+      data: {
+        provider: providerConfig.provider,
+        model,
+        analysis: response.data,
+        summary: {
+          ticker,
+          netVol,
+          avgBsr,
+          latestBs,
+          latestOa,
+          latestObp,
+          latestOsp
+        }
+      },
+    };
+  }
 }));
