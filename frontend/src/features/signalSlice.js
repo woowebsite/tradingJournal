@@ -317,38 +317,59 @@ export const scanSignals = createAsyncThunk(
 
                     if (!history || history.length === 0) return;
 
+                    // Optimization: Pre-fetch all existing signals for this symbol in 1 single query
+                    // instead of making a GET request for every matching candle in the loop.
+                    const existingSignalKeys = new Set();
+
+                    // 1. Seed from Redux state if available
+                    (state.signals?.items || []).forEach(sig => {
+                        const sId = sig.symbol?.documentId || sig.symbol?.id;
+                        if (sId && sId.toString() === symId.toString()) {
+                            const d = (sig.date || '').slice(0, 10);
+                            (sig.rules || []).forEach(r => {
+                                const rId = (r.documentId || r.id || r)?.toString();
+                                if (rId) existingSignalKeys.add(`${d}_${rId}`);
+                            });
+                        }
+                    });
+
+                    // 2. Query backend once for this symbol to ensure completeness
+                    try {
+                        const symFilter = typeof symId === 'string'
+                            ? `filters[symbol][documentId][$eq]=${encodeURIComponent(symId)}`
+                            : `filters[symbol][id][$eq]=${encodeURIComponent(symId)}`;
+                        const existingRes = await api.get(`/signals?${symFilter}&pagination[limit]=-1&populate[rules][fields][0]=id&populate[rules][fields][1]=documentId`);
+                        (existingRes.data?.data || []).forEach(sig => {
+                            const d = (sig.date || '').slice(0, 10);
+                            (sig.rules || []).forEach(r => {
+                                const rId = (r.documentId || r.id || r)?.toString();
+                                if (rId) existingSignalKeys.add(`${d}_${rId}`);
+                            });
+                        });
+                    } catch (err) {
+                        console.warn(`Failed to pre-fetch existing signals for ${symbol.Name}:`, err);
+                    }
+
                     for (let i = history.length - 1; i >= 0; i--) {
                         // Process each candle chronologically so demo trades open and close in chart order.
                         for (const rule of rulesToScan) {
                             const isMatch = evaluateRule(history, rule.Rule, i);
 
                             if (isMatch) {
-                                // Uniqueness Check: Prevent duplicate signal for same Symbol + Date + Rule
-                                const checkDate = history[i].date;
-                                const ruleId = rule.documentId || rule.id;
-                                const isAllowedSignal = await canCreateSignal({ symbol, symId, rule, historyItem: history[i] });
-                                if (!isAllowedSignal) continue;
+                                const checkDate = (history[i].date || '').slice(0, 10);
+                                const ruleId = (rule.documentId || rule.id)?.toString();
+                                const signalKey = `${checkDate}_${ruleId}`;
 
-                                let checkUrl = `/signals?filters[date][$eq]=${checkDate}`;
-                                if (typeof symId === 'string') {
-                                    checkUrl += `&filters[symbol][documentId][$eq]=${symId}`;
-                                } else {
-                                    checkUrl += `&filters[symbol][id][$eq]=${symId}`;
-                                }
-                                if (typeof ruleId === 'string') {
-                                    checkUrl += `&filters[rules][documentId][$eq]=${ruleId}`;
-                                } else {
-                                    checkUrl += `&filters[rules][id][$eq]=${ruleId}`;
-                                }
-
-                                const existing = await api.get(checkUrl);
-                                if (existing.data.data && existing.data.data.length > 0) {
-                                    console.log(`Signal already exists for ${symbol.Name} on ${checkDate} with ${rule.Name}. Skipping.`);
+                                // Fast O(1) in-memory duplicate check - zero network calls
+                                if (existingSignalKeys.has(signalKey)) {
                                     if (syncDemoTrades) {
                                         await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
                                     }
                                     continue;
                                 }
+
+                                const isAllowedSignal = await canCreateSignal({ symbol, symId, rule, historyItem: history[i] });
+                                if (!isAllowedSignal) continue;
 
                                 const payload = {
                                     data: {
@@ -363,6 +384,7 @@ export const scanSignals = createAsyncThunk(
                                 console.log(`Match found for symbol ${symbol.Name} with ${rule.Name} at index ${i} (Date: ${history[i].date})`);
 
                                 await api.post('/signals', payload);
+                                existingSignalKeys.add(signalKey);
                                 if (syncDemoTrades) {
                                     await syncDemoTradeDetailForSignal({ symbol, symId, rule, historyItem: history[i] });
                                 }
@@ -377,7 +399,10 @@ export const scanSignals = createAsyncThunk(
 
             await Promise.all(scanPromises);
 
-            dispatch(fetchSignals());
+            // Only refetch signals if new signals were actually created
+            if (matchCount > 0) {
+                dispatch(fetchSignals());
+            }
             return matchCount;
         } catch (error) {
             return rejectWithValue(error.message);

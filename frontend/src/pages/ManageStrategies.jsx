@@ -14,9 +14,178 @@ const RULE_GROUPS = [
     { key: 'exitRules', label: 'Exit Rules', labelClassName: 'text-yellow-400' }
 ];
 
-const getRuleId = (rule) => rule?.documentId || rule?.id;
+const getRuleId = (rule) => {
+    if (!rule) return null;
+    if (typeof rule === 'object') return rule.documentId || rule.id || null;
+    return rule;
+};
 
-export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules, availableWebhooks }) => {
+const findAvailableRule = (id, availableRules) => {
+    if (!id || !availableRules) return null;
+    return availableRules.find(r => r.documentId === id || r.id === id || String(r.id) === String(id) || String(r.documentId) === String(id));
+};
+
+// Helper for badges
+const TypeBadge = ({ type }) => {
+    const styles = {
+        priceaction: 'bg-blue-500/20 text-blue-400',
+        indicator: 'bg-purple-500/20 text-purple-400'
+    };
+
+    return (
+        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${styles[type] || 'bg-gray-500/20 text-gray-400'}`}>
+            {type}
+        </span>
+    );
+};
+
+const RuleGroupSelector = ({
+    group,
+    formData,
+    availableRules = [],
+    openRuleGroup,
+    setOpenRuleGroup,
+    ruleSearchTerms,
+    setRuleSearchTerms,
+    handleAddRule,
+    handleRemoveRule,
+    handleRulePercentChange
+}) => {
+    const selectedIds = formData[group.key] || [];
+    const searchTerm = ruleSearchTerms[group.key] || '';
+    const selectedRules = selectedIds.map(id => {
+        return findAvailableRule(id, availableRules) || (typeof id === 'object' ? id : null);
+    }).filter(Boolean);
+
+    const supportsPercent = ['entryRules', 'takeProfitRules', 'stoplossRules'].includes(group.key);
+    const rulesToSelect = (availableRules || []).filter(rule => {
+        const name = rule.Name || '';
+        const description = rule.Description || '';
+        const ruleId = getRuleId(rule);
+
+        const isAlreadySelected = selectedIds.some(id => {
+            if (id === ruleId || id === rule.id || id === rule.documentId) return true;
+            const matched = findAvailableRule(id, availableRules);
+            return matched && (matched.documentId === rule.documentId || matched.id === rule.id);
+        });
+
+        return !isAlreadySelected &&
+            (name.toLowerCase().includes(searchTerm.toLowerCase()) || description.toLowerCase().includes(searchTerm.toLowerCase()));
+    });
+    const isScannerOpen = openRuleGroup === group.key;
+
+    return (
+        <div>
+            <div className="flex justify-between items-center mb-2">
+                <label className={`block text-sm font-medium ${group.labelClassName}`}>{group.label}</label>
+                {!isScannerOpen && (
+                    <button
+                        type="button"
+                        onClick={() => setOpenRuleGroup(group.key)}
+                        className="text-xs flex items-center gap-1 bg-blue-600/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-600/30 transition"
+                    >
+                        <Plus size={14} /> Add Rule
+                    </button>
+                )}
+            </div>
+
+            <div className="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden mb-4">
+                <table className="w-full text-left text-sm">
+                    <tbody className="divide-y divide-gray-700/50">
+                        {selectedRules.length === 0 ? (
+                            <tr>
+                                <td colSpan={supportsPercent ? 4 : 3} className="p-4 text-center text-gray-500">No rules added yet.</td>
+                            </tr>
+                        ) : (
+                            selectedRules.map(rule => {
+                                const ruleId = getRuleId(rule);
+                                return (
+                                    <tr key={ruleId}>
+                                        <td className="p-3 text-white">{rule.Name}</td>
+                                        <td className="p-3"><TypeBadge type={rule.Type} /></td>
+                                        {supportsPercent && (
+                                            <td className="p-3 w-32">
+                                                <label className="flex items-center gap-1 text-xs text-gray-400">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.01"
+                                                        value={formData.rulePercents?.[ruleId] ?? ''}
+                                                        onChange={event => handleRulePercentChange(ruleId, event.target.value)}
+                                                        className="w-20 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-right text-white focus:border-blue-500 focus:outline-none"
+                                                        placeholder="0"
+                                                    />
+                                                    <span>%</span>
+                                                </label>
+                                            </td>
+                                        )}
+                                        <td className="p-3 text-right">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveRule(group.key, ruleId)}
+                                                className="text-red-500 hover:text-red-400"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            {isScannerOpen && (
+                <div className="mt-4 border border-gray-700 rounded-xl p-4 bg-gray-900/30 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex justify-between items-center mb-3">
+                        <h4 className="font-bold text-gray-300 text-sm">Add {group.label}</h4>
+                        <button type="button" onClick={() => setOpenRuleGroup(null)} className="text-gray-500 hover:text-white">
+                            <X size={16} />
+                        </button>
+                    </div>
+                    <div className="relative mb-3">
+                        <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
+                        <input
+                            type="text"
+                            placeholder="Search available rules..."
+                            value={searchTerm}
+                            onChange={(e) => setRuleSearchTerms(prev => ({ ...prev, [group.key]: e.target.value }))}
+                            className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+                            autoFocus
+                        />
+                    </div>
+                    <div className="rule-list max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        {rulesToSelect.length === 0 ? (
+                            <p className="text-gray-500 text-center py-4 text-sm">No matching rules found.</p>
+                        ) : (
+                            rulesToSelect.map(rule => (
+                                <button
+                                    key={getRuleId(rule)}
+                                    type="button"
+                                    onClick={() => handleAddRule(group.key, rule)}
+                                    className="w-full text-left p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 flex justify-between items-center group transition"
+                                >
+                                    <div>
+                                        <p className="text-gray-200 font-medium text-sm">{rule.Name}</p>
+                                        <p className="text-gray-500 text-xs">{rule.Description}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <TypeBadge type={rule.Type} />
+                                        <Plus size={16} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </div>
+                                </button>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules = [], availableWebhooks = [] }) => {
     const [formData, setFormData] = useState({
         name: '',
         description: '',
@@ -39,21 +208,36 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                     ? initialData[fieldName]
                     : fieldName === 'entryRules' ? fallbackRules : [];
 
-                return sourceRules.map(getRuleId).filter(Boolean);
+                return sourceRules
+                    .map(r => {
+                        const rawId = getRuleId(r);
+                        if (!rawId) return null;
+                        const matched = findAvailableRule(rawId, availableRules);
+                        if (availableRules && availableRules.length > 0) {
+                            return matched ? (matched.documentId || matched.id) : null;
+                        }
+                        return rawId;
+                    })
+                    .filter(Boolean);
             };
             const rulePercents = {};
             [...(initialData.entryRules || []), ...(initialData.takeProfitRules || []), ...(initialData.stoplossRules || [])]
                 .forEach(rule => {
-                    const ruleId = getRuleId(rule);
-                    if (ruleId) rulePercents[ruleId] = rule.percent ?? '';
+                    const rawId = getRuleId(rule);
+                    const matched = findAvailableRule(rawId, availableRules);
+                    const ruleId = matched ? (matched.documentId || matched.id) : rawId;
+                    if (ruleId) rulePercents[ruleId] = (typeof rule === 'object' ? rule.percent : matched?.percent) ?? '';
                 });
+
+            const rawWebhook = initialData.webhook;
+            const webhookId = typeof rawWebhook === 'object' ? (rawWebhook?.documentId || rawWebhook?.id) : rawWebhook;
 
             setFormData({
                 name: initialData.name || '',
                 description: initialData.description || '',
                 template: initialData.template || '',
-                type: initialData.type || (initialData.webhook ? 'Webhook' : 'Rules'),
-                webhook: initialData.webhook ? (initialData.webhook.documentId || initialData.webhook.id) : '',
+                type: initialData.type || (webhookId ? 'Webhook' : 'Rules'),
+                webhook: webhookId || '',
                 entryRules: getInitialRules('entryRules'),
                 takeProfitRules: getInitialRules('takeProfitRules'),
                 stoplossRules: getInitialRules('stoplossRules'),
@@ -76,7 +260,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
         }
         setOpenRuleGroup(null);
         setRuleSearchTerms({});
-    }, [initialData, isOpen]);
+    }, [initialData, isOpen, availableRules]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -96,8 +280,18 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
         });
     };
 
-    const handleAddRule = (fieldName, ruleId) => {
-        if (!formData[fieldName].includes(ruleId)) {
+    const handleAddRule = (fieldName, rule) => {
+        const ruleId = getRuleId(rule);
+        if (!ruleId) return;
+
+        const exists = formData[fieldName].some(id => {
+            if (id === ruleId) return true;
+            const matchedA = findAvailableRule(id, availableRules);
+            const matchedB = findAvailableRule(ruleId, availableRules);
+            return matchedA && matchedB && (matchedA.documentId === matchedB.documentId || matchedA.id === matchedB.id);
+        });
+
+        if (!exists) {
             setFormData(prev => ({
                 ...prev,
                 [fieldName]: [...prev[fieldName], ruleId],
@@ -112,7 +306,15 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
     const handleRemoveRule = (fieldName, ruleId) => {
         setFormData(prev => ({
             ...prev,
-            [fieldName]: prev[fieldName].filter(id => id !== ruleId),
+            [fieldName]: prev[fieldName].filter(id => {
+                if (id === ruleId) return false;
+                const matchedA = findAvailableRule(id, availableRules);
+                const matchedB = findAvailableRule(ruleId, availableRules);
+                if (matchedA && matchedB && (matchedA.documentId === matchedB.documentId || matchedA.id === matchedB.id)) {
+                    return false;
+                }
+                return true;
+            }),
             rulePercents: { ...prev.rulePercents, [ruleId]: undefined }
         }));
     };
@@ -126,158 +328,38 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
 
     const handleSubmit = (e) => {
         e?.preventDefault?.();
-        const ruleIds = RULE_GROUPS.flatMap(group => formData[group.key]);
+        
+        const sanitizeRuleList = (list) => {
+            if (!Array.isArray(list)) return [];
+            return list
+                .map(r => {
+                    const rawId = getRuleId(r);
+                    const matched = findAvailableRule(rawId, availableRules);
+                    if (availableRules && availableRules.length > 0) {
+                        return matched ? (matched.documentId || matched.id) : null;
+                    }
+                    return rawId;
+                })
+                .filter(Boolean);
+        };
+
+        const entryRules = formData.type === 'Rules' ? sanitizeRuleList(formData.entryRules) : [];
+        const takeProfitRules = formData.type === 'Rules' ? sanitizeRuleList(formData.takeProfitRules) : [];
+        const stoplossRules = formData.type === 'Rules' ? sanitizeRuleList(formData.stoplossRules) : [];
+        const exitRules = formData.type === 'Rules' ? sanitizeRuleList(formData.exitRules) : [];
+        const allRules = [...new Set([...entryRules, ...takeProfitRules, ...stoplossRules, ...exitRules])];
 
         onSubmit({
             ...formData,
             template: formData.template?.trim() || '',
-            webhook: formData.type === 'Webhook' ? formData.webhook : null,
-            rules: formData.type === 'Rules' ? [...new Set(ruleIds)] : [],
-            entryRules: formData.type === 'Rules' ? formData.entryRules : [],
-            takeProfitRules: formData.type === 'Rules' ? formData.takeProfitRules : [],
-            stoplossRules: formData.type === 'Rules' ? formData.stoplossRules : [],
-            exitRules: formData.type === 'Rules' ? formData.exitRules : [],
+            webhook: formData.type === 'Webhook' ? (formData.webhook || null) : null,
+            rules: formData.type === 'Rules' ? allRules : [],
+            entryRules,
+            takeProfitRules,
+            stoplossRules,
+            exitRules,
             rulePercents: formData.rulePercents
         });
-    };
-
-    // Helper for badges
-    const TypeBadge = ({ type }) => {
-        const styles = {
-            priceaction: 'bg-blue-500/20 text-blue-400',
-            indicator: 'bg-purple-500/20 text-purple-400'
-        };
-
-        return (
-            <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${styles[type] || 'bg-gray-500/20 text-gray-400'}`}>
-                {type}
-            </span>
-        );
-    };
-
-    const RuleGroupSelector = ({ group }) => {
-        const selectedIds = formData[group.key];
-        const searchTerm = ruleSearchTerms[group.key] || '';
-        const selectedRules = availableRules.filter(rule =>
-            selectedIds.includes(rule.id) || selectedIds.includes(rule.documentId)
-        );
-        const supportsPercent = ['entryRules', 'takeProfitRules', 'stoplossRules'].includes(group.key);
-        const rulesToSelect = availableRules.filter(rule => {
-            const name = rule.Name || '';
-            const description = rule.Description || '';
-
-            return !selectedIds.includes(rule.id) &&
-                !selectedIds.includes(rule.documentId) &&
-                (name.toLowerCase().includes(searchTerm.toLowerCase()) || description.toLowerCase().includes(searchTerm.toLowerCase()));
-        });
-        const isScannerOpen = openRuleGroup === group.key;
-
-        return (
-            <div>
-                <div className="flex justify-between items-center mb-2">
-                    <label className={`block text-sm font-medium ${group.labelClassName}`}>{group.label}</label>
-                    {!isScannerOpen && (
-                        <button
-                            type="button"
-                            onClick={() => setOpenRuleGroup(group.key)}
-                            className="text-xs flex items-center gap-1 bg-blue-600/20 text-blue-400 px-2 py-1 rounded hover:bg-blue-600/30 transition"
-                        >
-                            <Plus size={14} /> Add Rule
-                        </button>
-                    )}
-                </div>
-
-                <div className="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden mb-4">
-                    <table className="w-full text-left text-sm">
-                        <tbody className="divide-y divide-gray-700/50">
-                            {selectedRules.length === 0 ? (
-                                <tr>
-                                    <td colSpan="3" className="p-4 text-center text-gray-500">No rules added yet.</td>
-                                </tr>
-                            ) : (
-                                selectedRules.map(rule => (
-                                    <tr key={getRuleId(rule)}>
-                                        <td className="p-3 text-white">{rule.Name}</td>
-                                        <td className="p-3"><TypeBadge type={rule.Type} /></td>
-                                        {supportsPercent && (
-                                            <td className="p-3 w-32">
-                                                <label className="flex items-center gap-1 text-xs text-gray-400">
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max="100"
-                                                        step="0.01"
-                                                        value={formData.rulePercents?.[getRuleId(rule)] ?? ''}
-                                                        onChange={event => handleRulePercentChange(getRuleId(rule), event.target.value)}
-                                                        className="w-20 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-right text-white focus:border-blue-500 focus:outline-none"
-                                                        placeholder="0"
-                                                    />
-                                                    <span>%</span>
-                                                </label>
-                                            </td>
-                                        )}
-                                        <td className="p-3 text-right">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveRule(group.key, getRuleId(rule))}
-                                                className="text-red-500 hover:text-red-400"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {isScannerOpen && (
-                    <div className="mt-4 border border-gray-700 rounded-xl p-4 bg-gray-900/30 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex justify-between items-center mb-3">
-                            <h4 className="font-bold text-gray-300 text-sm">Add {group.label}</h4>
-                            <button type="button" onClick={() => setOpenRuleGroup(null)} className="text-gray-500 hover:text-white">
-                                <X size={16} />
-                            </button>
-                        </div>
-                        <div className="relative mb-3">
-                            <Search className="absolute left-3 top-2.5 text-gray-500" size={14} />
-                            <input
-                                type="text"
-                                placeholder="Search available rules..."
-                                value={searchTerm}
-                                onChange={(e) => setRuleSearchTerms(prev => ({ ...prev, [group.key]: e.target.value }))}
-                                className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-9 pr-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
-                                autoFocus
-                            />
-                        </div>
-                        <div className="rule-list max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                            {rulesToSelect.length === 0 ? (
-                                <p className="text-gray-500 text-center py-4 text-sm">No matching rules found.</p>
-                            ) : (
-                                rulesToSelect.map(rule => (
-                                    <button
-                                        key={getRuleId(rule)}
-                                        type="button"
-                                        onClick={() => handleAddRule(group.key, getRuleId(rule))}
-                                        className="w-full text-left p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 flex justify-between items-center group transition"
-                                    >
-                                        <div>
-                                            <p className="text-gray-200 font-medium text-sm">{rule.Name}</p>
-                                            <p className="text-gray-500 text-xs">{rule.Description}</p>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <TypeBadge type={rule.Type} />
-                                            <Plus size={16} className="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                        </div>
-                                    </button>
-                                ))
-                            )}
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
     };
 
     if (!isOpen) return null;
@@ -377,7 +459,19 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                     ) : (
                         <div className="space-y-6">
                             {RULE_GROUPS.map(group => (
-                                <RuleGroupSelector key={group.key} group={group} />
+                                <RuleGroupSelector
+                                    key={group.key}
+                                    group={group}
+                                    formData={formData}
+                                    availableRules={availableRules}
+                                    openRuleGroup={openRuleGroup}
+                                    setOpenRuleGroup={setOpenRuleGroup}
+                                    ruleSearchTerms={ruleSearchTerms}
+                                    setRuleSearchTerms={setRuleSearchTerms}
+                                    handleAddRule={handleAddRule}
+                                    handleRemoveRule={handleRemoveRule}
+                                    handleRulePercentChange={handleRulePercentChange}
+                                />
                             ))}
                         </div>
                     )}
@@ -511,7 +605,7 @@ const ManageStrategies = () => {
                                 </button>
                             </div>
                         </div>
-                        <p className="text-gray-400 text-sm h-20 overflow-hidden text-ellipsis mb-4">
+                        <p className="text-gray-400 text-sm h-20 overflow-hidden text-ellipsis mb-4 whitespace-pre-line">
                             {strategy.description || 'No description provided.'}
                         </p>
 

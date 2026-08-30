@@ -1,8 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { useDispatch } from 'react-redux';
-import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { RefreshCw, Edit2, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { loadExternalHistory, fetchHistories } from '../features/marketSlice';
+import { updateWatchlist, fetchWatchlists } from '../features/watchlistSlice';
+import WatchlistModal from './WatchlistModal';
 
 const WatchlistSelector = ({ 
     className = '',
@@ -13,6 +15,7 @@ const WatchlistSelector = ({
 }) => {
     const dispatch = useDispatch();
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const {
         selectedAccount,
         accountSymbols = [],
@@ -32,6 +35,23 @@ const WatchlistSelector = ({
         }
         return accountSymbols;
     })();
+
+    const handleUpdateWatchlist = async (data) => {
+        try {
+            if (!selectedWatchlist) return;
+            const id = selectedWatchlist.documentId || selectedWatchlist.id;
+            await dispatch(updateWatchlist({ id, data })).unwrap();
+            const res = await dispatch(fetchWatchlists()).unwrap();
+            const updated = res.find(w => (w.documentId || w.id) === id);
+            if (updated) {
+                setSelectedWatchlist(updated);
+            }
+            setIsEditModalOpen(false);
+        } catch (error) {
+            console.error('Failed to update watchlist:', error);
+            alert(`Failed to update watchlist: ${error?.message || error}`);
+        }
+    };
 
     const handleWatchlistRefresh = useCallback(async () => {
         if (!filteredSymbols || filteredSymbols.length === 0) return;
@@ -84,7 +104,7 @@ const WatchlistSelector = ({
                         );
                         if (watchlist) setSelectedWatchlist(watchlist);
                     }}
-                    className="rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="flex-1 min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                     {accountWatchlists.length === 0 && <option value="">No Watchlists</option>}
                     {accountWatchlists.map(watchlist => (
@@ -94,16 +114,37 @@ const WatchlistSelector = ({
                     ))}
                 </select>
 
-                <button
-                    type="button"
-                    onClick={handleWatchlistRefresh}
-                    disabled={isRefreshing}
-                    className="text-gray-400 transition hover:text-blue-400 disabled:opacity-50"
-                    title="Refresh Watchlist Data"
-                >
-                    <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-blue-400' : ''} />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                    <button
+                        type="button"
+                        onClick={() => setIsEditModalOpen(true)}
+                        disabled={!selectedWatchlist}
+                        className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-700 hover:text-blue-400 disabled:opacity-50"
+                        title="Edit Watchlist"
+                    >
+                        <Edit2 size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleWatchlistRefresh}
+                        disabled={isRefreshing}
+                        className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-700 hover:text-blue-400 disabled:opacity-50"
+                        title="Refresh Watchlist Data"
+                    >
+                        <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-blue-400' : ''} />
+                    </button>
+                </div>
             </div>
+
+            {selectedWatchlist && (
+                <WatchlistModal
+                    isOpen={isEditModalOpen}
+                    onClose={() => setIsEditModalOpen(false)}
+                    onSubmit={handleUpdateWatchlist}
+                    initialData={selectedWatchlist}
+                    symbols={accountSymbols}
+                />
+            )}
 
             {showSymbols && (
                 <div id="symbol-list" className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar bg-gray-900/40 mt-2 rounded-lg max-h-[250px]">

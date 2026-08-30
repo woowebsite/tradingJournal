@@ -7,7 +7,7 @@ import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
 import { getStrategyId, resolveSetting } from '../utils/roadmapCalculations';
 import { fetchStrategies, updateStrategy } from '../features/strategySlice';
-import { fetchRules } from '../features/ruleSlice';
+import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 import { fetchSignals } from '../features/signalSlice';
 import { fetchWatchlists } from '../features/watchlistSlice';
@@ -174,7 +174,20 @@ const Dashboard = () => {
         if (!id) return;
 
         try {
-            await dispatch(updateStrategy({ id, data: strategyData })).unwrap();
+            const { rulePercents = {}, ...sanitizedStrategyData } = strategyData;
+            await dispatch(updateStrategy({ id, data: sanitizedStrategyData })).unwrap();
+
+            await Promise.all(Object.entries(rulePercents)
+                .filter(([, percent]) => percent !== '' && percent !== undefined && percent !== null)
+                .map(([ruleId, percent]) => dispatch(updateRule({
+                    id: ruleId,
+                    data: { percent: Number(percent) }
+                })).unwrap()));
+
+            if (Object.keys(rulePercents).length > 0) {
+                dispatch(fetchRules());
+            }
+
             await dispatch(fetchStrategies()).unwrap();
             setEditingStrategy(false);
         } catch (error) {

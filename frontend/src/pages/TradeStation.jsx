@@ -549,7 +549,6 @@ const TradeStation = () => {
                 return 0;
             })
             .then(() => {
-                dispatch(fetchSignals());
                 if (accountId) refreshSelectedAccountTrades();
             })
             .catch(err => console.error(`Failed to refresh history: ${err}`));

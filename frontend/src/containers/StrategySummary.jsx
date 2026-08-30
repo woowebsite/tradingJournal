@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Edit } from 'lucide-react';
 import { fetchTrades } from '../features/tradeSlice';
 import { fetchStrategies, updateStrategy } from '../features/strategySlice';
-import { fetchRules } from '../features/ruleSlice';
+import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 import { StrategyModal } from '../pages/ManageStrategies';
 
@@ -72,7 +72,20 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
         if (!strategyId) return;
 
         try {
-            await dispatch(updateStrategy({ id: strategyId, data: strategyData })).unwrap();
+            const { rulePercents = {}, ...sanitizedStrategyData } = strategyData;
+            await dispatch(updateStrategy({ id: strategyId, data: sanitizedStrategyData })).unwrap();
+
+            await Promise.all(Object.entries(rulePercents)
+                .filter(([, percent]) => percent !== '' && percent !== undefined && percent !== null)
+                .map(([ruleId, percent]) => dispatch(updateRule({
+                    id: ruleId,
+                    data: { percent: Number(percent) }
+                })).unwrap()));
+
+            if (Object.keys(rulePercents).length > 0) {
+                dispatch(fetchRules());
+            }
+
             await dispatch(fetchStrategies()).unwrap();
             setIsEditModalOpen(false);
         } catch (error) {
@@ -87,7 +100,7 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
 
     return (
         <div className="grid grid-cols-2 gap-4">
-           
+
             <div>
                 <p className="mb-1">
                     <span className="font-semibold text-gray-400">Name:</span>{' '}
@@ -95,7 +108,9 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
                 </p>
                 <p className="mb-1">
                     <span className="font-semibold text-gray-400">Description:</span>{' '}
-                    {activeStrategy.description || 'No description'}
+                    <div className="whitespace-pre-line text-gray-300 text-xs">
+                        {activeStrategy.description || 'No description'}
+                    </div>
                 </p>
                 <div className="flex gap-6 mt-3">
                     <div>
