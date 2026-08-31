@@ -1,0 +1,249 @@
+//@version=6
+indicator("Zig Zag Auto Strategy", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+import TradingView/ZigZag/9 as ZigZagLib 
+
+// Tooltips
+string TT_D = (
+	"Specifies the total number of bars required to confirm a pivot point. "
+	+ "The required number of left and right bars is half this value, rounded down as necessary."
+)
+
+// Inputs
+bool   useAtr         = input.bool(true, "Use ATR for Deviation", group = "Deviation Settings")
+int    atrLength      = input.int(14, "ATR Length", minval = 1, group = "Deviation Settings")
+float  atrMult        = input.float(1.5, "ATR Multiplier", minval = 0.1, step = 0.1, tooltip = "Multiplier applied to ATR to determine reversal deviation (%)", group = "Deviation Settings")
+float  fixedDev       = input.float(5.0, "Fixed Deviation (%)", minval = 0.00001, maxval = 100.0, step = 0.5, group = "Deviation Settings")
+int    depthInput     = input.int(5, "Pivot legs", 2, tooltip = TT_D)
+color  lineColorUp    = input(#00BCD4, "Line color Up", display = display.none)
+color  lineColorDown  = input(#F23645, "Line color Down", display = display.none)
+bool   showChgInput   = input.bool(true, "Price difference", inline = "priceRev")
+string priceDiffInput = input.string("Absolute", "", ["Absolute", "Percent"], inline = "priceRev", display = display.none, active = showChgInput)
+
+// Volume Profile Inputs
+bool   showVpInput    = input.bool(false, "Show Volume Profile (Last 4 waves)", group = "Volume Profile Settings")
+int    vpWavesInput   = input.int(4, "Number of Waves", minval = 1, maxval = 10, group = "Volume Profile Settings")
+int    vpRowsInput    = input.int(12, "Number of Rows/Bins", minval = 4, maxval = 30, group = "Volume Profile Settings")
+bool   showPocInput   = input.bool(true, "Highlight POC (Point of Control)", group = "Volume Profile Settings")
+color  vpUpColor      = input.color(color.new(#00BCD4, 65), "VP Up Wave Color", group = "Volume Profile Settings")
+color  vpDownColor    = input.color(color.new(#F23645, 65), "VP Down Wave Color", group = "Volume Profile Settings")
+color  vpPocColor     = input.color(color.new(#FFEB3B, 20), "POC Color", group = "Volume Profile Settings")
+
+// Fair Value Gap (FVG) Inputs
+bool   showFvgInput   = input.bool(true, "Show Fair Value Gap (FVG)", group = "Fair Value Gap (FVG) Settings")
+int    fvgWavesInput  = input.int(4, "Number of Waves for FVG", minval = 1, maxval = 10, group = "Fair Value Gap (FVG) Settings")
+string fvgTypeInput   = input.string("Wave Direction", "FVG Filter", options = ["Wave Direction", "All FVGs"], group = "Fair Value Gap (FVG) Settings")
+string fvgExtendInput = input.string("Wave End", "Extend FVG To", options = ["Wave End", "Current Bar"], group = "Fair Value Gap (FVG) Settings")
+float  fvgMinSize     = input.float(0.0, "Min FVG Gap Size (%)", minval = 0.0, step = 0.05, group = "Fair Value Gap (FVG) Settings")
+color  fvgBullColor   = input.color(color.new(#00BCD4, 75), "Bullish FVG Color", group = "Fair Value Gap (FVG) Settings")
+color  fvgBearColor   = input.color(color.new(#F23645, 75), "Bearish FVG Color", group = "Fair Value Gap (FVG) Settings")
+color  fvgBorderBull  = input.color(color.new(#00BCD4, 35), "Bullish Border", group = "Fair Value Gap (FVG) Settings")
+color  fvgBorderBear  = input.color(color.new(#F23645, 35), "Bearish Border", group = "Fair Value Gap (FVG) Settings")
+
+// Calculate dynamic deviation from ATR(14) as percentage of close price
+float  atrVal         = ta.atr(atrLength)
+float  atrDevPercent  = (atrVal / close) * 100 * atrMult
+float  deviationInput = useAtr ? atrDevPercent : fixedDev
+
+// Create a `ZigZag` object from user settings.
+var zigZag = ZigZagLib.newInstance(
+    ZigZagLib.Settings.new(
+        deviationInput, depthInput, lineColorUp, true, 
+		true, true, true, priceDiffInput, true
+	)
+)
+
+// Update deviation dynamically on each bar
+zigZag.settings.devThreshold := deviationInput
+
+// Update the Zig Zag on each bar, adding new pivot points and drawings when possible.
+zigZag.update()
+
+// Update line colors và line widths:
+// - Chỉ duyệt tối đa 4 pivot gần nhất trên mỗi bar để tối ưu hiệu năng (tránh loop timeout >500ms trên biểu đồ nhiều nến)
+int pSize = array.size(zigZag.pivots)
+if pSize > 0
+    int startIdx = math.max(0, pSize - 4)
+    for i = startIdx to pSize - 1
+        ZigZagLib.Pivot p = array.get(zigZag.pivots, i)
+        if not na(p.ln)
+            // Màu sắc theo chiều sóng
+            line.set_color(p.ln, p.isHigh ? lineColorUp : lineColorDown)
+            
+            // Độ dày nét vẽ theo volume
+            int lineWidth = 1
+            if i >= 2
+                ZigZagLib.Pivot prevSame = array.get(zigZag.pivots, i - 2)
+                if not na(p.vol) and not na(prevSame.vol) and p.vol > prevSame.vol
+                    lineWidth := 2
+            line.set_width(p.ln, lineWidth)
+
+// Volume Profile cho N sóng gần nhất (chỉ tính toán và vẽ ở nến cuối cùng barstate.islast)
+var array<box> vpBoxes = array.new_box()
+
+if showVpInput and barstate.islast and pSize > 0
+    // Xóa các box cũ trước khi vẽ lại
+    if array.size(vpBoxes) > 0
+        for bx in vpBoxes
+            box.delete(bx)
+        array.clear(vpBoxes)
+    
+    int barDuration = int(time - nz(time[1], time - 60000))
+    if barDuration <= 0
+        barDuration := 60000
+    
+    int startWaveIdx = math.max(0, pSize - vpWavesInput)
+    for i = startWaveIdx to pSize - 1
+        ZigZagLib.Pivot p = array.get(zigZag.pivots, i)
+        if not na(p.ln)
+            int   x1        = int(line.get_x1(p.ln))
+            int   x2        = int(line.get_x2(p.ln))
+            float y1        = line.get_y1(p.ln)
+            float y2        = line.get_y2(p.ln)
+            
+            int   startTime = math.min(x1, x2)
+            int   endTime   = math.max(x1, x2)
+            float lowPrice  = math.min(y1, y2)
+            float highPrice = math.max(y1, y2)
+            int   timeSpan  = endTime - startTime
+            
+            if timeSpan > 0 and highPrice > lowPrice
+                float priceStep = (highPrice - lowPrice) / vpRowsInput
+                array<float> binVols = array.new_float(vpRowsInput, 0.0)
+                
+                // Quét các nến trong khoảng thời gian [startTime, endTime]
+                for offset = 0 to 4999
+                    int bTime = time[offset]
+                    if na(bTime) or bTime < startTime
+                        break
+                    if bTime <= endTime
+                        float bVol  = volume[offset]
+                        float bHigh = high[offset]
+                        float bLow  = low[offset]
+                        if not na(bVol) and bVol > 0 and not na(bHigh) and not na(bLow)
+                            int lowBin  = math.max(0, math.min(vpRowsInput - 1, int(math.floor((bLow - lowPrice) / priceStep))))
+                            int highBin = math.max(0, math.min(vpRowsInput - 1, int(math.floor((bHigh - lowPrice) / priceStep))))
+                            int span    = highBin - lowBin + 1
+                            float volPerBin = bVol / span
+                            for b = lowBin to highBin
+                                array.set(binVols, b, array.get(binVols, b) + volPerBin)
+                
+                float maxVol = array.max(binVols)
+                int   pocIdx = array.indexof(binVols, maxVol)
+                
+                if maxVol > 0
+                    for b = 0 to vpRowsInput - 1
+                        float bVol = array.get(binVols, b)
+                        if bVol > 0
+                            float binBottom = lowPrice + b * priceStep
+                            float binTop    = binBottom + priceStep
+                            int   binWidth  = math.max(barDuration, int(math.round((bVol / maxVol) * timeSpan * 0.7)))
+                            int   bLeft     = startTime
+                            int   bRight    = startTime + binWidth
+                            bool  isPoc     = (b == pocIdx) and showPocInput
+                            color boxBg     = isPoc ? vpPocColor : (p.isHigh ? vpUpColor : vpDownColor)
+                            color boxBorder = isPoc ? color.new(vpPocColor, 20) : color.new(boxBg, 80)
+                            
+                            box bx = box.new(
+                                left         = bLeft,
+                                top          = binTop,
+                                right        = bRight,
+                                bottom       = binBottom,
+                                xloc         = xloc.bar_time,
+                                border_color = boxBorder,
+                                border_width = 1,
+                                bgcolor      = boxBg
+                            )
+                            array.push(vpBoxes, bx)
+
+if not showVpInput and barstate.islast and array.size(vpBoxes) > 0
+    for bx in vpBoxes
+        box.delete(bx)
+    array.clear(vpBoxes)
+
+// Fair Value Gap (FVG) cho N sóng gần nhất (chỉ tính toán và vẽ ở nến cuối cùng barstate.islast)
+var array<box> fvgBoxes = array.new_box()
+
+if showFvgInput and barstate.islast and pSize > 0
+    // Xóa các box FVG cũ trước khi vẽ lại
+    if array.size(fvgBoxes) > 0
+        for bx in fvgBoxes
+            box.delete(bx)
+        array.clear(fvgBoxes)
+    
+    int startWaveIdx = math.max(0, pSize - fvgWavesInput)
+    for i = startWaveIdx to pSize - 1
+        ZigZagLib.Pivot p = array.get(zigZag.pivots, i)
+        if not na(p.ln)
+            int   x1        = int(line.get_x1(p.ln))
+            int   x2        = int(line.get_x2(p.ln))
+            int   startTime = math.min(x1, x2)
+            int   endTime   = math.max(x1, x2)
+            
+            if endTime > startTime
+                // Quét tìm FVG trong khoảng thời gian [startTime, endTime] của sóng
+                for offset = 0 to 4997
+                    int t1 = time[offset + 2]
+                    int t3 = time[offset]
+                    if na(t1) or t1 < startTime
+                        break
+                    if not na(t3) and t3 <= endTime
+                        float c1_high = high[offset + 2]
+                        float c1_low  = low[offset + 2]
+                        float c3_high = high[offset]
+                        float c3_low  = low[offset]
+                        int   fvgTime = time[offset + 1]
+                        int   fvgEnd  = (fvgExtendInput == "Current Bar") ? time : endTime
+                        
+                        // Bullish FVG: Low nến 3 > High nến 1 (khoảng trống tăng giá)
+                        bool isBullFvg = (c3_low > c1_high) and (fvgTypeInput == "All FVGs" or p.isHigh)
+                        if isBullFvg
+                            float top = c3_low
+                            float btm = c1_high
+                            float gapPct = ((top - btm) / btm) * 100
+                            if gapPct >= fvgMinSize
+                                box bx = box.new(
+                                    left         = fvgTime,
+                                    top          = top,
+                                    right        = fvgEnd,
+                                    bottom       = btm,
+                                    xloc         = xloc.bar_time,
+                                    border_color = fvgBorderBull,
+                                    border_width = 1,
+                                    bgcolor      = fvgBullColor,
+                                    text         = "FVG",
+                                    text_size    = size.tiny,
+                                    text_color   = color.new(color.white, 30),
+                                    text_halign  = text.align_right,
+                                    text_valign  = text.align_center
+                                )
+                                array.push(fvgBoxes, bx)
+                        
+                        // Bearish FVG: High nến 3 < Low nến 1 (khoảng trống giảm giá)
+                        bool isBearFvg = (c3_high < c1_low) and (fvgTypeInput == "All FVGs" or not p.isHigh)
+                        if isBearFvg
+                            float top = c1_low
+                            float btm = c3_high
+                            float gapPct = ((top - btm) / btm) * 100
+                            if gapPct >= fvgMinSize
+                                box bx = box.new(
+                                    left         = fvgTime,
+                                    top          = top,
+                                    right        = fvgEnd,
+                                    bottom       = btm,
+                                    xloc         = xloc.bar_time,
+                                    border_color = fvgBorderBear,
+                                    border_width = 1,
+                                    bgcolor      = fvgBearColor,
+                                    text         = "FVG",
+                                    text_size    = size.tiny,
+                                    text_color   = color.new(color.white, 30),
+                                    text_halign  = text.align_right,
+                                    text_valign  = text.align_center
+                                )
+                                array.push(fvgBoxes, bx)
+
+if not showFvgInput and barstate.islast and array.size(fvgBoxes) > 0
+    for bx in fvgBoxes
+        box.delete(bx)
+    array.clear(fvgBoxes)
