@@ -18,13 +18,13 @@ strategy(
 
 import TradingView/ZigZag/9 as ZigZagLib 
 
-// Cấu trúc lưu trữ FVG phát hiện theo từng nến
-type FvgItem
-    int   fvgTime
+// Cấu trúc lưu trữ FVG chưa bị quét (Unmitigated FVG)
+type ActiveFvg
+    box   bx
     float top
-    float bottom
+    float btm
     bool  isBull
-
+    int   startBar
 // Tooltips
 string TT_D = (
 	"Specifies the total number of bars required to confirm a pivot point. "
@@ -40,7 +40,7 @@ int    depthInput     = input.int(5, "Pivot legs", 2, tooltip = TT_D)
 color  lineColorUp    = input(#00BCD4, "Line color Up", display = display.none)
 color  lineColorDown  = input(#F23645, "Line color Down", display = display.none)
 bool   showChgInput   = input.bool(true, "Price difference", inline = "priceRev")
-string priceDiffInput = input.string("Absolute", "", ["Absolute", "Percent"], inline = "priceRev", display = display.none, active = showChgInput)
+string priceDiffInput = input.string("Percent", "", ["Absolute", "Percent"], inline = "priceRev", display = display.none, active = showChgInput)
 
 // Volume Profile Inputs
 bool   showVpInput    = input.bool(false, "Show Volume Profile (Last 4 waves)", group = "Volume Profile Settings")
@@ -52,15 +52,13 @@ color  vpDownColor    = input.color(color.new(#F23645, 65), "VP Down Wave Color"
 color  vpPocColor     = input.color(color.new(#FFEB3B, 20), "POC Color", group = "Volume Profile Settings")
 
 // Fair Value Gap (FVG) Inputs
-bool   showFvgInput   = input.bool(true, "Show Fair Value Gap (Last 4 waves)", group = "Fair Value Gap (FVG) Settings")
-int    fvgWavesInput  = input.int(4, "Number of Waves for FVG", minval = 1, maxval = 10, group = "Fair Value Gap (FVG) Settings")
-string fvgTypeInput   = input.string("Wave Direction", "FVG Filter", options = ["Wave Direction", "All FVGs"], group = "Fair Value Gap (FVG) Settings")
-string fvgExtendInput = input.string("Wave End", "Extend FVG To", options = ["Wave End", "Current Bar"], group = "Fair Value Gap (FVG) Settings")
-float  fvgMinSize     = input.float(0.0, "Min FVG Gap Size (%)", minval = 0.0, step = 0.05, group = "Fair Value Gap (FVG) Settings")
-color  fvgBullColor   = input.color(color.new(#00BCD4, 75), "Bullish FVG Color", group = "Fair Value Gap (FVG) Settings")
-color  fvgBearColor   = input.color(color.new(#F23645, 75), "Bearish FVG Color", group = "Fair Value Gap (FVG) Settings")
-color  fvgBorderBull  = input.color(color.new(#00BCD4, 35), "Bullish Border", group = "Fair Value Gap (FVG) Settings")
-color  fvgBorderBear  = input.color(color.new(#F23645, 35), "Bearish Border", group = "Fair Value Gap (FVG) Settings")
+bool   showFvgInput      = input.bool(true, "Show Fair Value Gap", group = "Fair Value Gap (FVG) Settings")
+bool   hideMitigatedFvg  = input.bool(true, "Hide Mitigated FVGs", tooltip = "Tự động xóa các FVG khi có nến đóng cửa vượt qua vùng FVG (Bullish: close < bottom, Bearish: close > top)", group = "Fair Value Gap (FVG) Settings")
+float  fvgMinSize        = input.float(0.0, "Min FVG Gap Size (%)", minval = 0.0, step = 0.05, group = "Fair Value Gap (FVG) Settings")
+color  fvgBullColor      = input.color(color.new(#00BCD4, 75), "Bullish FVG Color", group = "Fair Value Gap (FVG) Settings")
+color  fvgBearColor      = input.color(color.new(#F23645, 75), "Bearish FVG Color", group = "Fair Value Gap (FVG) Settings")
+color  fvgBorderBull     = input.color(color.new(#00BCD4, 35), "Bullish Border", group = "Fair Value Gap (FVG) Settings")
+color  fvgBorderBear     = input.color(color.new(#F23645, 35), "Bearish Border", group = "Fair Value Gap (FVG) Settings")
 
 // Signal Settings
 bool   showLongSignals  = input.bool(true, "Show Long Signal", group = "Signal Settings")
@@ -108,19 +106,54 @@ if pSize > 0
             line.set_width(p.ln, lineWidth)
 
 
-// Ghi nhận FVG theo thời gian thực (chỉ nhìn lại 2 nến tĩnh, không cần max_bars_back và không bao giờ lỗi bộ đệm)
-var array<FvgItem> recentFvgs = array.new<FvgItem>()
+// Quản lý FVG chưa bị quét (Unmitigated FVG - Tự động xóa khi giá đóng cửa qua FVG)
+var array<ActiveFvg> activeFvgs = array.new<ActiveFvg>()
 
-if bar_index >= 2
+if showFvgInput and bar_index >= 2
+    // 1. Kiểm tra xem các FVG hiện có đã bị giá đóng cửa vượt qua hay chưa (nếu bật hideMitigatedFvg)
+    if array.size(activeFvgs) > 0
+        for i = array.size(activeFvgs) - 1 to 0
+            ActiveFvg item = array.get(activeFvgs, i)
+            // Chỉ kiểm tra các nến sau nến hình thành FVG
+            if bar_index > item.startBar
+                bool isSwept = false
+                if hideMitigatedFvg
+                    if item.isBull
+                        // Bullish FVG bị ẩn khi giá đóng cửa nằm dưới đáy FVG (close < item.btm)
+                        if close < item.btm
+                            isSwept := true
+                    else
+                        // Bearish FVG bị ẩn khi giá đóng cửa nằm trên đỉnh FVG (close > item.top)
+                        if close > item.top
+                            isSwept := true
+                
+                if isSwept
+                    box.delete(item.bx)
+                    array.remove(activeFvgs, i)
+    
+    // 2. Phát hiện FVG mới và tạo hộp FVG với width cố định như ban đầu (depthInput * 3)
     // Bullish FVG: Low nến 3 > High nến 1
     if low > high[2]
         float fvgTop = low
         float fvgBtm = high[2]
         float fvgGap = ((fvgTop - fvgBtm) / fvgBtm) * 100
         if fvgGap >= fvgMinSize
-            array.push(recentFvgs, FvgItem.new(time[1], fvgTop, fvgBtm, true))
-            if array.size(recentFvgs) > 500
-                array.shift(recentFvgs)
+            box bx = box.new(
+                left         = bar_index - 1,
+                top          = fvgTop,
+                right        = bar_index + depthInput * 3,
+                bottom       = fvgBtm,
+                xloc         = xloc.bar_index,
+                border_color = fvgBorderBull,
+                border_width = 1,
+                bgcolor      = fvgBullColor,
+                text         = "FVG",
+                text_size    = size.tiny,
+                text_color   = color.new(color.white, 30),
+                text_halign  = text.align_right,
+                text_valign  = text.align_center
+            )
+            array.push(activeFvgs, ActiveFvg.new(bx, fvgTop, fvgBtm, true, bar_index))
     
     // Bearish FVG: High nến 3 < Low nến 1
     if high < low[2]
@@ -128,9 +161,27 @@ if bar_index >= 2
         float fvgBtm = high
         float fvgGap = ((fvgTop - fvgBtm) / fvgBtm) * 100
         if fvgGap >= fvgMinSize
-            array.push(recentFvgs, FvgItem.new(time[1], fvgTop, fvgBtm, false))
-            if array.size(recentFvgs) > 500
-                array.shift(recentFvgs)
+            box bx = box.new(
+                left         = bar_index - 1,
+                top          = fvgTop,
+                right        = bar_index + depthInput * 3,
+                bottom       = fvgBtm,
+                xloc         = xloc.bar_index,
+                border_color = fvgBorderBear,
+                border_width = 1,
+                bgcolor      = fvgBearColor,
+                text         = "FVG",
+                text_size    = size.tiny,
+                text_color   = color.new(color.white, 30),
+                text_halign  = text.align_right,
+                text_valign  = text.align_center
+            )
+            array.push(activeFvgs, ActiveFvg.new(bx, fvgTop, fvgBtm, false, bar_index))
+
+if not showFvgInput and array.size(activeFvgs) > 0
+    for item in activeFvgs
+        box.delete(item.bx)
+    array.clear(activeFvgs)
 
 // Volume Profile cho N sóng gần nhất (chỉ tính toán và vẽ ở nến cuối cùng barstate.islast)
 var array<box> vpBoxes = array.new_box()
@@ -215,55 +266,7 @@ if not showVpInput and barstate.islast and array.size(vpBoxes) > 0
         box.delete(bx)
     array.clear(vpBoxes)
 
-// Fair Value Gap (FVG) cho 4 sóng gần nhất (vẽ ở nến cuối cùng barstate.islast)
-var array<box> fvgBoxes = array.new_box()
 
-if showFvgInput and barstate.islast and pSize > 0
-    // Xóa các box FVG cũ trước khi vẽ lại
-    if array.size(fvgBoxes) > 0
-        for bx in fvgBoxes
-            box.delete(bx)
-        array.clear(fvgBoxes)
-    
-    int startWaveIdx = math.max(0, pSize - fvgWavesInput)
-    for i = startWaveIdx to pSize - 1
-        ZigZagLib.Pivot p = array.get(zigZag.pivots, i)
-        if not na(p.ln)
-            int x1 = int(line.get_x1(p.ln))
-            int x2 = int(line.get_x2(p.ln))
-            int wStart = math.min(x1, x2)
-            int wEnd   = math.max(x1, x2)
-            
-            if wEnd > wStart and array.size(recentFvgs) > 0
-                for item in recentFvgs
-                    // Chỉ lấy các FVG xuất hiện trong phạm vi thời gian của con sóng này
-                    if item.fvgTime >= wStart and item.fvgTime <= wEnd
-                        bool matchFilter = (fvgTypeInput == "All FVGs") or (item.isBull and p.isHigh) or (not item.isBull and not p.isHigh)
-                        if matchFilter
-                            int fvgEnd = (fvgExtendInput == "Current Bar") ? time : wEnd
-                            color boxBg = item.isBull ? fvgBullColor : fvgBearColor
-                            color boxBorder = item.isBull ? fvgBorderBull : fvgBorderBear
-                            box bx = box.new(
-                                left         = item.fvgTime,
-                                top          = item.top,
-                                right        = fvgEnd,
-                                bottom       = item.bottom,
-                                xloc         = xloc.bar_time,
-                                border_color = boxBorder,
-                                border_width = 1,
-                                bgcolor      = boxBg,
-                                text         = "FVG",
-                                text_size    = size.tiny,
-                                text_color   = color.new(color.white, 30),
-                                text_halign  = text.align_right,
-                                text_valign  = text.align_center
-                            )
-                            array.push(fvgBoxes, bx)
-
-if not showFvgInput and barstate.islast and array.size(fvgBoxes) > 0
-    for bx in fvgBoxes
-        box.delete(bx)
-    array.clear(fvgBoxes)
 
 
 
@@ -344,11 +347,11 @@ if shortSlDist < ta.atr(14) * 0.5
     shortSlPrice := close + shortSlDist
 float shortTpPrice = close - (shortSlDist * rrrInput)
 
-// Kích hoạt Long khi kết thúc sóng giảm thỏa điều kiện
-bool longSignal = showLongSignals and isNewPivotConfirmed and validLongWaveStructure
+// Kích hoạt Long khi kết thúc sóng giảm thỏa điều kiện VÀ không có vị thế Short đang mở
+bool longSignal = showLongSignals and isNewPivotConfirmed and validLongWaveStructure and strategy.position_size >= 0
 
-// Kích hoạt Short khi kết thúc sóng tăng thỏa điều kiện
-bool shortSignal = showShortSignals and isNewPivotConfirmed and validShortWaveStructure
+// Kích hoạt Short khi kết thúc sóng tăng thỏa điều kiện VÀ không có vị thế Long đang mở
+bool shortSignal = showShortSignals and isNewPivotConfirmed and validShortWaveStructure and strategy.position_size <= 0
 
 // Đỉnh sóng 1 mạnh (lineWidth = 2) cho Long
 ZigZagLib.Pivot wave1P_Long = (pSize >= 2) ? array.get(zigZag.pivots, pSize - 2) : na
@@ -360,24 +363,75 @@ ZigZagLib.Pivot wave1P_Short = (pSize >= 2) ? array.get(zigZag.pivots, pSize - 2
 float tp1Short = (not na(wave1P_Short) and not na(wave1P_Short.ln)) ? math.min(line.get_y1(wave1P_Short.ln), line.get_y2(wave1P_Short.ln)) : low
 float tp2Short = shortTpPrice
 
+// Tìm mức đáy sóng giảm gần nhất (Recent Down Wave Low) và đỉnh sóng tăng gần nhất (Recent Up Wave High)
+float latestDownWaveLow = na
+float latestUpWaveHigh  = na
+
+if pSize > 0
+    for k = pSize - 1 to math.max(0, pSize - 4)
+        ZigZagLib.Pivot p = array.get(zigZag.pivots, k)
+        if not na(p.ln)
+            if na(latestDownWaveLow) and not p.isHigh
+                latestDownWaveLow := math.min(line.get_y1(p.ln), line.get_y2(p.ln))
+            if na(latestUpWaveHigh) and p.isHigh
+                latestUpWaveHigh := math.max(line.get_y1(p.ln), line.get_y2(p.ln))
+        if not na(latestDownWaveLow) and not na(latestUpWaveHigh)
+            break
+
+// Biến theo dõi trạng thái đã chốt lời 50% (TP1) cho vị thế hiện tại
+var bool  isLongPartialFilled  = false
+var bool  isShortPartialFilled = false
+var float activeTp1Long        = na
+var float activeTp1Short       = na
+
+// Cập nhật trạng thái TP1 khi giá chạm mốc TP1 trong quá trình giữ vị thế
+if strategy.position_size > 0
+    if not na(activeTp1Long) and high >= activeTp1Long
+        isLongPartialFilled := true
+else if strategy.position_size < 0
+    if not na(activeTp1Short) and low <= activeTp1Short
+        isShortPartialFilled := true
+else
+    isLongPartialFilled  := false
+    isShortPartialFilled := false
+    activeTp1Long        := na
+    activeTp1Short       := na
+
+// Lấy nến vào lệnh gần nhất để ngăn việc đóng lệnh ngay trên cây nến vừa mở
+int lastEntryBar = (strategy.opentrades > 0) ? strategy.opentrades.entry_bar_index(strategy.opentrades - 1) : -1
+
 // Thực thi Strategy Entry / Exit
-// 1. Vào lệnh Long: Chốt lời 50% tại đỉnh cũ sóng mạnh, 50% còn lại theo RRR
+// 1. Đóng phần còn lại của Long nếu giá phá đáy 1 sóng giảm (CHỈ THỰC HIỆN SAU KHI ĐÃ PARTIAL EXIT)
+if strategy.position_size > 0 and bar_index > lastEntryBar and isLongPartialFilled and not na(latestDownWaveLow)
+    if close < latestDownWaveLow
+        strategy.close("Long", comment = "Close Long Post-TP1 (Break Wave Low)")
+
+// 2. Đóng phần còn lại của Short nếu giá phá đỉnh 1 sóng tăng (CHỈ THỰC HIỆN SAU KHI ĐÃ PARTIAL EXIT)
+if strategy.position_size < 0 and bar_index > lastEntryBar and isShortPartialFilled and not na(latestUpWaveHigh)
+    if close > latestUpWaveHigh
+        strategy.close("Short", comment = "Close Short Post-TP1 (Break Wave High)")
+
+// 3. Vào lệnh Long: Chốt lời 50% tại đỉnh cũ sóng mạnh (TP1), 50% còn lại theo RRR (TP2), dừng lỗ tại SL
 if longSignal
+    isLongPartialFilled := false
+    activeTp1Long       := (partialTpInput and tp1Long > close) ? tp1Long : na
     strategy.entry("Long", strategy.long)
     if partialTpInput and tp1Long > close
-        strategy.exit("TP1 Long", from_entry = "Long", qty_percent = 50, limit = tp1Long)
-        strategy.exit("TP2 Long", from_entry = "Long", limit = tp2Long)
+        strategy.exit("TP1 Long", from_entry = "Long", qty_percent = 50, limit = tp1Long, stop = slPrice, comment_profit = "TP1 Long", comment_loss = "SL Long")
+        strategy.exit("TP2 Long", from_entry = "Long", limit = tp2Long, stop = slPrice, comment_profit = "TP2 Long", comment_loss = "SL Long")
     else
-        strategy.exit("Exit Long", from_entry = "Long", limit = tp2Long)
+        strategy.exit("Exit Long", from_entry = "Long", stop = slPrice, limit = tp2Long, comment_profit = "TP Long", comment_loss = "SL Long")
 
-// 2. Vào lệnh Short: Chốt lời 50% tại đáy cũ sóng mạnh, 50% còn lại theo RRR
+// 4. Vào lệnh Short: Chốt lời 50% tại đáy cũ sóng mạnh (TP1), 50% còn lại theo RRR (TP2), dừng lỗ tại SL
 if shortSignal
+    isShortPartialFilled := false
+    activeTp1Short        := (partialTpInput and tp1Short < close) ? tp1Short : na
     strategy.entry("Short", strategy.short)
     if partialTpInput and tp1Short < close
-        strategy.exit("TP1 Short", from_entry = "Short", qty_percent = 50, limit = tp1Short)
-        strategy.exit("TP2 Short", from_entry = "Short", limit = tp2Short)
+        strategy.exit("TP1 Short", from_entry = "Short", qty_percent = 50, limit = tp1Short, stop = shortSlPrice, comment_profit = "TP1 Short", comment_loss = "SL Short")
+        strategy.exit("TP2 Short", from_entry = "Short", limit = tp2Short, stop = shortSlPrice, comment_profit = "TP2 Short", comment_loss = "SL Short")
     else
-        strategy.exit("Exit Short", from_entry = "Short", limit = tp2Short)
+        strategy.exit("Exit Short", from_entry = "Short", stop = shortSlPrice, limit = tp2Short, comment_profit = "TP Short", comment_loss = "SL Short")
 
 // Cập nhật số lượng pivot đã xử lý sau khi đã thực thi logic tín hiệu
 if isNewPivotConfirmed
@@ -455,6 +509,14 @@ if shortSignal and showTpSlLines
         style     = label.style_label_left,
         size      = size.small
     )
+
+// Xóa Entry, SL, TP Lines và Label khi vị thế được đóng (bằng SL, Close, hoặc TP hoàn tất)
+if strategy.position_size == 0
+    line.delete(entryLine)
+    line.delete(slLine)
+    line.delete(tpLine1)
+    line.delete(tpLine2)
+    label.delete(sigLabel)
 
 // Cấu hình Alerts
 alertcondition(longSignal, title = "Long Signal Alert", message = "Long Signal Triggered! Entry: {{close}}, SL: {{plot_0}}, TP: {{plot_1}}")
