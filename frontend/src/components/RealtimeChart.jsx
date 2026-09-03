@@ -1,16 +1,50 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { getFuturesHistory } from '../services/tcbs';
 import { evaluateRule } from '../utils/ruleEngine';
-import { calculateVWAP, drawVWAP } from '../indicators/vwap';
+import { calculateVWAP } from '../indicators/vwap';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
+import { RefreshCw } from 'lucide-react';
 
-const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], wsTick, wsStatus }) => {
+// Robust helper to parse trading date string/number to Unix timestamp in seconds
+const parseTradingDateToTimestamp = (dateInput) => {
+    if (!dateInput) return null;
+    if (typeof dateInput === 'number') {
+        return dateInput > 1e11 ? Math.floor(dateInput / 1000) : dateInput;
+    }
+    const str = String(dateInput).trim();
+    if (str.includes('Z') || str.includes('+')) {
+        const d = new Date(str);
+        return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
+    }
+    // Match "YYYY-MM-DD HH:mm:ss" or "YYYY/MM/DD HH:mm:ss" or "YYYY-MM-DDTHH:mm:ss"
+    const match = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (match) {
+        const year = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10) - 1;
+        const day = parseInt(match[3], 10);
+        const hour = match[4] ? parseInt(match[4], 10) : 0;
+        const minute = match[5] ? parseInt(match[5], 10) : 0;
+        const second = match[6] ? parseInt(match[6], 10) : 0;
+        const d = new Date(year, month, day, hour, minute, second);
+        return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
+};
+
+const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], wsTick, wsStatus, refreshTrigger = 0 }) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
-    const indicatorSeriesRef = useRef([]); // Stores references to active VWAP and Supertrend series
+
+    // Persistent indicator series refs
+    const vwapMainSeriesRef = useRef(null);
+    const vwapBandsSeriesRef = useRef([]); // [upper1, lower1, upper2, lower2, upper3, lower3]
+    const supertrendSeriesRef = useRef([]); // Array of segment series
+
     const [status, setStatus] = useState('Connecting...');
+    const [refreshingHistory, setRefreshingHistory] = useState(false);
 
     // Indicator display toggles & live metrics
     const [showVWAP, setShowVWAP] = useState(true);
@@ -22,88 +56,38 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         supertrendDirection: null
     });
 
-    const candleDataRef = useRef([]); // Stores finished candles and current candle
-    const currentCandleRef = useRef(null);
+    const candleDataRef = useRef([]); // Finished historical candles
+    const currentCandleRef = useRef(null); // Active building candle
     const strategyRulesRef = useRef(strategyRules);
+
+    // Cached markers to avoid re-evaluating 600+ candles on every tick
+    const historicalMarkersRef = useRef([]);
     const lastMarkersStrRef = useRef('');
+    const lastMarkerUpdateRef = useRef(0);
 
-    // Render VWAP and Supertrend indicators on top of the chart
-    const renderIndicators = useCallback(() => {
-        if (!chartRef.current) return;
+    // Latest tick buffer for RAF
+    const pendingTickRef = useRef(null);
+    const rafIdRef = useRef(null);
 
-        // Clear existing indicator series
-        indicatorSeriesRef.current.forEach(series => {
-            try {
-                chartRef.current?.removeSeries(series);
-            } catch (e) {
-                // Ignore removal error if already cleaned up
-            }
-        });
-        indicatorSeriesRef.current = [];
+    // Keep strategy rules ref updated
+    useEffect(() => {
+        strategyRulesRef.current = strategyRules;
+    }, [strategyRules]);
 
-        const currentData = candleDataRef.current;
-        if (!currentData || currentData.length === 0) return;
+    // Format time helper
+    const formatTime = useCallback((time) => {
+        if (typeof time === 'number') return time;
+        if (typeof time === 'string' && time.includes('T')) return time.split('T')[0];
+        return time;
+    }, []);
 
-        const fullData = [...currentData];
-        if (currentCandleRef.current && (fullData.length === 0 || fullData[fullData.length - 1].time !== currentCandleRef.current.time)) {
-            fullData.push(currentCandleRef.current);
-        }
-
-        if (fullData.length === 0) return;
-
-        let latestVwapVal = null;
-        let latestStVal = null;
-        let latestStDir = null;
-
-        // 1. Calculate & Draw VWAP + 3 Upper & Lower SD Bands (Day-anchored)
-        if (showVWAP) {
-            try {
-                const vwapData = calculateVWAP(fullData, 'Day');
-                if (vwapData && vwapData.length > 0) {
-                    const createdVwapSeries = drawVWAP(chartRef.current, LineSeries, vwapData, {
-                        color: '#ffffff', // clean white for main VWAP
-                        lineWidth: 2,
-                        showBands: showVWAPBands,
-                        title: 'VWAP',
-                    });
-                    indicatorSeriesRef.current.push(...createdVwapSeries);
-                    latestVwapVal = vwapData[vwapData.length - 1]?.value;
-                }
-            } catch (err) {
-                console.error('Failed to draw VWAP on RealtimeChart:', err);
-            }
-        }
-
-        // 2. Calculate & Draw Supertrend (10, 3)
-        if (showSupertrend) {
-            try {
-                const supertrendData = calculateSupertrend(10, 3, fullData);
-                if (supertrendData && supertrendData.length > 0) {
-                    const createdStSeries = drawSupertrend(chartRef.current, LineSeries, supertrendData, {
-                        lineWidth: 1,
-                    });
-                    indicatorSeriesRef.current.push(...createdStSeries);
-                    const lastSt = supertrendData[supertrendData.length - 1];
-                    latestStVal = lastSt?.value;
-                    latestStDir = lastSt?.direction;
-                }
-            } catch (err) {
-                console.error('Failed to draw Supertrend on RealtimeChart:', err);
-            }
-        }
-
-        setIndicatorStats({
-            vwap: latestVwapVal,
-            supertrend: latestStVal,
-            supertrendDirection: latestStDir
-        });
-    }, [showVWAP, showVWAPBands, showSupertrend]);
-
-    const updateMarkers = () => {
+    // Full scan marker evaluation (runs ONLY when history loads or strategy changes)
+    const computeAllMarkers = useCallback(() => {
         if (!seriesRef.current) return;
 
         const currentRules = strategyRulesRef.current;
         if (!currentRules || currentRules.length === 0) {
+            historicalMarkersRef.current = [];
             try { createSeriesMarkers(seriesRef.current, []); } catch (e) { }
             lastMarkersStrRef.current = '';
             return;
@@ -112,7 +96,6 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         const currentData = candleDataRef.current;
         if (!currentData || currentData.length === 0) return;
 
-        // Build the full array including the current live candle
         const fullData = [...currentData];
         if (currentCandleRef.current && (fullData.length === 0 || fullData[fullData.length - 1].time !== currentCandleRef.current.time)) {
             fullData.push(currentCandleRef.current);
@@ -129,14 +112,11 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             }
             if (!ruleDefinition) return;
 
-            // Scan through candles to identify match signals
             for (let i = 0; i < descHistory.length; i++) {
                 try {
                     const isMatch = evaluateRule(descHistory, ruleDefinition, i);
                     if (isMatch) {
-                        // Check if previous candle in time (i + 1 in DESC array) also matched
                         const prevMatch = (i + 1 < descHistory.length) ? evaluateRule(descHistory, ruleDefinition, i + 1) : false;
-                        // Trigger on signal onset (crossover/change) or single isolated signal
                         if (!prevMatch || i === 0) {
                             generatedSignals.push({
                                 time: descHistory[i].time,
@@ -150,17 +130,17 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             }
         });
 
-        // Map to lightweight-charts markers
+        const colors = {
+            entry: '#38bdf8',
+            takeprofit: '#34d399',
+            stoploss: '#f87171',
+            exit: '#fb923c',
+            rule: '#a78bfa',
+            unknown: '#9ca3af'
+        };
+
         const markers = generatedSignals.map(sig => {
             const rawType = (sig.rule.Type || sig.rule.type || '').toLowerCase();
-            const colors = {
-                entry: '#38bdf8', // bright sky blue
-                takeprofit: '#34d399', // bright emerald green
-                stoploss: '#f87171', // bright red
-                exit: '#fb923c', // orange
-                rule: '#a78bfa', // purple
-                unknown: '#9ca3af'
-            };
             const isEntry = rawType === 'entry';
             return {
                 time: sig.time,
@@ -172,7 +152,6 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             };
         });
 
-        // lightweight-charts strictly requires markers to be sorted by time ascending AND unique
         const uniqueTimes = new Map();
         markers.forEach(m => {
             if (uniqueTimes.has(m.time)) {
@@ -185,87 +164,326 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             }
         });
 
-        const finalMarkers = Array.from(uniqueTimes.values());
-        finalMarkers.sort((a, b) => a.time - b.time);
+        const finalMarkers = Array.from(uniqueTimes.values()).sort((a, b) => a.time - b.time);
+        historicalMarkersRef.current = finalMarkers;
 
         const markersStr = JSON.stringify(finalMarkers);
-        if (markersStr === lastMarkersStrRef.current) {
-            return;
+        if (markersStr !== lastMarkersStrRef.current) {
+            lastMarkersStrRef.current = markersStr;
+            try {
+                createSeriesMarkers(seriesRef.current, finalMarkers);
+            } catch (e) {
+                console.error('RealtimeChart Set Markers Error:', e);
+            }
         }
-        lastMarkersStrRef.current = markersStr;
+    }, []);
 
-        try {
-            createSeriesMarkers(seriesRef.current, finalMarkers);
-        } catch (e) {
-            console.error('RealtimeChart Set Markers Error:', e);
+    // Quick marker update on live candle (only checks latest candle index 0)
+    const updateLiveMarker = useCallback(() => {
+        if (!seriesRef.current) return;
+        const currentRules = strategyRulesRef.current;
+        if (!currentRules || currentRules.length === 0) return;
+
+        const now = Date.now();
+        if (now - lastMarkerUpdateRef.current < 1000) return; // Throttle to at most once per sec
+        lastMarkerUpdateRef.current = now;
+
+        const current = currentCandleRef.current;
+        if (!current) return;
+
+        const descHistory = [current, ...[...candleDataRef.current].reverse()];
+        const liveSignals = [];
+
+        currentRules.forEach(rule => {
+            let ruleDefinition = rule.Rule || rule.rule;
+            if (typeof ruleDefinition === 'string') {
+                try { ruleDefinition = JSON.parse(ruleDefinition); } catch (e) { }
+            }
+            if (!ruleDefinition) return;
+
+            try {
+                if (evaluateRule(descHistory, ruleDefinition, 0)) {
+                    const prevMatch = (descHistory.length > 1) ? evaluateRule(descHistory, ruleDefinition, 1) : false;
+                    if (!prevMatch) {
+                        liveSignals.push({ time: current.time, rule });
+                    }
+                }
+            } catch (e) { }
+        });
+
+        const colors = {
+            entry: '#38bdf8',
+            takeprofit: '#34d399',
+            stoploss: '#f87171',
+            exit: '#fb923c',
+            rule: '#a78bfa',
+            unknown: '#9ca3af'
+        };
+
+        const existingWithoutCurrent = historicalMarkersRef.current.filter(m => m.time !== current.time);
+        liveSignals.forEach(sig => {
+            const rawType = (sig.rule.Type || sig.rule.type || '').toLowerCase();
+            const isEntry = rawType === 'entry';
+            existingWithoutCurrent.push({
+                time: current.time,
+                position: isEntry ? 'belowBar' : 'aboveBar',
+                color: colors[rawType] || colors.unknown,
+                shape: isEntry ? 'arrowUp' : 'arrowDown',
+                text: sig.rule.Name || sig.rule.name || rawType.toUpperCase(),
+                size: 2
+            });
+        });
+
+        existingWithoutCurrent.sort((a, b) => a.time - b.time);
+        const markersStr = JSON.stringify(existingWithoutCurrent);
+        if (markersStr !== lastMarkersStrRef.current) {
+            lastMarkersStrRef.current = markersStr;
+            try {
+                createSeriesMarkers(seriesRef.current, existingWithoutCurrent);
+            } catch (e) { }
         }
-    };
+    }, []);
+
+    // Update Indicator Data without destroying series
+    const updateIndicatorsData = useCallback(() => {
+        if (!chartRef.current) return;
+
+        const currentData = candleDataRef.current;
+        if (!currentData || currentData.length === 0) return;
+
+        const fullData = [...currentData];
+        if (currentCandleRef.current && (fullData.length === 0 || fullData[fullData.length - 1].time !== currentCandleRef.current.time)) {
+            fullData.push(currentCandleRef.current);
+        }
+        if (fullData.length === 0) return;
+
+        let latestVwapVal = null;
+        let latestStVal = null;
+        let latestStDir = null;
+
+        // 1. VWAP Calculation & Set Data
+        try {
+            const vwapData = calculateVWAP(fullData, 'Day');
+            if (vwapData && vwapData.length > 0) {
+                if (vwapMainSeriesRef.current) {
+                    vwapMainSeriesRef.current.setData(vwapData.map(item => ({
+                        time: formatTime(item.time),
+                        value: item.value
+                    })));
+                }
+
+                // Update 6 Bands
+                const bandKeys = ['upper1', 'lower1', 'upper2', 'lower2', 'upper3', 'lower3'];
+                vwapBandsSeriesRef.current.forEach((bandSeries, idx) => {
+                    const key = bandKeys[idx];
+                    if (bandSeries && key) {
+                        bandSeries.setData(vwapData.map(item => ({
+                            time: formatTime(item.time),
+                            value: item[key]
+                        })));
+                    }
+                });
+
+                latestVwapVal = vwapData[vwapData.length - 1]?.value;
+            }
+        } catch (err) {
+            console.error('Failed to calculate VWAP:', err);
+        }
+
+        // 2. Supertrend Calculation & Segment Series
+        try {
+            const supertrendData = calculateSupertrend(10, 3, fullData);
+            if (supertrendData && supertrendData.length > 0) {
+                // Clear old supertrend series safely
+                supertrendSeriesRef.current.forEach(series => {
+                    try { chartRef.current?.removeSeries(series); } catch (e) { }
+                });
+                supertrendSeriesRef.current = [];
+
+                const createdStSeries = drawSupertrend(chartRef.current, LineSeries, supertrendData, {
+                    lineWidth: 1,
+                    visible: showSupertrend
+                });
+                supertrendSeriesRef.current = createdStSeries;
+
+                const lastSt = supertrendData[supertrendData.length - 1];
+                latestStVal = lastSt?.value;
+                latestStDir = lastSt?.direction;
+            }
+        } catch (err) {
+            console.error('Failed to calculate Supertrend:', err);
+        }
+
+        setIndicatorStats({
+            vwap: latestVwapVal,
+            supertrend: latestStVal,
+            supertrendDirection: latestStDir
+        });
+    }, [formatTime, showSupertrend]);
+
+    // Apply visibility toggles instantaneously
+    useEffect(() => {
+        if (vwapMainSeriesRef.current) {
+            vwapMainSeriesRef.current.applyOptions({ visible: showVWAP });
+        }
+        vwapBandsSeriesRef.current.forEach(s => {
+            s?.applyOptions({ visible: showVWAP && showVWAPBands });
+        });
+    }, [showVWAP, showVWAPBands]);
+
+    useEffect(() => {
+        supertrendSeriesRef.current.forEach(s => {
+            s?.applyOptions({ visible: showSupertrend });
+        });
+    }, [showSupertrend]);
+
+    // When strategyRules change, recompute full markers
+    useEffect(() => {
+        computeAllMarkers();
+    }, [strategyRules, computeAllMarkers]);
 
     useEffect(() => {
         setStatus(wsStatus || 'Connecting...');
     }, [wsStatus]);
 
-    // Handle incoming ticks from parent WebSocket
+    // Load & Synchronize Historical Candles from REST
+    const loadHistory = useCallback(async (isRefresh = false) => {
+        if (!symbol || !seriesRef.current) return;
+        try {
+            if (!isRefresh) setStatus('Loading Historical Data...');
+            setRefreshingHistory(true);
+
+            const hisData = await getFuturesHistory(symbol, 'derivative', '1');
+
+            if (Array.isArray(hisData) && hisData.length > 0) {
+                const mappedData = hisData.map(item => {
+                    const timeStamp = parseTradingDateToTimestamp(item.tradingDate || item.date || item.time);
+                    return {
+                        time: timeStamp,
+                        date: item.tradingDate || item.date || new Date((timeStamp || 0) * 1000).toISOString(),
+                        open: Number(item.open),
+                        high: Number(item.high),
+                        low: Number(item.low),
+                        close: Number(item.close),
+                        volume: Number(item.volume || item.v || 1)
+                    };
+                }).filter(item => item.time !== null).sort((a, b) => a.time - b.time);
+
+                if (mappedData.length > 0) {
+                    const lastCandle = mappedData.pop();
+                    currentCandleRef.current = lastCandle;
+                    candleDataRef.current = mappedData;
+                    seriesRef.current.setData([...mappedData, lastCandle]);
+
+                    // Update indicators & markers
+                    updateIndicatorsData();
+                    computeAllMarkers();
+                }
+            }
+        } catch (error) {
+            console.error("Failed to load REST historical data:", error);
+        } finally {
+            setRefreshingHistory(false);
+        }
+    }, [symbol, computeAllMarkers, updateIndicatorsData]);
+
+    // Refresh history on external trigger (e.g. user clicked Refresh Price button in parent)
+    useEffect(() => {
+        if (refreshTrigger > 0) {
+            loadHistory(true);
+        }
+    }, [refreshTrigger, loadHistory]);
+
+    // Auto-sync historical candles periodically (every 30s) to guarantee no missing minutes
+    useEffect(() => {
+        if (!symbol || !jwtToken) return;
+        const interval = setInterval(() => {
+            loadHistory(true);
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [symbol, jwtToken, loadHistory]);
+
+    // Process buffered WS tick via RAF
+    const processTick = useCallback(() => {
+        rafIdRef.current = null;
+        const tick = pendingTickRef.current;
+        if (!tick || !seriesRef.current) return;
+
+        const price = Number(
+            tick.mp ||
+            tick.matchPrice ||
+            tick.lastPrice ||
+            tick.price ||
+            tick.bp1 ||
+            tick.bidPrice01 ||
+            tick.op1 ||
+            tick.offerPrice01
+        );
+
+        if (!price || isNaN(price)) return;
+
+        // Accurate tick timestamp calculation
+        let timeStamp;
+        if (tick.s && typeof tick.s === 'number') {
+            timeStamp = Math.floor(tick.s / 60) * 60;
+        } else if (tick.tm && typeof tick.tm === 'string' && tick.tm.includes(':')) {
+            const parts = tick.tm.split(':');
+            const now = new Date();
+            now.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
+            timeStamp = Math.floor(now.getTime() / 1000);
+        } else {
+            const now = new Date();
+            const coeff = 1000 * 60; // 1 min bucket
+            timeStamp = Math.floor(Math.floor(now.getTime() / coeff) * 60);
+        }
+
+        let current = currentCandleRef.current;
+        let isNewCandle = false;
+
+        if (current && current.time === timeStamp) {
+            current.high = Math.max(current.high, price);
+            current.low = Math.min(current.low, price);
+            current.close = price;
+        } else {
+            if (current) {
+                candleDataRef.current.push({ ...current });
+                isNewCandle = true;
+            }
+            current = {
+                time: timeStamp,
+                date: new Date(timeStamp * 1000).toISOString(),
+                open: current ? current.close : price,
+                high: price,
+                low: price,
+                close: price,
+                volume: 1
+            };
+            currentCandleRef.current = current;
+        }
+
+        // 1. Fast direct O(1) chart update
+        seriesRef.current.update(current);
+
+        // 2. If new candle formed, update indicators & full markers
+        if (isNewCandle) {
+            updateIndicatorsData();
+            computeAllMarkers();
+        } else {
+            // Otherwise quick live marker check
+            updateLiveMarker();
+        }
+    }, [computeAllMarkers, updateIndicatorsData, updateLiveMarker]);
+
+    // Receive wsTick and schedule RAF
     useEffect(() => {
         if (!wsTick || !seriesRef.current) return;
-
-        try {
-            const price = Number(
-                wsTick.mp ||
-                wsTick.matchPrice ||
-                wsTick.lastPrice ||
-                wsTick.price ||
-                wsTick.bidPrice01 ||
-                wsTick.offerPrice01
-            );
-
-            if (price && !isNaN(price)) {
-                const now = new Date();
-                const coeff = 1000 * 60; // 1 min bucket
-                const rounded = new Date(Math.floor(now.getTime() / coeff) * coeff);
-                const timeStamp = Math.floor(rounded.getTime() / 1000);
-
-                let current = currentCandleRef.current;
-                if (current && current.time === timeStamp) {
-                    current.high = Math.max(current.high, price);
-                    current.low = Math.min(current.low, price);
-                    current.close = price;
-                } else {
-                    if (current) {
-                        candleDataRef.current.push({ ...current });
-                    }
-                    current = {
-                        time: timeStamp,
-                        date: new Date(timeStamp * 1000).toISOString(),
-                        open: current ? current.close : price,
-                        high: price,
-                        low: price,
-                        close: price,
-                        volume: 1
-                    };
-                    currentCandleRef.current = current;
-                }
-
-                // Update chart
-                seriesRef.current.update(current);
-                updateMarkers();
-            }
-        } catch (e) {
-            console.error('RealtimeChart process tick error:', e);
+        pendingTickRef.current = wsTick;
+        if (!rafIdRef.current) {
+            rafIdRef.current = requestAnimationFrame(processTick);
         }
-    }, [wsTick]);
+    }, [wsTick, processTick]);
 
-    useEffect(() => {
-        strategyRulesRef.current = strategyRules;
-        updateMarkers();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [strategyRules]);
-
-    // Re-render indicators when showVWAP / showSupertrend toggle changes
-    useEffect(() => {
-        renderIndicators();
-    }, [renderIndicators]);
-
+    // Initialize chart
     useEffect(() => {
         if (!symbol) return;
         if (!chartContainerRef.current) return;
@@ -278,7 +496,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         // Initialize lightweight chart
         const chart = createChart(chartContainerRef.current, {
             layout: {
-                background: { type: ColorType.Solid, color: '#111827' }, // matching app theme
+                background: { type: ColorType.Solid, color: '#111827' },
                 textColor: '#9ca3af',
             },
             grid: {
@@ -287,7 +505,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             },
             timeScale: {
                 borderColor: '#374151',
-                timeVisible: true, // Show intraday time
+                timeVisible: true,
                 secondsVisible: false,
             },
             rightPriceScale: {
@@ -315,66 +533,70 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         chartRef.current = chart;
         seriesRef.current = candlestickSeries;
 
-        const loadHistoryAndConnect = async () => {
-            try {
-                setStatus('Loading Historical Data...');
+        // Initialize VWAP main line
+        const vwapMain = chart.addSeries(LineSeries, {
+            color: '#ffffff',
+            lineWidth: 2,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'VWAP',
+            visible: showVWAP,
+        });
+        vwapMainSeriesRef.current = vwapMain;
 
-                // Fetch generic stock history using 1-minute resolution for derivatives
-                try {
-                    const hisData = await getFuturesHistory(symbol, 'derivative', '1');
+        // Initialize 6 VWAP Bands (Upper & Lower ±1, ±2, ±3 SD) - More prominent & vibrant
+        const bandColors = [
+            'rgba(56, 189, 248, 0.75)', // ±1 SD Sky Blue (Upper 1)
+            'rgba(56, 189, 248, 0.75)', // ±1 SD Sky Blue (Lower 1)
+            'rgba(251, 191, 36, 0.80)', // ±2 SD Amber (Upper 2)
+            'rgba(251, 191, 36, 0.80)', // ±2 SD Amber (Lower 2)
+            'rgba(244, 63, 94, 0.85)',   // ±3 SD Rose (Upper 3)
+            'rgba(244, 63, 94, 0.85)',   // ±3 SD Rose (Lower 3)
+        ];
+        const createdBands = [];
+        for (let i = 0; i < 6; i++) {
+            const bandSeries = chart.addSeries(LineSeries, {
+                color: bandColors[i],
+                lineWidth: 1,
+                lineStyle: 2, // Dashed
+                crosshairMarkerVisible: false,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                visible: showVWAP && showVWAPBands,
+            });
+            createdBands.push(bandSeries);
+        }
+        vwapBandsSeriesRef.current = createdBands;
 
-                    if (Array.isArray(hisData) && hisData.length > 0) {
-                        const mappedData = hisData.map(item => {
-                            const date = new Date(item.tradingDate);
-                            return {
-                                time: Math.floor(date.getTime() / 1000),
-                                date: item.tradingDate,
-                                open: Number(item.open),
-                                high: Number(item.high),
-                                low: Number(item.low),
-                                close: Number(item.close),
-                                volume: Number(item.volume || item.v || 1)
-                            };
-                        }).sort((a, b) => a.time - b.time);
+        // Load initial history
+        loadHistory(false);
 
-                        if (mappedData.length > 0) {
-                            const lastCandle = mappedData.pop();
-                            currentCandleRef.current = lastCandle;
-                            candleDataRef.current = mappedData;
-                            seriesRef.current.setData([...mappedData, lastCandle]);
-                            setTimeout(() => {
-                                updateMarkers();
-                                renderIndicators();
-                            }, 0);
-                        }
-                    }
-                } catch (e) {
-                    console.warn("Failed to fetch getFutureHistory:", e);
-                }
-            } catch (error) {
-                console.error("Failed to load REST historical data:", error);
+        // Handle Resize with ResizeObserver
+        const resizeObserver = new ResizeObserver(entries => {
+            if (!entries || entries.length === 0 || !chartRef.current) return;
+            const { width, height } = entries[0].contentRect;
+            if (width > 0 && height > 0) {
+                chartRef.current.applyOptions({ width, height });
             }
-        };
+        });
 
-        loadHistoryAndConnect();
-
-        // Handle Resize
-        const handleResize = () => {
-            if (chartContainerRef.current) {
-                chart.applyOptions({
-                    width: chartContainerRef.current.clientWidth,
-                    height: chartContainerRef.current.clientHeight,
-                });
-            }
-        };
-        window.addEventListener('resize', handleResize);
+        if (chartContainerRef.current) {
+            resizeObserver.observe(chartContainerRef.current);
+        }
 
         // Cleanup
         return () => {
-            window.removeEventListener('resize', handleResize);
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+            resizeObserver.disconnect();
             chart.remove();
+            chartRef.current = null;
+            seriesRef.current = null;
+            vwapMainSeriesRef.current = null;
+            vwapBandsSeriesRef.current = [];
+            supertrendSeriesRef.current = [];
         };
-    }, [symbol, jwtToken]);
+    }, [symbol, jwtToken, loadHistory]);
 
     return (
         <div className="flex flex-col w-full h-full relative min-h-[300px]">
@@ -387,6 +609,17 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                             {status === 'Connected' ? 'LIVE' : status}
                         </span>
                     </div>
+
+                    {/* Chart Refresh Button */}
+                    <button
+                        type="button"
+                        onClick={() => loadHistory(true)}
+                        disabled={refreshingHistory}
+                        className="p-1.5 bg-gray-900/80 hover:bg-gray-800 border border-gray-700/60 text-gray-400 hover:text-white rounded-lg backdrop-blur transition disabled:opacity-50 shadow-sm cursor-pointer"
+                        title="Làm mới toàn bộ nến & chỉ báo"
+                    >
+                        <RefreshCw size={12} className={refreshingHistory ? "animate-spin text-blue-400" : ""} />
+                    </button>
 
                     {/* VWAP Toggle Button */}
                     <button

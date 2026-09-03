@@ -40,6 +40,7 @@ const Derivation = () => {
     const [showOtpModal, setShowOtpModal] = useState(false);
     const [wsStatus, setWsStatus] = useState('Connecting...');
     const [wsTick, setWsTick] = useState(null);
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     // Order Confirmation Modal states
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -145,6 +146,7 @@ const Derivation = () => {
 
         setLoadingPrice(true);
         setError('');
+        setRefreshTrigger(prev => prev + 1);
         try {
             const data = await getTCBSDerivatives(jwtToken);
             setDerivativeData(data);
@@ -176,38 +178,101 @@ const Derivation = () => {
         }
     };
 
-    // WebSocket Logic moved from RealtimeChart
-    useEffect(() => {
-        if (!activeSymbol || !jwtToken) return;
+    // Ref to throttle UI header updates
+    const lastHeaderUpdateRef = React.useRef(0);
+    const wsRef = React.useRef(null);
+    const activeSymbolRef = React.useRef(activeSymbol);
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/openapi-tcbs/ws/thesis/v1/stream/derivative`;
-        let ws;
+    // Keep activeSymbolRef updated
+    useEffect(() => {
+        activeSymbolRef.current = activeSymbol;
+        // If WebSocket is already connected, send new subscription without reconnecting
+        if (activeSymbol && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            try {
+                wsRef.current.send(`d|s|tk|bp+bi+tm+mp+op+fe |${activeSymbol}`);
+            } catch (e) { }
+        }
+    }, [activeSymbol]);
+
+    // WebSocket Connection Lifecycle
+    useEffect(() => {
+        if (!jwtToken) {
+            setWsStatus('Authentication Required');
+            return;
+        }
+
+        let isUnmounted = false;
+        let reconnectTimer = null;
+        let pingTimer = null;
+        let reconnectAttempts = 0;
+
+        // Try direct TCBS WebSocket URL first, fallback if needed
+        const wsUrl = `wss://openapi.tcbs.com.vn/thesis/v1/stream/derivative`;
 
         const connectWebSocket = () => {
-            console.log('Derivation WS Attempting connection to:', wsUrl);
+            if (isUnmounted) return;
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            console.log('Derivation WS connecting to:', wsUrl);
             setWsStatus('Connecting...');
-            ws = new WebSocket(wsUrl);
+
+            let ws;
+            try {
+                ws = new WebSocket(wsUrl);
+                wsRef.current = ws;
+            } catch (err) {
+                console.error('Failed to create WebSocket:', err);
+                setWsStatus('Connection Error');
+                reconnectTimer = setTimeout(connectWebSocket, 5000);
+                return;
+            }
 
             ws.onopen = () => {
+                if (isUnmounted) {
+                    try { ws.close(); } catch (e) { }
+                    return;
+                }
+                reconnectAttempts = 0;
                 setWsStatus('Authenticating...');
-                const base64Jwt = btoa(jwtToken);
-                const authMsg = `d|a|||${base64Jwt}`;
-                ws.send(authMsg);
+                try {
+                    const base64Jwt = btoa(jwtToken);
+                    ws.send(`d|a|||${base64Jwt}`);
+                } catch (e) {
+                    console.error('WS Auth send error:', e);
+                }
+
+                // Heartbeat Keep-Alive Ping every 25s to avoid idle timeout
+                if (pingTimer) clearInterval(pingTimer);
+                pingTimer = setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        try { ws.send('d|h|||'); } catch (e) { }
+                    }
+                }, 25000);
             };
 
             ws.onmessage = (event) => {
+                if (isUnmounted) return;
+
                 if (typeof event.data === 'string' && event.data.startsWith('d|0|')) {
                     try {
                         const payload = JSON.parse(event.data.substring(4));
                         if (payload.success) {
                             setWsStatus('Connected');
-                            ws.send(`d|s|tk|bp+bi+tm+mp+op+fe |${activeSymbol}`);
+                            const target = activeSymbolRef.current || '41I1G9000';
+                            ws.send(`d|s|tk|bp+bi+tm+mp+op+fe |${target}`);
                         } else {
+                            console.warn('WS Auth Failed:', payload.error);
                             setWsStatus('Auth Failed');
-                            if (payload.error?.message?.includes('Invalid')) setShowOtpModal(true);
+                            if (payload.error?.message?.toLowerCase().includes('invalid') || payload.error?.message?.toLowerCase().includes('expired')) {
+                                setShowOtpModal(true);
+                            }
                         }
-                    } catch (e) { console.error('WS Auth Error:', e); }
+                    } catch (e) {
+                        console.error('WS Auth Error:', e);
+                    }
                     return;
                 }
 
@@ -226,50 +291,80 @@ const Derivation = () => {
                     } else return;
 
                     const items = Array.isArray(data) ? data : [data];
-                    items.forEach(item => {
-                        // Update UI Header (Bid/Offer/MatchPrice)
+                    if (items.length === 0) return;
+
+                    const lastItem = items[items.length - 1];
+
+                    // 1. Pass latest tick to chart directly
+                    setWsTick(lastItem);
+
+                    // 2. Throttle UI Header (Bid/Offer/MatchPrice) updates at most once every 150ms
+                    const now = Date.now();
+                    if (now - lastHeaderUpdateRef.current > 150) {
+                        lastHeaderUpdateRef.current = now;
                         setDerivativeData(prev => {
                             if (!prev) return prev;
                             const current = Array.isArray(prev) ? prev[0] : prev;
-                            // Only update if it refers to the same symbol
-                            if ((current.symbol || current.sec) !== (item.symbol || item.sec || activeSymbol)) return prev;
+                            const curSym = activeSymbolRef.current;
+                            if (curSym && (current.symbol || current.sec) !== (lastItem.symbol || lastItem.sec || curSym)) return prev;
 
                             const updated = {
                                 ...current,
-                                matchPrice: item.mp || item.matchPrice || current.matchPrice,
-                                bidPrice01: item.bp1 || item.bidPrice01 || current.bidPrice01,
-                                bidQtty01: item.bi1 || item.bidQtty01 || current.bidQtty01,
-                                offerPrice01: item.op1 || item.offerPrice01 || current.offerPrice01,
-                                offerQtty01: item.fe1 || item.offerQtty01 || current.offerQtty01
+                                matchPrice: lastItem.mp || lastItem.matchPrice || current.matchPrice,
+                                bidPrice01: lastItem.bp1 || lastItem.bidPrice01 || current.bidPrice01,
+                                bidQtty01: lastItem.bi1 || lastItem.bidQtty01 || current.bidQtty01,
+                                offerPrice01: lastItem.op1 || lastItem.offerPrice01 || current.offerPrice01,
+                                offerQtty01: lastItem.fe1 || lastItem.offerQtty01 || current.offerQtty01
                             };
                             return Array.isArray(prev) ? [updated] : updated;
                         });
+                    }
 
-                        // Pass tick to RealtimeChart
-                        const tickPrice = item.mp || item.matchPrice || item.price ||
-                            item.bp1 || item.bidPrice01 ||
-                            item.op1 || item.offerPrice01 || '';
-
-                        if (tickPrice) {
-                            setWsTick(item);
-                            setEntryPrice(tickPrice.toString());
+                    // 3. Auto fill entry price ONCE if currently empty
+                    setEntryPrice(prevPrice => {
+                        if (!prevPrice) {
+                            const tickPrice = lastItem.mp || lastItem.matchPrice || lastItem.price ||
+                                lastItem.bp1 || lastItem.bidPrice01 || lastItem.op1 || lastItem.offerPrice01 || '';
+                            return tickPrice ? tickPrice.toString() : prevPrice;
                         }
+                        return prevPrice; // Do not overwrite user input
                     });
-                } catch (e) { console.error('Derivation WS Data Error:', e); }
+
+                } catch (e) {
+                    console.error('Derivation WS Data Error:', e);
+                }
             };
 
-            ws.onclose = () => {
+            ws.onclose = (ev) => {
+                if (pingTimer) clearInterval(pingTimer);
+                if (isUnmounted) return;
+
+                console.warn('Derivation WS closed:', ev.code, ev.reason);
+                reconnectAttempts++;
+                const delay = Math.min(2000 * Math.pow(1.5, reconnectAttempts), 10000);
                 setWsStatus('Disconnected. Reconnecting...');
-                setTimeout(connectWebSocket, 5000);
+                reconnectTimer = setTimeout(connectWebSocket, delay);
             };
 
-            ws.onerror = () => setWsStatus('Error connecting WS');
+            ws.onerror = (err) => {
+                if (isUnmounted) return;
+                console.error('Derivation WS error:', err);
+                setWsStatus('Error connecting WS');
+            };
         };
 
         connectWebSocket();
 
-        return () => { if (ws) ws.close(); };
-    }, [activeSymbol, jwtToken]);
+        return () => {
+            isUnmounted = true;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            if (pingTimer) clearInterval(pingTimer);
+            if (wsRef.current) {
+                try { wsRef.current.close(); } catch (e) { }
+                wsRef.current = null;
+            }
+        };
+    }, [jwtToken]);
 
     const handlePlaceOrder = (side) => {
         const price = Number(entryPrice);
@@ -426,6 +521,7 @@ const Derivation = () => {
                                     strategyRules={strategyRules}
                                     wsTick={wsTick}
                                     wsStatus={wsStatus}
+                                    refreshTrigger={refreshTrigger}
                                 />
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-500 italic text-sm absolute inset-0">
@@ -494,9 +590,23 @@ const Derivation = () => {
                             {/* Entry Price & Volume */}
                             <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1 block">
-                                        Giá Mở (Entry)
-                                    </label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block">
+                                            Giá Mở (Entry)
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const info = Array.isArray(derivativeData) ? derivativeData[0] : derivativeData;
+                                                const p = info?.matchPrice || info?.price || info?.bidPrice01 || '';
+                                                if (p) setEntryPrice(p.toString());
+                                            }}
+                                            className="text-[9px] text-blue-400 hover:text-blue-300 font-medium px-1 bg-blue-500/10 rounded border border-blue-500/20 cursor-pointer"
+                                            title="Điền giá khớp thị trường hiện tại"
+                                        >
+                                            Giá TT
+                                        </button>
+                                    </div>
                                     <input
                                         type="number"
                                         className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-mono"
@@ -577,7 +687,7 @@ const Derivation = () => {
 
                     {/* Lực Cung Cầu Phái Sinh (Market Pressure Gauge) */}
                     <div className="flex-1 min-h-[360px] w-full">
-                        <MarketPressureGauge defaultTicker="41I1G9000" className="h-full w-full" />
+                        <MarketPressureGauge defaultTicker={activeSymbol || '41I1G9000'} className="h-full w-full" />
                     </div>
                 </div>
             </div>

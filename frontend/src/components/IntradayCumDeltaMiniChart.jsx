@@ -2,15 +2,51 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { getIntradayBSA } from '../services/tcbs';
 
+// Helper to sort intraday items chronologically (earliest -> latest, left to right)
+const sortChronological = (list) => {
+    if (!Array.isArray(list)) return [];
+    return [...list].sort((a, b) => {
+        const sA = Number(a.s || a.raw?.s) || 0;
+        const sB = Number(b.s || b.raw?.s) || 0;
+        if (sA > 0 && sB > 0 && sA !== sB) return sA - sB;
+
+        const tA = String(a.t || a.time || a.raw?.t || '').trim();
+        const tB = String(b.t || b.time || b.raw?.t || '').trim();
+        if (tA && tB) return tA.localeCompare(tB);
+
+        return sA - sB;
+    });
+};
+
+// Clean time label formatter (HH:mm)
+const formatTimeLabel = (item) => {
+    if (!item) return '--:--';
+    const rawT = item.t || item.time || item.raw?.t;
+    if (rawT && typeof rawT === 'string') {
+        const parts = rawT.split(':');
+        if (parts.length >= 2) {
+            return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+        }
+        return rawT;
+    }
+    if (item.s) {
+        const d = new Date(Number(item.s) * 1000);
+        if (!isNaN(d.getTime())) {
+            return d.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' });
+        }
+    }
+    return '--:--';
+};
+
 const IntradayCumDeltaMiniChart = ({ symbol = '41I1G9000', data = null, className = '' }) => {
     const [fetchedData, setFetchedData] = useState([]);
 
     const fetchData = useCallback(async () => {
         if (!symbol) return;
         try {
-            const res = await getIntradayBSA(symbol, { timeWindow: '5', tWindow: '60m', type: 'all' });
+            const res = await getIntradayBSA(symbol, { timeWindow: '5', tWindow: '1d', type: 'all' });
             const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
-            setFetchedData(list);
+            setFetchedData(sortChronological(list));
         } catch (e) {
             console.error('IntradayCumDeltaMiniChart fetch error:', e);
         }
@@ -35,16 +71,16 @@ const IntradayCumDeltaMiniChart = ({ symbol = '41I1G9000', data = null, classNam
         }
 
         // Chronological order (earliest to latest)
-        const sorted = [...activeData].sort((a, b) => (Number(a.s) || 0) - (Number(b.s) || 0));
+        const sorted = sortChronological(activeData);
         const times = [];
         const numericValues = [];
         let cumDelta = 0;
         const baseline = 0;
 
         sorted.forEach(item => {
-            times.push(item.t || '--:--');
-            const bms = Number(item.bms) || 0;
-            const sms = Number(item.sms) || 0;
+            times.push(formatTimeLabel(item));
+            const bms = Number(item.bms ?? item.bu ?? item.raw?.bms ?? item.raw?.bu) || 0;
+            const sms = Number(item.sms ?? item.sd ?? item.raw?.sms ?? item.raw?.sd) || 0;
             const netVol = bms - sms;
             cumDelta += netVol;
             numericValues.push(cumDelta);

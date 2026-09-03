@@ -2,6 +2,42 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { getIntradayBidAsk } from '../services/tcbs';
 
+// Helper to sort intraday items chronologically (earliest -> latest, left to right)
+const sortChronological = (list) => {
+    if (!Array.isArray(list)) return [];
+    return [...list].sort((a, b) => {
+        const sA = Number(a.s || a.raw?.s) || 0;
+        const sB = Number(b.s || b.raw?.s) || 0;
+        if (sA > 0 && sB > 0 && sA !== sB) return sA - sB;
+
+        const tA = String(a.t || a.time || a.raw?.t || '').trim();
+        const tB = String(b.t || b.time || b.raw?.t || '').trim();
+        if (tA && tB) return tA.localeCompare(tB);
+
+        return sA - sB;
+    });
+};
+
+// Clean time label formatter (HH:mm)
+const formatTimeLabel = (item) => {
+    if (!item) return '--:--';
+    const rawT = item.t || item.time || item.raw?.t;
+    if (rawT && typeof rawT === 'string') {
+        const parts = rawT.split(':');
+        if (parts.length >= 2) {
+            return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+        }
+        return rawT;
+    }
+    if (item.s) {
+        const d = new Date(Number(item.s) * 1000);
+        if (!isNaN(d.getTime())) {
+            return d.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' });
+        }
+    }
+    return '--:--';
+};
+
 const IntradayBidAskRatioMiniChart = ({ symbol = '41I1G9000', data = null, className = '' }) => {
     const [fetchedData, setFetchedData] = useState([]);
 
@@ -36,11 +72,8 @@ const IntradayBidAskRatioMiniChart = ({ symbol = '41I1G9000', data = null, class
                 unifiedMap.set(tStr, { ...existing, bs, oa, obp, osp });
             });
 
-            const mergedList = Array.from(unifiedMap.values()).sort((a, b) => {
-                if (a.t && b.t) return a.t.localeCompare(b.t);
-                return (Number(a.s) || 0) - (Number(b.s) || 0);
-            });
-            setFetchedData(mergedList);
+            const mergedList = Array.from(unifiedMap.values());
+            setFetchedData(sortChronological(mergedList));
         } catch (e) {
             console.error('IntradayBidAskRatioMiniChart fetch error:', e);
         }
@@ -64,17 +97,24 @@ const IntradayBidAskRatioMiniChart = ({ symbol = '41I1G9000', data = null, class
             return { chartOption: {}, latestRatio: null };
         }
 
+        // Always sort chronologically (earliest to latest, left to right)
+        const sorted = sortChronological(activeData);
+
         const times = [];
         const ratioValues = [];
         const baseline = 1.0;
 
-        activeData.forEach(item => {
-            times.push(item.t || '--:--');
-            const bs = Number(item.bs ?? item.bv) || 0;
-            const oa = Number(item.oa ?? item.av) || 0;
+        sorted.forEach(item => {
+            times.push(formatTimeLabel(item));
+            const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv) || 0;
+            const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av) || 0;
             const total = bs + oa;
-            const obp = typeof item.obp === 'number' ? item.obp : (total > 0 ? bs / total : 0.5);
-            const osp = typeof item.osp === 'number' ? item.osp : (total > 0 ? oa / total : 1 - obp);
+            const obp = typeof item.obp === 'number'
+                ? item.obp
+                : (typeof item.raw?.obp === 'number' ? item.raw.obp : (total > 0 ? bs / total : 0.5));
+            const osp = typeof item.osp === 'number'
+                ? item.osp
+                : (typeof item.raw?.osp === 'number' ? item.raw.osp : (total > 0 ? oa / total : 1 - obp));
             const ratio = osp > 0 ? Number((obp / osp).toFixed(3)) : (oa > 0 ? Number((bs / oa).toFixed(3)) : 1.0);
             ratioValues.push(ratio);
         });

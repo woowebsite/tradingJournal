@@ -2,6 +2,34 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, Activity, Zap, Scale, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { getIntradayBSA, getIntradayBidAsk } from '../services/tcbs';
 
+const isTodayRecord = (item) => {
+    if (!item) return false;
+
+    // 1. If timestamp `s` exists (unix timestamp in seconds)
+    if (item.s) {
+        const itemDate = new Date(Number(item.s) * 1000);
+        if (!isNaN(itemDate.getTime())) {
+            const itemDateStr = itemDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+            return itemDateStr === todayStr;
+        }
+    }
+
+    // 2. If date string exists (e.g. item.date or item.tradingDate or item.d)
+    const rawDate = item.date || item.tradingDate || item.d;
+    if (rawDate) {
+        const itemDate = new Date(rawDate);
+        if (!isNaN(itemDate.getTime())) {
+            const itemDateStr = itemDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+            return itemDateStr === todayStr;
+        }
+    }
+
+    // 3. Intraday items with only `t` format (e.g. "09:15") from intraday session
+    return true;
+};
+
 const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) => {
     const [ticker, setTicker] = useState(defaultTicker);
     const [bsaData, setBsaData] = useState([]);
@@ -9,12 +37,18 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
 
+    // Sync with prop changes
+    useEffect(() => {
+        if (defaultTicker) setTicker(defaultTicker);
+    }, [defaultTicker]);
+
     const fetchData = useCallback(async () => {
         if (!ticker) return;
         setLoading(true);
         try {
+            // Use tWindow: '1d' to get all intraday data for today's trading session
             const [resBsa, resBa] = await Promise.allSettled([
-                getIntradayBSA(ticker, { timeWindow: '5', tWindow: '60m', type: 'all' }),
+                getIntradayBSA(ticker, { timeWindow: '5', tWindow: '1d', type: 'all' }),
                 getIntradayBidAsk(ticker, { mode: 'baAll' }),
             ]);
 
@@ -68,16 +102,20 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
         return () => clearInterval(interval);
     }, [fetchData]);
 
-    // Calculate aggregated Metrics & Gauge Position
+    // Calculate aggregated Metrics & Gauge Position STRICTLY FOR TODAY
     const metrics = useMemo(() => {
+        // Filter datasets to ONLY include data for today
+        const todayBsa = bsaData.filter(isTodayRecord);
+        const todayBidAsk = bidAskData.filter(isTodayRecord);
+
         // --- 1. Market Order Pressure (BSA) ---
         let totalBms = 0;
         let totalSms = 0;
         let totalBu = 0;
         let totalSd = 0;
 
-        if (bsaData.length > 0) {
-            bsaData.forEach(item => {
+        if (todayBsa.length > 0) {
+            todayBsa.forEach(item => {
                 totalBms += Number(item.bms ?? item.bu ?? item.raw?.bms ?? item.raw?.bu) || 0;
                 totalSms += Number(item.sms ?? item.sd ?? item.raw?.sms ?? item.raw?.sd) || 0;
                 totalBu += Number(item.bu ?? item.raw?.bu) || 0;
@@ -96,8 +134,8 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
         let totalBs = 0;
         let totalOa = 0;
 
-        if (bidAskData.length > 0) {
-            bidAskData.forEach(item => {
+        if (todayBidAsk.length > 0) {
+            todayBidAsk.forEach(item => {
                 totalBs += Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv) || 0;
                 totalOa += Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av) || 0;
             });
@@ -149,6 +187,13 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
             stanceBorder = '#F87171';
         }
 
+        const todayDateStr = new Date().toLocaleDateString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        });
+
         return {
             totalBms,
             totalSms,
@@ -165,6 +210,8 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
             stanceColor,
             stanceBg,
             stanceBorder,
+            todayDateStr,
+            recordsCount: todayBsa.length,
         };
     }, [bsaData, bidAskData]);
 
@@ -176,15 +223,15 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
                     <Zap size={16} className="text-amber-400" />
                     <span className="font-bold text-white text-sm">Lực Cung Cầu Phái Sinh</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 font-mono border border-amber-500/20">
-                        Realtime
+                        Hôm nay: {metrics.todayDateStr}
                     </span>
                 </div>
                 <button
                     type="button"
                     onClick={fetchData}
                     disabled={loading}
-                    className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition disabled:opacity-50 border border-gray-700"
-                    title="Làm mới lực cung cầu"
+                    className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition disabled:opacity-50 border border-gray-700 cursor-pointer"
+                    title="Làm mới lực cung cầu hôm nay"
                 >
                     <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                 </button>
