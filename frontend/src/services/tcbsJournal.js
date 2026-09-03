@@ -42,7 +42,7 @@ export const getTCBSOrders = async (accountNo, jwtToken) => {
     const headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
+        ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
     };
 
     try {
@@ -73,7 +73,7 @@ export const getTCBSProfile = async (custodyCode, jwtToken) => {
     const headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
+        ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
     };
 
     try {
@@ -101,7 +101,7 @@ export const getTCBSDerivatives = async (jwtToken) => {
     const headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
+        ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
     };
 
     try {
@@ -124,7 +124,7 @@ export const getTCBSIntradayHistory = async (symbol, jwtToken) => {
     const headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
+        ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
     };
 
     try {
@@ -155,7 +155,7 @@ export const getTCBSTickerCommons = async (symbol, jwtToken) => {
     const headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
+        ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
     };
 
     try {
@@ -173,7 +173,7 @@ export const placeTCBSConditionOrder = async (jwtToken, payload) => {
     const headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}`,
+        ...(jwtToken ? { 'Authorization': `Bearer ${jwtToken}` } : {}),
     };
 
     try {
