@@ -545,7 +545,7 @@ const MarketFlow = () => {
                     <h3 className={`font-bold ${colorClass}`}>{title}</h3>
                     <span className="text-xs text-gray-500 font-mono">{rows.length} items</span>
                 </div>
-                <div className="overflow-auto flex-1">
+                <div className="overflow-auto flex-1 custom-scrollbar">
                     <table id={id} className="w-full text-left text-sm border-collapse">
                         <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-sm">
                             <tr>
@@ -621,7 +621,7 @@ const MarketFlow = () => {
                             <ChevronDown size={14} className={`transition-transform duration-200 ${industryOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {industryOpen && (
-                            <div className="absolute top-full mt-2 right-0 z-50 bg-gray-900 border border-gray-600 rounded-xl shadow-2xl overflow-hidden w-[300px] max-h-[400px] overflow-y-auto animate-in fade-in slide-in-from-top-2">
+                            <div className="absolute top-full mt-2 right-0 z-50 bg-gray-900 border border-gray-600 rounded-xl shadow-2xl overflow-hidden w-[300px] max-h-[400px] overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2">
                                 <div className="p-2 border-b border-gray-800 bg-gray-800/30 sticky top-0 backdrop-blur-md">
                                     <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold px-2">Select Sector</p>
                                 </div>
@@ -748,13 +748,13 @@ const MarketFlow = () => {
                                 Calculating leaderboard...
                             </div>
                         ) : leaderboard.length > 0 ? (
-                            <div className="overflow-auto flex-1">
+                            <div className="overflow-auto flex-1 custom-scrollbar">
                                 <table className="w-full text-left text-sm border-collapse">
                                     <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
                                         <tr>
-                                            <th className="p-4 w-16 text-center font-bold">Rank</th>
-                                            <th className="p-4 font-bold">Ticker</th>
-                                            <th className="p-4 text-right font-bold">Monthly Score</th>
+                                            <th className="p-3 w-16 text-xs text-center font-bold">Rank</th>
+                                            <th className="p-3 text-xs font-bold">Ticker</th>
+                                            <th className="p-3 text-xs text-right font-bold">Monthly Score</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-700/50">
@@ -824,7 +824,7 @@ const MarketFlow = () => {
                             Loading daily score details...
                         </div>
                     ) : selectedTickerDailyScores.length > 0 ? (
-                        <div className="max-h-[360px] overflow-auto">
+                        <div className="max-h-[500px] overflow-auto custom-scrollbar">
                             <table className="w-full text-left text-sm border-collapse">
                                 <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
                                     <tr>
@@ -883,11 +883,10 @@ const MarketFlow = () => {
                 <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
                     <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40 flex items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                            <h3 className="text-xl font-bold text-gray-100 flex items-center gap-2">
                                 Market Analytics (BSI & PSI)
-                            </h2>
+                            </h3>
                             <div className="text-[10px] text-gray-400 mt-1 space-y-0.5 font-mono uppercase tracking-wider">
-                                <p>Average of latest 30 days</p>
                                 <p>BSI = số mã đóng góp dương / tổng số mã ảnh hưởng; PSI = ∑positive_impact − ∑negative_impact</p>
                             </div>
                         </div>
@@ -907,14 +906,14 @@ const MarketFlow = () => {
                                 Loading analytics...
                             </div>
                         ) : analytics.length > 0 ? (
-                            <div className="overflow-auto flex-1">
+                            <div className="overflow-auto flex-1 custom-scrollbar">
                                 <table className="w-full text-left text-sm border-collapse">
                                     <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
                                         <tr>
-                                            <th className="p-4 font-bold text-xs uppercase">Industry</th>
-                                            <th className="p-4 text-center font-bold text-xs uppercase">BSI</th>
-                                            <th className="p-4 text-center font-bold text-xs uppercase">PSI</th>
-                                            <th className="p-4 font-bold text-xs uppercase">Status</th>
+                                            <th className="p-3 text-xs font-bold text-xs uppercase">Industry</th>
+                                            <th className="p-3 text-xs text-center font-bold text-xs uppercase">BSI</th>
+                                            <th className="p-3 text-xs text-center font-bold text-xs uppercase">PSI</th>
+                                            <th className="p-3 text-xs font-bold text-xs uppercase">Status</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-700/50">
@@ -990,7 +989,7 @@ const MarketFlow = () => {
                             Loading daily details...
                         </div>
                     ) : selectedIndustryAnalyticsHistory.length > 0 ? (
-                        <div className="max-h-[360px] overflow-auto">
+                        <div className="max-h-[500px] overflow-auto">
                             <table className="w-full text-left text-sm border-collapse">
                                 <thead className="bg-gray-900/80 text-gray-400 sticky top-0 z-10 backdrop-blur-md">
                                     <tr>

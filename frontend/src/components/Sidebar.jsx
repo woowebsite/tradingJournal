@@ -128,7 +128,8 @@ const Sidebar = () => {
         }
     ];
 
-    const [expandedItems, setExpandedItems] = useState(['/', '/journal', '/webhooks', '/trade-station', '/derivation', '/manage-market', '/signals', '/manage-strategies', '/news']);
+    // Collapse all submenus by default
+    const [expandedItems, setExpandedItems] = useState([]);
 
     const toggleExpand = (path) => {
         setExpandedItems(prev =>
@@ -289,7 +290,7 @@ const Sidebar = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => toggleExpand(item.path)}
-                                                    className="p-1.5 text-gray-500 hover:text-white transition-colors"
+                                                    className="p-1.5 text-gray-500 hover:text-white transition-colors cursor-pointer"
                                                 >
                                                     {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                                                 </button>
