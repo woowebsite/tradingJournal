@@ -1,0 +1,724 @@
+//@version=5
+strategy("PA Analytics", overlay=true, 
+  default_qty_type=strategy.percent_of_equity, default_qty_value=10,pyramiding=3)
+
+// ---------- Inputs ----------
+// ---------- Strategy Selection (Checkbox) ----------
+useContinue        = input.bool(true, "Continue: Bull - Bull", group="Price Action")
+useEngulfing       = input.bool(true, "Engulfing: Bear - Bull (Engulfing)", group="Price Action")
+useBreakOpposite   = input.bool(true, "Breakout Opposite: Bear - Bull", group="Price Action")
+useLarry           = input.bool(true, "Larry William: Bear - Bear (Lower) - Bull", group="Price Action")
+useSweep           = input.bool(true, "Sweep: Lowest(3) - Bull", group="Price Action")
+useIncludeOpposite = input.bool(true, "Include Opposite: Bear or Bear - Bull", group="Price Action")
+useAbsorption      = input.bool(true, "Absorption:  Absorption - Bull", group="Price Action")
+
+// ---------- ADX Filter ----------
+useAdxFilter     = input.bool(true, "Use ADX", group="ADX")
+useDiCondition   = input.bool(true, "Follow Trend: Buy when DI+ > DI-", group="ADX")
+useAdxAbove20    = input.bool(false, "Strong Trend: ADX > 20", group="ADX")
+useAdaptiveAdx   = input.bool(true, "Adaptive ADX Length (Volatility)", group="ADX")
+useAdxRising     = input.bool(false, "Trend Strengthening: ADX is Rising", group="ADX")
+adxLen           = input.int(14, "ADX Length (Base)", group="ADX")
+adxSmoothing     = input.int(14, "ADX Smoothing", group="ADX")
+
+// Stoploss, Takeprofit --------
+tpMethod = input.string(     title="Choose TakeProfit",     defval="Break 1 candle",
+     options=["RRR 1:1", "RRR 2:1", "RRR 3:1", "Break 1 candle", "Break 2 candle", "Breakout 9 candle"], group="TP/SL")
+slMethod = input.string("Tick Offset", "Stop Loss Method", options=["Tick Offset", "ATR Buffer", "Supertrend"], group="TP/SL")
+atrMultiplier = input.float(0.5, "ATR Multiplier", step=0.1, group="TP/SL")
+
+// Long Short  --------
+enableLong  = input.bool(true, "Enable Long", group="Long/Short")
+enableShort = input.bool(true, "Enable Short", group="Long/Short")
+
+// Other filters
+useATRCandle     = input.bool(false, "Use ATR Candle", group="Other filters")
+useBigVolume     = input.bool(false, "Use Big Volume", group="Other filters")
+useSuperTrend    = input.bool(true, "Use SuperTrend", group="Other filters")
+useSuperStructure = input.bool(false, "Use Super Structure", group="Other filters")
+
+
+// Tables
+showWeekdayTable   = input.bool(false, "Show Weekday Stats Table", group="Tables")
+showMonthlyTable   = input.bool(false, "Show Monthly Stats Table", group="Tables")
+showAnalyticsTable = input.bool(false, "Show Analytics Table", group="Tables")
+minAnaTrades       = input.int(10, "Min Trades for Analytics Table", minval=1, group="Tables", tooltip="Số lượng lệnh tối thiểu để hiển thị mốc thời lượng nến trong bảng.")
+
+
+// small offset so stop is strictly below/above the low/high
+tick_offset = syminfo.mintick
+stoplossBuff = (ta.atr(14) * atrMultiplier)  
+sl_offset = slMethod == "ATR Buffer" ? stoplossBuff : tick_offset
+
+// ---------- Bar references ----------
+prev_open  = open[1]
+prev_close = close[1]
+prev_high  = high[1]
+prev_low   = low[1]
+
+prev2_open  = open[2]
+prev2_close = close[2]
+prev2_high  = high[2]
+prev2_low   = low[2]
+
+curr_open  = open
+curr_close = close
+curr_high  = high
+curr_low   = low
+
+var float longSL  = na
+var float shortSL = na
+var float longEntry  = na
+var float shortEntry = na
+
+// Check if candle at offset n is highest / lowest of previous 3 candles
+f_isHighLowN(n, lookback = 3) =>
+    isHighest = high[n] == ta.highest(high[n], lookback + 1)
+    isLowest  = low[n]  == ta.lowest(low[n],  lookback + 1)
+    [isHighest, isLowest]
+
+
+// ---------- Strategy selection flags ----------
+
+
+// Candles
+curr_green =  curr_close > curr_open 
+curr_red =  curr_close < curr_open
+prev_green =  prev_close > prev_open 
+prev_red =  prev_close < prev_open
+
+// ---------- Entry conditions ----------
+// 1. ENGULFING => Đỏ | Xanh - đỉnh đáy bao trùm nến trước  (Bao phủ nến đỏ)
+// Long: current green, prev is red. Current break low and then break high prev
+fb_long = curr_green and prev_red and (curr_high > prev_high) and (curr_low < prev_low)
+// Short: current red breaks high and then break previous low, previous is green
+fb_short = curr_red and prev_green and (curr_high > prev_high) and (curr_low < prev_low)
+
+// 2. LARRY WILLIAM => Đỏ | Đỏ thấp nhất | Xanh - đóng cửa vượt đỉnh    
+// Vượt đáy thấp nhất, đáy là cây có low thấp hơn 2 cây bên cạnh nó
+// Long when current green breaks prev high, prev is red, and prev low < prev2 low
+lw_long = curr_green and prev_red and (curr_close > prev_high) and (prev_low < prev2_low)
+// Short when current red breaks prev low, prev is green, and prev high > prev2 high
+lw_short = curr_red and prev_green and (curr_close < prev_low) and (prev_high > prev2_high)
+
+// 3. CONTINUE => Xanh | Xanh   
+// Cây trước xanh
+// Breakout nến xanh hoặc inside bar (close > prev2 close)
+bp_long  = curr_green and (curr_high > prev_high) and (prev_green or prev_close > prev2_close)  
+bp_short = curr_red and (curr_low < prev_low) and (prev_red or prev_close < prev2_close)  
+
+// 4. BREAKOUT opposite => Đỏ | Xanh  - đỉnh vượt đỉnh trước 
+// Vượt đỏ (không nhất thiết đỏ là đáy)
+// Long: current green breaks previous high, previous is red
+fbo_long = curr_green and prev_red and (curr_high > prev_high) 
+// Short: current red breaks previous low, previous is green
+fbo_short = curr_red and prev_green and (curr_low < prev_low) 
+
+// 5. Sweep => Thấp nhất | Xanh - đóng cửa vượt đỉnh        
+// Xanh vượt đáy (ko cần thấp nhất đáy là đỏ)
+[isHigh, isLow] = f_isHighLowN(1)
+sw_long = curr_green and isLow and curr_close > prev_high
+sw_short = curr_red and isHigh and curr_close < prev_low
+
+// 7. Include Opposite
+// Buy: Signal (nến đỏ) thấp hơn 3 nến trước, Entry đóng cửa trên high signal
+ico_long = curr_green and curr_close > ta.highest(high[2] , 3) and (prev_red or prev2_close < prev2_open)
+// Sell: Signal (nến xanh) cao hơn 3 nến trước, Entry đóng cửa dưới low signal
+ico_short = curr_red and curr_close < ta.lowest(low[2] , 3) and (prev_green or prev2_close > prev2_open)
+
+// 8. Absorption
+// Buy: Nến hiện tại tăng, nến trước đó là Absorption
+preAbsorption = prev_high - prev_low < prev2_high - prev2_low and volume[1] > volume[2] // Spread giảm, Volume tăng
+abs_long = curr_green and curr_close > prev_close and preAbsorption
+abs_short = curr_red and curr_close < prev_close and preAbsorption
+
+
+// Combine according to selected mode and check enable flags
+baseEntryCondLong = enableLong and ((useEngulfing and fb_long) or (useLarry and lw_long) or (useContinue and bp_long) or (useBreakOpposite and fbo_long) or (useSweep and sw_long) or (useIncludeOpposite and ico_long) or (useAbsorption and abs_long) )
+baseEntryCondShort = enableShort and ((useEngulfing and fb_short) or (useLarry and lw_short) or (useContinue and bp_short) or (useBreakOpposite and fbo_short) or (useSweep and sw_short) or (useIncludeOpposite and ico_short) or (useAbsorption and abs_short))
+
+// ====== ADAPTIVE ADX CUSTOM FUNCTION ======
+f_rma(src, len) =>
+    alpha = 1.0 / math.max(len, 1)
+    var float val = na
+    val := na(val[1]) ? src : alpha * src + (1.0 - alpha) * nz(val[1])
+    val
+
+f_adaptive_dmi(base_len, smoothing) =>
+    long_atr = ta.sma(ta.tr, base_len * 3)
+    v_ratio = long_atr == 0 ? 1 : ta.sma(ta.tr, base_len) / long_atr
+    dyn_len = math.max(3, math.min(base_len * 3, base_len / math.max(v_ratio, 0.1)))
+    dyn_smooth = math.max(3, math.min(smoothing * 3, smoothing / math.max(v_ratio, 0.1)))
+    
+    up = ta.change(high)
+    down = -ta.change(low)
+    
+    plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    
+    tr_rma = f_rma(ta.tr, dyn_len)
+    plus_rma = f_rma(plusDM, dyn_len)
+    minus_rma = f_rma(minusDM, dyn_len)
+    
+    // Pine Script safe division
+    plusDI = tr_rma == 0 ? 0 : 100 * plus_rma / tr_rma
+    minusDI = tr_rma == 0 ? 0 : 100 * minus_rma / tr_rma
+    
+    dx = (plusDI + minusDI) == 0 ? 0 : 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+    adx = f_rma(dx, dyn_smooth)
+    
+    [plusDI, minusDI, adx]
+
+// Apply ADX Filter
+[diPlus_std, diMinus_std, adxValue_std] = ta.dmi(adxLen, adxSmoothing)
+[diPlus_ada, diMinus_ada, adxValue_ada] = f_adaptive_dmi(adxLen, adxSmoothing)
+
+diPlus = useAdaptiveAdx ? diPlus_ada : diPlus_std
+diMinus = useAdaptiveAdx ? diMinus_ada : diMinus_std
+adxValue = useAdaptiveAdx ? adxValue_ada : adxValue_std
+adxMA9 = ta.sma(adxValue, 9)
+adxIsRising = adxValue > nz(adxValue[1], adxValue) or adxValue > adxMA9
+
+
+
+adxFilterLong = not useAdxFilter or (
+     (not useDiCondition or (diPlus > diMinus)) and 
+     (not useAdxAbove20 or (adxValue > 20)) and 
+     (not useAdxRising or adxIsRising)
+ )
+adxFilterShort = not useAdxFilter or (
+     (not useDiCondition or (diMinus > diPlus)) and 
+     (not useAdxAbove20 or (adxValue > 20)) and 
+     (not useAdxRising or adxIsRising)
+ )
+
+// =====================================
+// Others Filter
+// =====================================
+
+// ATR Filter
+prevCandleRange = math.abs(prev_high - prev_low)
+atr14 = ta.atr(14)
+isNormalCandle = prevCandleRange < atr14 * 1.618  // Nến tín hiệu không được to hơn 2.5x ATR
+normalCandleFilter = not useATRCandle or isNormalCandle
+
+// Volume filter
+avgVol = ta.sma(volume, 3)
+isHighVolume = volume > avgVol * 1.2 
+bigVolumeFilter = not useBigVolume or isHighVolume
+
+// SuperTrend
+[st, stDir] = ta.supertrend(3.0, 10)
+upTrend =    plot(stDir < 0 ? st : na, "Up Trend",   color = color.green, style = plot.style_linebr)
+downTrend =  plot(stDir < 0 ? na : st, "Down Trend", color = color.red,   style = plot.style_linebr)
+bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle",display = display.none)
+fill(bodyMiddle, upTrend,   title = "Uptrend background",   color = color.new(color.green, 90), fillgaps = false)
+fill(bodyMiddle, downTrend, title = "Downtrend background", color = color.new(color.red,   90), fillgaps = false)
+
+longSuperTrendFilter =  not useSuperTrend or (useSuperTrend and stDir < 0)
+shortSuperTrendFilter =  not useSuperTrend or (useSuperTrend and stDir > 0)
+
+// Supertrend swing points used to draw the current trendlines.
+var float[] stUpArr   = array.new_float()
+var float[] stDownArr = array.new_float()
+var int[]   stUpBar   = array.new_int()
+var int[]   stDownBar = array.new_int()
+
+// Supertrend changes from Bear to Bull.
+if ta.change(stDir) < 0
+    array.unshift(stUpArr, st)
+    array.unshift(stUpBar, bar_index)
+    if array.size(stUpArr) > 2
+        array.pop(stUpArr)
+        array.pop(stUpBar)
+
+// Supertrend changes from Bull to Bear.
+if ta.change(stDir) > 0
+    array.unshift(stDownArr, st)
+    array.unshift(stDownBar, bar_index)
+    if array.size(stDownArr) > 2
+        array.pop(stDownArr)
+        array.pop(stDownBar)
+
+
+var line stUpLine = na
+var line stDownLine = na
+
+if useSuperStructure and array.size(stUpArr) == 2
+    y1 = array.get(stUpArr, 0)
+    y2 = array.get(stUpArr, 1)
+    x1 = array.get(stUpBar, 0)
+    x2 = array.get(stUpBar, 1)
+
+    if not na(stUpLine)
+        line.delete(stUpLine)
+
+    lineLength = x1 - x2
+    extendLength = int(lineLength * 0.9)
+    slope = (y1 - y2) / lineLength
+    xExtend = x1 + extendLength
+    yExtend = y1 + slope * extendLength
+    stUpLine := line.new(x1=x2, y1=y2, x2=xExtend, y2=yExtend, color=color.green, width=1)
+
+if useSuperStructure and array.size(stDownArr) == 2
+    y1 = array.get(stDownArr, 0)
+    y2 = array.get(stDownArr, 1)
+    x1 = array.get(stDownBar, 0)
+    x2 = array.get(stDownBar, 1)
+
+    if not na(stDownLine)
+        line.delete(stDownLine)
+
+    lineLength = x1 - x2
+    extendLength = int(lineLength * 0.9)
+    slope = (y1 - y2) / lineLength
+    xExtend = x1 + extendLength
+    yExtend = y1 + slope * extendLength
+    stDownLine := line.new(x1=x2, y1=y2, x2=xExtend, y2=yExtend, color=color.red, width=1)
+
+if not useSuperStructure
+    if not na(stUpLine)
+        line.delete(stUpLine)
+        stUpLine := na
+    if not na(stDownLine)
+        line.delete(stDownLine)
+        stDownLine := na
+
+superStructureLongFilter = not useSuperStructure ? true : array.size(stUpArr) >= 2 ? array.get(stUpArr, 0) > array.get(stUpArr, 1) : false
+superStructureShortFilter = not useSuperStructure ? true : array.size(stDownArr) >= 2 ? array.get(stDownArr, 0) < array.get(stDownArr, 1) : false
+
+
+entryCondLong = baseEntryCondLong and adxFilterLong and normalCandleFilter and bigVolumeFilter and longSuperTrendFilter and superStructureLongFilter
+entryCondShort = baseEntryCondShort and adxFilterShort and normalCandleFilter and bigVolumeFilter and shortSuperTrendFilter and superStructureShortFilter
+
+// Only enter if flat (no existing position)
+enterLong = entryCondLong and (strategy.position_size >= 0)
+enterShort = entryCondShort and (strategy.position_size <= 0)
+
+// Execute entries
+if enterLong
+    longSL := curr_low - sl_offset
+    longEntry := close
+    longTag =
+     useEngulfing     and fb_long  ? "Engulfing" :
+     useLarry         and lw_long  ? "Larry" :
+     useContinue      and bp_long  ? "Continue" :
+     useBreakOpposite and fbo_long ? "BreakOpp" :
+     useSweep         and sw_long  ? "Sweep" :
+     useIncludeOpposite and ico_long  ? "Include Opposite" :
+     useAbsorption      and abs_long  ? "Absorption" :"Multi"
+    strategy.entry(id="Long", direction=strategy.long, comment = longTag)
+
+if enterShort
+    shortSL := curr_high + sl_offset
+    shortEntry := close
+    shortTag =
+     useEngulfing     and fb_short  ? "Engulfing" :
+     useLarry         and lw_short  ? "Larry" :
+     useContinue      and bp_short  ? "Continue" :
+     useBreakOpposite and fbo_short ? "BreakOpp" :
+     useSweep         and sw_short  ? "Sweep" :
+     useIncludeOpposite and ico_short  ? "Include Opposite" :
+     useAbsorption      and abs_short  ? "Absorption" :"Multi"
+    strategy.entry(id="Short", direction=strategy.short, comment = shortTag)
+
+// ======================================================
+// RISK & TAKE PROFIT (TICK ALIGNED)
+// ======================================================
+useRRR1 = tpMethod == "RRR 1:1"
+useRRR2 = tpMethod == "RRR 2:1"
+useRRR3 = tpMethod == "RRR 3:1"
+longTP_Condition = (tpMethod == "Break 1 candle" and (close < prev_low)) or (tpMethod == "Break 2 candle" and (close < prev2_low)) or (tpMethod == "Breakout 9 candle" and close > ta.highest(high[1], 9))
+shortTP_Condition = (tpMethod == "Break 1 candle" and (close > prev_high)) or (tpMethod == "Break 2 candle" and (close > prev2_high)) or (tpMethod == "Breakout 9 candle" and close < ta.lowest(low[1], 9))
+
+// Hàm làm tròn giá trị về bước giá của sàn (bắt buộc để tránh lỗi reject lệnh Limit/Stop)
+f_tick_round(val) => math.round(val / syminfo.mintick) * syminfo.mintick
+
+longRisk  = f_tick_round(longEntry - longSL)
+shortRisk = f_tick_round(shortSL - shortEntry)
+
+longTP = 
+     useRRR1 ? f_tick_round(longEntry + longRisk * 1) :
+     useRRR2 ? f_tick_round(longEntry + longRisk * 2) :
+     useRRR3 ? f_tick_round(longEntry + longRisk * 3) :
+     na
+
+shortTP =
+     useRRR1 ? f_tick_round(shortEntry - shortRisk * 1) :
+     useRRR2 ? f_tick_round(shortEntry - shortRisk * 2) :
+     useRRR3 ? f_tick_round(shortEntry - shortRisk * 3) :
+     na
+
+// Takeprofit
+strategy.exit(id="Long_Exit", from_entry="Long",  limit=longTP, comment_profit="Long_TP")
+strategy.exit(id="Short_Exit", from_entry="Short", limit=shortTP, comment_profit="Short_TP")
+
+// Stoploss
+if slMethod != "Supertrend"
+    strategy.exit(id="Long_Exit", from_entry="Long", stop=f_tick_round(longSL), comment_loss="Long_SL")
+    strategy.exit(id="Short_Exit", from_entry="Short", stop=f_tick_round(shortSL), comment_loss="Short_SL")
+else 
+    // Confirm the previous candle was already outside its own Supertrend line,
+    // then require the current candle to continue in the same direction.
+    supertrendStopLong = slMethod == "Supertrend" and strategy.position_size > 0 and ((prev_low < st[1] and close < prev_low) or stDir > 0)
+    supertrendStopShort = slMethod == "Supertrend" and strategy.position_size < 0 and ((prev_high > st[1] and close > prev_high) or stDir < 0)
+
+    if supertrendStopLong
+        strategy.close(id="Long", comment="Long_SL")
+
+    if supertrendStopShort
+        strategy.close(id="Short", comment="Short_SL")
+
+// ======================================================
+// TAKEPROFIT WITH CONDITION
+// ======================================================
+if (strategy.position_size > 0) and longTP_Condition
+    strategy.close(id="Long", comment="TP_L")
+
+if (strategy.position_size < 0) and shortTP_Condition
+    strategy.close(id="Short", comment="TP_S")
+
+// show chosen mode in the chart (update label on last bar)
+var label modeLabel = na
+if barstate.islast
+    label.delete(modeLabel)
+    modeLabel := label.new(bar_index, high, text="Mode: Long: " + (enableLong ? "ON" : "OFF") + "  Short: " + (enableShort ? "ON" : "OFF"),
+                           xloc=xloc.bar_index, yloc=yloc.abovebar, style=label.style_label_left)
+
+// plot current initial SL levels when in position
+plot( (strategy.position_size > 0) ? longSL : na, title="Initial SL Long", linewidth=1, style=plot.style_linebr, display=display.none)
+plot( (strategy.position_size < 0) ? shortSL : na, title="Initial SL Short", linewidth=1, style=plot.style_linebr, display=display.none)
+
+// ---------- Closed trades drawing (unchanged) ----------
+var int max_distance = 500
+for i = 0 to strategy.closedtrades - 1 by 1
+    tradeSize = strategy.closedtrades.size(i)
+    entry = strategy.closedtrades.entry_price(i)
+    entryBarIndex = strategy.closedtrades.entry_bar_index(i)
+    exit = strategy.closedtrades.exit_price(i)
+    exitBarIndex = strategy.closedtrades.exit_bar_index(i)
+    profit = strategy.closedtrades.profit(i)
+    qty = strategy.closedtrades.size(i)
+    distance_x1 = math.abs(bar_index - entryBarIndex)
+    distance_x2 = math.abs(bar_index - exitBarIndex)
+    entryTime = strategy.closedtrades.entry_time(i)
+    exitTime = strategy.closedtrades.exit_time(i)
+    entryDate = str.format('{0,date,EEEE dd-MMMM-yyyy}', entryTime)
+    exitDate = str.format('{0,date,EEEE dd-MMMM-yyyy}', exitTime)
+    disable = distance_x1 > max_distance or distance_x2 > max_distance
+    colorTakeprofit = tradeSize > 0 ? color.green : color.red
+    colorStoploss = tradeSize > 0 ? color.red : color.green
+    if exit > entry and not disable
+        line.new(x1 = entryBarIndex, y1 = entry, x2 = exitBarIndex, y2 = exit, color = colorTakeprofit, width = 1, style = line.style_dotted)
+    else if not disable
+        line.new(x1 = entryBarIndex, y1 = entry, x2 = exitBarIndex, y2 = exit, color = colorStoploss, width = 1, style = line.style_dotted)
+
+
+// ======================================================
+// WEEKDAY STATS (FULL HISTORY)
+// ======================================================
+
+// 0=Mon ... 6=Sun
+
+var int[] buyCount  = array.new_int(7, 0)
+var int[] sellCount = array.new_int(7, 0)
+var int[] tpCount   = array.new_int(7, 0)
+var int[] slCount   = array.new_int(7, 0)
+var float[] pnlSum  = array.new_float(7, 0)
+
+// Reset mỗi lần load lại chart
+if showWeekdayTable and barstate.isfirst 
+    for i = 0 to 6
+        array.set(buyCount, i, 0)
+        array.set(sellCount, i, 0)
+        array.set(tpCount, i, 0)
+        array.set(slCount, i, 0)
+        array.set(pnlSum, i, 0)
+
+// Process ALL closed trades (1 lần duy nhất)
+if showWeekdayTable and ((not timeframe.isweekly and not timeframe.isdaily and barstate.islast) or timeframe.isweekly or timeframe.isdaily)
+    for i = 0 to strategy.closedtrades - 1
+        entryTime = strategy.closedtrades.entry_time(i)
+        day = dayofweek(entryTime)
+
+        // Convert → index 0–6
+        idx =
+             day == dayofweek.monday    ? 0 :
+             day == dayofweek.tuesday   ? 1 :
+             day == dayofweek.wednesday ? 2 :
+             day == dayofweek.thursday  ? 3 :
+             day == dayofweek.friday    ? 4 :
+             day == dayofweek.saturday  ? 5 : 6
+
+        profit = strategy.closedtrades.profit(i)
+        size   = strategy.closedtrades.size(i)
+
+        // Side
+        if size > 0
+            array.set(buyCount, idx, array.get(buyCount, idx) + 1)
+        else
+            array.set(sellCount, idx, array.get(sellCount, idx) + 1)
+
+        // TP / SL
+        if profit > 0
+            array.set(tpCount, idx, array.get(tpCount, idx) + 1)
+        else
+            array.set(slCount, idx, array.get(slCount, idx) + 1)
+
+        // PnL
+        array.set(pnlSum, idx, array.get(pnlSum, idx) + profit)
+
+var table t = table.new(position.bottom_right, 5, 8, border_width=1)
+
+// Header
+if showWeekdayTable and barstate.isfirst
+    table.cell(t, 0, 0, "Day", bgcolor=color.gray)
+    table.cell(t, 1, 0, "Buy/Sell", bgcolor=color.gray)
+    table.cell(t, 2, 0, "TP/SL (count)", bgcolor=color.gray)
+    table.cell(t, 3, 0, "Winrate", bgcolor=color.gray)
+    table.cell(t, 4, 0, "PnL", bgcolor=color.gray)
+
+// Day labels
+dayNames = array.from("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
+
+// Fill table
+if showWeekdayTable and ((not timeframe.isweekly and not timeframe.isdaily and barstate.islast) or timeframe.isweekly or timeframe.isdaily)
+    for i = 0 to 6
+        buy  = array.get(buyCount, i)
+        sell = array.get(sellCount, i)
+        tp   = array.get(tpCount, i)
+        sl   = array.get(slCount, i)
+        pnl  = array.get(pnlSum, i)
+
+        total = tp + sl
+        winrate = total > 0 ? (tp * 100.0 / total) : 0
+
+        table.cell(t, 0, i + 1, array.get(dayNames, i), text_color = color.gray)
+
+        table.cell(t, 1, i + 1,"B:" + str.tostring(buy) + " / S:" + str.tostring(sell), text_color = color.gray)
+
+        table.cell(t, 2, i + 1, "TP:" + str.tostring(tp) + " / SL:" + str.tostring(sl), text_color = color.gray)
+
+        table.cell(t, 3, i + 1, str.tostring(math.round(winrate, 1)) + "%", text_color = color.gray)
+
+        table.cell(t, 4, i + 1, str.tostring(math.round(pnl, 2)) + "$", text_color = pnl >= 0 ? color.green : color.red)
+
+
+
+
+
+// ======================================================
+// MONTHLY STATS (FULL HISTORY)
+// ======================================================
+
+// 0=Jan ... 11=Dec
+var int[] m_buyCount  = array.new_int(12, 0)
+var int[] m_sellCount = array.new_int(12, 0)
+var int[] m_tpCount   = array.new_int(12, 0)
+var int[] m_slCount   = array.new_int(12, 0)
+var float[] m_pnlSum  = array.new_float(12, 0)
+
+// Reset & Process ALL trades
+if (not timeframe.isweekly and not timeframe.isdaily and barstate.islast) or timeframe.isweekly or timeframe.isdaily
+    // Bắt buộc reset về 0 ở mỗi nến trước khi cộng dồn để tránh lỗi phình to dữ liệu
+    for i = 0 to 11
+        array.set(m_buyCount, i, 0)
+        array.set(m_sellCount, i, 0)
+        array.set(m_tpCount, i, 0)
+        array.set(m_slCount, i, 0)
+        array.set(m_pnlSum, i, 0)
+
+    for i = 0 to strategy.closedtrades - 1
+        entryTime = strategy.closedtrades.entry_time(i)
+        m = month(entryTime) - 1  // 0–11
+
+        profit = strategy.closedtrades.profit(i)
+        size   = strategy.closedtrades.size(i)
+
+        // Side
+        if size > 0
+            array.set(m_buyCount, m, array.get(m_buyCount, m) + 1)
+        else
+            array.set(m_sellCount, m, array.get(m_sellCount, m) + 1)
+
+        // TP / SL
+        if profit > 0
+            array.set(m_tpCount, m, array.get(m_tpCount, m) + 1)
+        else
+            array.set(m_slCount, m, array.get(m_slCount, m) + 1)
+
+        // PnL
+        array.set(m_pnlSum, m, array.get(m_pnlSum, m) + profit)
+
+
+var table mt = na
+
+if showMonthlyTable
+    if na(mt)
+        mt := table.new(position.bottom_right, 5, 13, border_width=1)
+
+    // Header
+    if (not timeframe.isweekly and not timeframe.isdaily and barstate.islast) or timeframe.isweekly or timeframe.isdaily
+        table.cell(mt, 0, 0, "Month", bgcolor=color.gray)
+        table.cell(mt, 1, 0, "Buy/Sell", bgcolor=color.gray)
+        table.cell(mt, 2, 0, "TP/SL", bgcolor=color.gray)
+        table.cell(mt, 3, 0, "Winrate", bgcolor=color.gray)
+        table.cell(mt, 4, 0, "PnL", bgcolor=color.gray)
+
+    monthNames = array.from("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+    if (not timeframe.isweekly and not timeframe.isdaily and barstate.islast) or timeframe.isweekly or timeframe.isdaily
+        for i = 0 to 11
+            buy  = array.get(m_buyCount, i)
+            sell = array.get(m_sellCount, i)
+            tp   = array.get(m_tpCount, i)
+            sl   = array.get(m_slCount, i)
+            pnl  = array.get(m_pnlSum, i)
+
+            total = tp + sl
+            winrate = total > 0 ? (tp * 100.0 / total) : 0
+
+            table.cell(mt, 0, i + 1, array.get(monthNames, i), text_color = color.gray)
+
+            table.cell(mt, 1, i + 1,"B:" + str.tostring(buy) + " / S:" + str.tostring(sell), text_color = color.gray)
+
+            table.cell(mt, 2, i + 1,"TP:" + str.tostring(tp) + " / SL:" + str.tostring(sl), text_color = color.gray)
+
+            table.cell(mt, 3, i + 1,str.tostring(math.round(winrate, 1)) + "%", text_color = color.gray)
+
+            table.cell(mt, 4, i + 1,str.tostring(math.round(pnl, 2)) + "$",text_color = pnl >= 0 ? color.green : color.red)
+
+else
+    if not na(mt)
+        table.delete(mt)
+        mt := na
+
+
+// ======================================================
+// ANALYTIC TABLE (HOLDING DURATION & OPTIMAL WINRATE HIGHLIGHT)
+// ======================================================
+
+// Hàm tính điểm tối ưu hóa (Wilson Lower Bound Score) cân bằng Winrate & Số lượng mẫu (Sample Size)
+f_calc_optimal_score(int w, int l) =>
+    n = w + l
+    score = 0.0
+    if n > 0
+        p = float(w) / float(n)
+        z = 1.645 // Độ tin cậy 90%
+        z2 = 2.706025
+        denom = 1.0 + z2 / float(n)
+        center = (p + z2 / (2.0 * float(n))) / denom
+        radicand = (p * (1.0 - p) + z2 / (4.0 * float(n))) / float(n)
+        margin = (z * math.sqrt(math.max(0.0, radicand))) / denom
+        score := math.max(0.0, center - margin)
+    score
+
+var int[] winCounts = array.new_int(0)
+var int[] lossCounts = array.new_int(0)
+var int[] activeDurations = array.new_int(0)
+var table anaTable = na
+var int lastRowsCount = 0
+
+if showAnalyticsTable
+    cond = (not timeframe.isweekly and not timeframe.isdaily and barstate.islast) or timeframe.isweekly or timeframe.isdaily
+    if cond
+        array.clear(winCounts)
+        array.clear(lossCounts)
+        array.clear(activeDurations)
+        maxDurationInfo = 0
+        
+        if strategy.closedtrades > 0
+            for i = 0 to strategy.closedtrades - 1
+                entryBar = strategy.closedtrades.entry_bar_index(i)
+                exitBar = strategy.closedtrades.exit_bar_index(i)
+                duration = math.round(math.abs(exitBar - entryBar))
+                if duration > maxDurationInfo
+                    maxDurationInfo := duration
+            
+            if maxDurationInfo >= 0
+                for i = 0 to maxDurationInfo
+                    array.push(winCounts, 0)
+                    array.push(lossCounts, 0)
+
+            for i = 0 to strategy.closedtrades - 1
+                entryBar = strategy.closedtrades.entry_bar_index(i)
+                exitBar = strategy.closedtrades.exit_bar_index(i)
+                duration = math.round(math.abs(exitBar - entryBar))
+                profit = strategy.closedtrades.profit(i)
+                
+                if profit > 0
+                    array.set(winCounts, duration, array.get(winCounts, duration) + 1)
+                else
+                    array.set(lossCounts, duration, array.get(lossCounts, duration) + 1)
+
+        // Tìm các mốc nến thỏa điều kiện số lượng mẫu tối thiểu và xác định dòng tối ưu nhất
+        bestDuration = -1
+        maxScore = -1.0
+
+        if array.size(winCounts) > 0 and maxDurationInfo >= 0
+            for i = 0 to maxDurationInfo
+                w = array.get(winCounts, i)
+                l = array.get(lossCounts, i)
+                total = w + l
+                if total >= minAnaTrades
+                    array.push(activeDurations, i)
+                    winrate = (float(w) * 100.0) / float(total)
+                    score = f_calc_optimal_score(w, l)
+                    if winrate >= 50.0 and score > maxScore
+                        maxScore := score
+                        bestDuration := i
+
+        activeCount = array.size(activeDurations)
+        rowsCount = activeCount > 0 ? (activeCount + 1) : 2 // 1 Header + dữ liệu
+
+        if rowsCount != lastRowsCount or na(anaTable)
+            if not na(anaTable)
+                table.delete(anaTable)
+            anaTable := table.new(position.middle_right, 4, rowsCount, border_width=1)
+            lastRowsCount := rowsCount
+
+        // Header
+        table.cell(anaTable, 0, 0, "Số nến", bgcolor=color.new(#1e222d, 0), text_color=color.white)
+        table.cell(anaTable, 1, 0, "Thắng", bgcolor=color.new(#1e222d, 0), text_color=color.green)
+        table.cell(anaTable, 2, 0, "Lỗ", bgcolor=color.new(#1e222d, 0), text_color=color.red)
+        table.cell(anaTable, 3, 0, "Winrate", bgcolor=color.new(#1e222d, 0), text_color=color.white)
+
+        if activeCount > 0
+            for i = 0 to activeCount - 1
+                d = array.get(activeDurations, i)
+                w = array.get(winCounts, d)
+                l = array.get(lossCounts, d)
+                total = w + l
+                winrate = total > 0 ? (float(w) * 100.0 / float(total)) : 0.0
+                isBest = (d == bestDuration)
+
+                // Highlight dòng tối ưu nhất
+                rowBg = isBest ? color.new(#f59e0b, 75) : color.new(#1e222d, 90)
+                nenText = isBest ? (str.tostring(d) + " nến") : (str.tostring(d) + " nến")
+                wrText = isBest ? (str.tostring(math.round(winrate, 1)) + "%") : (str.tostring(math.round(winrate, 1)) + "%")
+
+                table.cell(anaTable, 0, i + 1, nenText, bgcolor=rowBg, text_color=isBest ? #fbbf24 : color.gray)
+                table.cell(anaTable, 1, i + 1, str.tostring(w), bgcolor=rowBg, text_color=w > 0 ? (isBest ? #34d399 : color.green) : color.gray)
+                table.cell(anaTable, 2, i + 1, str.tostring(l), bgcolor=rowBg, text_color=l > 0 ? (isBest ? #f87171 : color.red) : color.gray)
+                table.cell(anaTable, 3, i + 1, wrText, bgcolor=rowBg, text_color=isBest ? #fbbf24 : (winrate >= 50.0 ? color.green : color.gray))
+        else
+            table.cell(anaTable, 0, 1, "Chưa đủ dữ liệu", bgcolor=color.new(#1e222d, 90), text_color=color.gray)
+            table.cell(anaTable, 1, 1, "-", bgcolor=color.new(#1e222d, 90), text_color=color.gray)
+            table.cell(anaTable, 2, 1, "-", bgcolor=color.new(#1e222d, 90), text_color=color.gray)
+            table.cell(anaTable, 3, 1, "-", bgcolor=color.new(#1e222d, 90), text_color=color.gray)
+else
+    if not na(anaTable)
+        table.delete(anaTable)
+        anaTable := na
+        lastRowsCount := 0
+
+// Log
+// https://chatgpt.com/c/698855f2-bd6c-8324-b9a3-4e0da66b5f1e
+// v75: Fix lỗi không show Week Table ở Daily
+// v76: Thêm Analytics table
+// v82: Sử dụng Stoploss bằng ATR
+// v106: Fix takeprofit condition and RRR
+// v109: Other filter with ATR Candle
+// v114: Other filter with SuperTrend
+// v115: Highlight dòng Winrate & Sample Size tối ưu nhất trong Analytics Table (Wilson Score)
+
