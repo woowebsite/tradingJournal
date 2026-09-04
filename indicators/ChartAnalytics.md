@@ -154,13 +154,20 @@ Indicator tích hợp tính năng tự động tìm kiếm và làm nổi bật 
    - Giúp bạn nhận diện ngay ngày trong tuần có tỷ suất sinh lời vượt trội nhất.
 
 2. **Bảng theo Tháng (Monthly):**
-   - 🌟 Tự động highlight toàn bộ dòng của **Tháng có `Avg %` lớn nhất** bằng màu vàng hổ phách (**Amber Highlight**).
-   - Giúp bạn nhận diện ngay tháng có hiệu suất tăng trưởng trung bình mạnh nhất trong năm.
+   - 🟣 **Top 1 Tháng có `Avg %` lớn nhất:** Highlight nền **Tím (Purple `#8b5cf6`, 50% opacity)**.
+   - 🟢 **Top 2 Tháng có `Avg %` lớn nhì:** Highlight nền **Xanh lục (Green `#089981`, 50% opacity)**.
+   - 🔵 **Top 3 Tháng có `Avg %` lớn ba:** Highlight nền **Xanh dương (Blue `#2962ff`, 50% opacity)**.
+   - Giúp bạn nhận diện ngay 3 tháng mang lại hiệu suất tăng trưởng trung bình mạnh nhất trong cả năm với màu sắc phân biệt rõ ràng.
 
 3. **Bảng 10 Mức Spread (Volatility Matrix):**
-   - 🟢 **Ô có số nến Green nhiều nhất (`Max Green`):** Highlight nền màu **Xanh ngọc (Emerald)**. Cho biết thứ nào và ở mức biên độ nào phe Mua thắng áp đảo với số lượng nến bùng nổ nhất.
-   - 🔴 **Ô có số nến Red nhiều nhất (`Max Red`):** Highlight nền màu **Đỏ (Ruby)**. Cho biết thứ nào và ở mức biên độ nào phe Bán xả hàng mạnh nhất.
-   - 🟣 **Ô đồng thời có cả Green và Red lớn nhất:** Highlight nền màu **Tím (Purple)**.
+   - 📅 **Từng Thứ trong tuần (Dòng `Mon` $\rightarrow$ `Sun`):**
+     - 🟢 **Ô có số nến Green nhiều nhất trong ngày đó (`Max Green`):** Highlight nền **Xanh ngọc (Emerald `#089981`)** — Cho biết ở ngày thứ đó, mức spread nào phe Mua thắng áp đảo nhất.
+     - 🔴 **Ô có số nến Red nhiều nhất trong ngày đó (`Max Red`):** Highlight nền **Đỏ (Ruby `#f23645`)** — Cho biết ở ngày thứ đó, mức spread nào phe Bán xả hàng nhiều nhất.
+     - 🟣 **Ô đồng thời có cả Green và Red lớn nhất trong ngày:** Highlight nền **Tím (Purple `#8b5cf6`)**.
+   - 📊 **Dòng Tổng kết (`Total Row` ở dưới cùng):**
+     - 🟢 **Cột Spread có tổng số nến Green lớn nhất toàn bảng:** Highlight nền **Xanh ngọc (Emerald)**.
+     - 🔴 **Cột Spread có tổng số nến Red lớn nhất toàn bảng:** Highlight nền **Đỏ (Ruby)**.
+     - 🟣 **Cột Spread đồng thời đạt cả Green và Red lớn nhất:** Highlight nền **Tím (Purple)**.
 
 ---
 
