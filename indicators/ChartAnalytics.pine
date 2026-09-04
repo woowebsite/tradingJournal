@@ -1,0 +1,560 @@
+//@version=5
+indicator("Chart Analytics", overlay=true)
+
+// ======================================================
+// INPUTS & SETTINGS (GỌN GÀNG TRÊN TAB INPUTS)
+// ======================================================
+
+// Group: Chế độ tính toán
+grp_calc = "Cấu hình tính toán"
+calcMode = input.string("Close > Open", "Tiêu chuẩn nến xanh (Bullish)", options=["Close > Open", "Close > Close[1]"], group=grp_calc, tooltip="Close > Open: Nến có giá đóng cửa cao hơn mở cửa.\nClose > Close[1]: Nến có giá đóng cửa cao hơn nến trước.")
+filterYear = input.int(0, "Năm thống kê (0 = Toàn bộ lịch sử)", minval=0, maxval=2100, group=grp_calc, tooltip="Nhập 0 để tính toàn bộ lịch sử nến trên biểu đồ. Nhập ví dụ 2025 để chỉ thống kê riêng năm 2025.")
+includeDojiAsGreen = input.bool(false, "Tính Doji (Close == Open) là Xanh", group=grp_calc)
+
+// Group: Bảng thống kê theo thứ (Weekday)
+grp_week = "Bảng thống kê theo Thứ trong tuần (Weekday)"
+showWeekdayTable = input.bool(true, "Hiển thị bảng theo Thứ (Weekday)", group=grp_week)
+weekdayPos = input.string("Bottom Right", "Vị trí bảng Thứ", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right"], group=grp_week)
+showWeekend = input.bool(false, "Hiển thị Thứ 7 & Chủ Nhật", group=grp_week, tooltip="Bật nếu bạn giao dịch Crypto / Forex 24/7.")
+
+// Group: Bảng thống kê theo tháng (Monthly)
+grp_month = "Bảng thống kê theo Tháng trong năm (Monthly)"
+showMonthlyTable = input.bool(true, "Hiển thị bảng theo Tháng (Monthly)", group=grp_month)
+monthlyPos = input.string("Top Right", "Vị trí bảng Tháng", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right", "Top Center", "Bottom Center"], group=grp_month)
+
+// Group: Bảng thống kê Spread theo Thứ trong tuần
+grp_spread = "Bảng thống kê Biên độ (Spread) theo Thứ"
+showSpreadTable = input.bool(true, "Hiển thị bảng 10 mức Spread theo Thứ", group=grp_spread)
+spreadPos = input.string("Bottom Center", "Vị trí bảng Spread", options=["Top Left", "Bottom Left", "Top Right", "Bottom Right", "Middle Right", "Top Center", "Bottom Center"], group=grp_spread)
+spreadDisplayMode = input.string("G/R (Xanh/Đỏ)", "Hiển thị ô dữ liệu Spread", options=["G/R (Xanh/Đỏ)", "Total (Tổng nến)", "% Green (Tỷ lệ Xanh)"], group=grp_spread, tooltip="G/R: Hiển thị số nến Xanh / Đỏ (VD: 5/3).\nTotal: Tổng số nến.\n% Green: Tỷ lệ nến Xanh.")
+spreadType = input.string("High - Low (%)", "Cách tính Spread", options=["High - Low (%)", "|Close - Open| (%)", "High - Low (Points)"], group=grp_spread, tooltip="High - Low (%): Biên độ toàn bộ cây nến (Râu trên - Râu dưới) chia cho giá Low.\n|Close - Open| (%): Biên độ thân nến chia cho Open.\nHigh - Low (Points): Chênh lệch giá trị tuyệt đối.")
+spreadStep = input.float(0.5, "Bước nhảy mỗi mức Spread (%)", minval=0.01, step=0.1, group=grp_spread, tooltip="Độ rộng của mỗi mức. Ví dụ 0.5% sẽ chia thành 10 mức: 0-0.5%, 0.5-1.0%, 1.0-1.5%...")
+
+// ======================================================
+// HẰNG SỐ GIAO DIỆN, ĐƯỜNG VIỀN & ĐỘ RỘNG (ĐÃ CỐ ĐỊNH)
+// ======================================================
+
+fontSize       = size.small
+colHeaderBg    = color.new(#1e222d, 0)
+colHeaderTxt   = color.white
+colGreenTxt    = #089981
+colRedTxt      = #f23645
+colNeutralTxt  = #d1d4dc
+
+tblBorderColor = color.new(#363c4e, 0)
+tblBorderWidth = 1
+tblFrameColor  = color.new(#4a5060, 0)
+tblFrameWidth  = 1
+
+// Màu Highlight nổi bật
+colHighlightAvg   = color.new(#f59e0b, 75) // Vàng cam (Amber) cho Thứ / Tháng có Avg % cao nhất
+colHighlightGreen = color.new(#089981, 55) // Xanh lục (Emerald) cho ô Spread có Green nhiều nhất
+colHighlightRed   = color.new(#f23645, 55) // Đỏ (Red) cho ô Spread có Red nhiều nhất
+colHighlightBoth  = color.new(#8b5cf6, 50) // Tím (Purple) nếu đồng thời Green & Red nhiều nhất
+
+// Độ rộng cột (% chart width) cho Weekday & Monthly table
+wColName   = 4.6
+wColGreen  = 2.6
+wColRed    = 2.6
+wColTotal  = 2.6
+wColRate   = 2.6
+wColAvg    = 2.6
+
+// Độ rộng cột cho Spread Table (10 mức nằm ngang)
+wSpreadDayCol = 3.2
+wSpreadLvlCol = 2.1
+wSpreadTotCol = 2.4
+
+// Helper chuyển text vị trí thành position object
+getTablePosition(string posStr) =>
+    pos = position.bottom_right
+    if posStr == "Top Right"
+        pos := position.top_right
+    else if posStr == "Bottom Right"
+        pos := position.bottom_right
+    else if posStr == "Top Left"
+        pos := position.top_left
+    else if posStr == "Bottom Left"
+        pos := position.bottom_left
+    else if posStr == "Middle Right"
+        pos := position.middle_right
+    else if posStr == "Top Center"
+        pos := position.top_center
+    else if posStr == "Bottom Center"
+        pos := position.bottom_center
+    pos
+
+// ======================================================
+// DATA ARRAYS (WEEKDAY, MONTHLY & SPREAD ACCUMULATORS)
+// ======================================================
+
+// Weekday: Index 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+var int[]   w_greenCount  = array.new_int(7, 0)
+var int[]   w_redCount    = array.new_int(7, 0)
+var int[]   w_totalCount  = array.new_int(7, 0)
+var float[] w_changeSum   = array.new_float(7, 0.0)
+
+// Monthly: Index 0=Jan ... 11=Dec
+var int[]   m_greenCount  = array.new_int(12, 0)
+var int[]   m_redCount    = array.new_int(12, 0)
+var int[]   m_totalCount  = array.new_int(12, 0)
+var float[] m_changeSum   = array.new_float(12, 0.0)
+
+// Spread: 10 mức (0..9) x 7 ngày (0..6) = 70 phần tử (Index = sIdx * 7 + wIdx)
+var int[]   sp_counts       = array.new_int(70, 0)
+var int[]   sp_greenCounts  = array.new_int(70, 0)
+var int[]   sp_redCounts    = array.new_int(70, 0)
+var int[]   sp_dayTotals    = array.new_int(7, 0)
+var int[]   sp_dayGreen     = array.new_int(7, 0)
+var int[]   sp_dayRed       = array.new_int(7, 0)
+var int[]   sp_levelTotals  = array.new_int(10, 0)
+var int[]   sp_levelGreen   = array.new_int(10, 0)
+var int[]   sp_levelRed     = array.new_int(10, 0)
+
+// Reset khi bắt đầu tính toán bar đầu tiên
+if barstate.isfirst
+    for i = 0 to 6
+        array.set(w_greenCount, i, 0)
+        array.set(w_redCount, i, 0)
+        array.set(w_totalCount, i, 0)
+        array.set(w_changeSum, i, 0.0)
+        array.set(sp_dayTotals, i, 0)
+        array.set(sp_dayGreen, i, 0)
+        array.set(sp_dayRed, i, 0)
+
+    for i = 0 to 11
+        array.set(m_greenCount, i, 0)
+        array.set(m_redCount, i, 0)
+        array.set(m_totalCount, i, 0)
+        array.set(m_changeSum, i, 0.0)
+
+    for i = 0 to 9
+        array.set(sp_levelTotals, i, 0)
+        array.set(sp_levelGreen, i, 0)
+        array.set(sp_levelRed, i, 0)
+
+    for i = 0 to 69
+        array.set(sp_counts, i, 0)
+        array.set(sp_greenCounts, i, 0)
+        array.set(sp_redCounts, i, 0)
+
+// ======================================================
+// BAR EVALUATION (CHẠY QUA TỪNG NẾN)
+// ======================================================
+
+// Kiểm tra điều kiện nến xanh / đỏ
+isGreen = calcMode == "Close > Open" ? (close > open or (includeDojiAsGreen and close == open)) : (close > close[1] or (includeDojiAsGreen and close == close[1]))
+isRed   = calcMode == "Close > Open" ? (close < open) : (close < close[1])
+
+// Tính phần trăm thay đổi của nến
+barChangePct = open != 0 ? ((close - open) / open * 100.0) : 0.0
+
+// Tính Spread của nến
+candSpread = 0.0
+if spreadType == "High - Low (%)"
+    candSpread := low != 0 ? ((high - low) / low * 100.0) : 0.0
+else if spreadType == "|Close - Open| (%)"
+    candSpread := open != 0 ? (math.abs(close - open) / open * 100.0) : 0.0
+else
+    candSpread := high - low
+
+// Lọc theo năm nếu người dùng cài đặt
+barYear = year(time)
+isValidYear = (filterYear == 0) or (barYear == filterYear)
+
+if isValidYear
+    // 1. Phân loại theo Thứ trong tuần
+    day = dayofweek(time)
+    wIdx = day == dayofweek.monday    ? 0 :
+           day == dayofweek.tuesday   ? 1 :
+           day == dayofweek.wednesday ? 2 :
+           day == dayofweek.thursday  ? 3 :
+           day == dayofweek.friday    ? 4 :
+           day == dayofweek.saturday  ? 5 : 6
+
+    array.set(w_totalCount, wIdx, array.get(w_totalCount, wIdx) + 1)
+    if isGreen
+        array.set(w_greenCount, wIdx, array.get(w_greenCount, wIdx) + 1)
+    else if isRed
+        array.set(w_redCount, wIdx, array.get(w_redCount, wIdx) + 1)
+    array.set(w_changeSum, wIdx, array.get(w_changeSum, wIdx) + barChangePct)
+
+    // 2. Phân loại theo Tháng trong năm
+    mIdx = month(time) - 1 // 0..11
+    array.set(m_totalCount, mIdx, array.get(m_totalCount, mIdx) + 1)
+    if isGreen
+        array.set(m_greenCount, mIdx, array.get(m_greenCount, mIdx) + 1)
+    else if isRed
+        array.set(m_redCount, mIdx, array.get(m_redCount, mIdx) + 1)
+    array.set(m_changeSum, mIdx, array.get(m_changeSum, mIdx) + barChangePct)
+
+    // 3. Phân loại theo 10 Mức Spread
+    sIdx = 0
+    if spreadStep > 0
+        sIdx := int(math.floor(candSpread / spreadStep))
+        if sIdx > 9
+            sIdx := 9
+        if sIdx < 0
+            sIdx := 0
+
+    arrIdx = sIdx * 7 + wIdx
+    array.set(sp_counts, arrIdx, array.get(sp_counts, arrIdx) + 1)
+    array.set(sp_dayTotals, wIdx, array.get(sp_dayTotals, wIdx) + 1)
+    array.set(sp_levelTotals, sIdx, array.get(sp_levelTotals, sIdx) + 1)
+
+    if isGreen
+        array.set(sp_greenCounts, arrIdx, array.get(sp_greenCounts, arrIdx) + 1)
+        array.set(sp_dayGreen, wIdx, array.get(sp_dayGreen, wIdx) + 1)
+        array.set(sp_levelGreen, sIdx, array.get(sp_levelGreen, sIdx) + 1)
+    else if isRed
+        array.set(sp_redCounts, arrIdx, array.get(sp_redCounts, arrIdx) + 1)
+        array.set(sp_dayRed, wIdx, array.get(sp_dayRed, wIdx) + 1)
+        array.set(sp_levelRed, sIdx, array.get(sp_levelRed, sIdx) + 1)
+
+// ======================================================
+// RENDER TABLES (CHỈ VẼ Ở NẾN CUỐI CÙNG - BARSTATE.ISLAST)
+// ======================================================
+
+// ------------------------------------------------------
+// 1. RENDER WEEKDAY TABLE
+// ------------------------------------------------------
+var table weekTable = na
+maxDays = showWeekend ? 7 : 5
+
+if showWeekdayTable and barstate.islast
+    if not na(weekTable)
+        table.delete(weekTable)
+    
+    // 6 cột: Day | Green | Red | Total | % Green | Avg %
+    totalRows = 1 + maxDays + 1
+    weekTable := table.new(getTablePosition(weekdayPos), 6, totalRows, color.new(#131722, 10), tblFrameColor, tblFrameWidth, tblBorderColor, tblBorderWidth)
+
+    // Headers
+    table.cell(weekTable, 0, 0, "Day", width=wColName, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_left)
+    table.cell(weekTable, 1, 0, "Green", width=wColGreen, bgcolor=colHeaderBg, text_color=colGreenTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 2, 0, "Red", width=wColRed, bgcolor=colHeaderBg, text_color=colRedTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 3, 0, "Total", width=wColTotal, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 4, 0, "% Green", width=wColRate, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 5, 0, "Avg %", width=wColAvg, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+
+    wNames = array.from("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    // Tìm ngày có Avg % lớn nhất
+    bestWeekIdx = -1
+    bestWeekAvg = -999999.0
+    for i = 0 to maxDays - 1
+        tot = array.get(w_totalCount, i)
+        if tot > 0
+            cSum = array.get(w_changeSum, i)
+            avgVal = cSum / tot
+            if avgVal > bestWeekAvg
+                bestWeekAvg := avgVal
+                bestWeekIdx := i
+
+    totalAllGreen = 0
+    totalAllRed = 0
+    totalAllBars = 0
+    totalAllChange = 0.0
+
+    for i = 0 to maxDays - 1
+        g = array.get(w_greenCount, i)
+        r = array.get(w_redCount, i)
+        tot = array.get(w_totalCount, i)
+        cSum = array.get(w_changeSum, i)
+
+        totalAllGreen += g
+        totalAllRed += r
+        totalAllBars += tot
+        totalAllChange += cSum
+
+        winrate = tot > 0 ? (g * 100.0 / tot) : 0.0
+        avgChg  = tot > 0 ? (cSum / tot) : 0.0
+
+        rowIdx = i + 1
+        isBestDay = (i == bestWeekIdx)
+        rowBg = isBestDay ? colHighlightAvg : color(na)
+
+        // Day
+        table.cell(weekTable, 0, rowIdx, array.get(wNames, i), bgcolor=rowBg, text_color=isBestDay ? color.white : colNeutralTxt, text_size=fontSize, text_halign=text.align_left)
+        // Green
+        table.cell(weekTable, 1, rowIdx, str.tostring(g), bgcolor=rowBg, text_color=colGreenTxt, text_size=fontSize, text_halign=text.align_center)
+        // Red
+        table.cell(weekTable, 2, rowIdx, str.tostring(r), bgcolor=rowBg, text_color=colRedTxt, text_size=fontSize, text_halign=text.align_center)
+        // Total
+        table.cell(weekTable, 3, rowIdx, str.tostring(tot), bgcolor=rowBg, text_color=isBestDay ? color.white : colNeutralTxt, text_size=fontSize, text_halign=text.align_center)
+        // % Green
+        rateCol = winrate >= 50.0 ? colGreenTxt : colRedTxt
+        table.cell(weekTable, 4, rowIdx, str.tostring(math.round(winrate, 1)) + "%", bgcolor=rowBg, text_color=rateCol, text_size=fontSize, text_halign=text.align_center)
+        // Avg %
+        avgCol = avgChg >= 0 ? colGreenTxt : colRedTxt
+        avgPrefix = avgChg > 0 ? "+" : ""
+        table.cell(weekTable, 5, rowIdx, avgPrefix + str.tostring(math.round(avgChg, 2)) + "%", bgcolor=rowBg, text_color=avgCol, text_size=fontSize, text_halign=text.align_center)
+
+    // Dòng tổng kết (Summary)
+    sumRow = maxDays + 1
+    totalWinrate = totalAllBars > 0 ? (totalAllGreen * 100.0 / totalAllBars) : 0.0
+    totalAvgChg  = totalAllBars > 0 ? (totalAllChange / totalAllBars) : 0.0
+
+    table.cell(weekTable, 0, sumRow, "Total", bgcolor=color.new(#1e222d, 30), text_color=color.white, text_size=fontSize, text_halign=text.align_left)
+    table.cell(weekTable, 1, sumRow, str.tostring(totalAllGreen), bgcolor=color.new(#1e222d, 30), text_color=colGreenTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 2, sumRow, str.tostring(totalAllRed), bgcolor=color.new(#1e222d, 30), text_color=colRedTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 3, sumRow, str.tostring(totalAllBars), bgcolor=color.new(#1e222d, 30), text_color=color.white, text_size=fontSize, text_halign=text.align_center)
+    table.cell(weekTable, 4, sumRow, str.tostring(math.round(totalWinrate, 1)) + "%", bgcolor=color.new(#1e222d, 30), text_color=totalWinrate >= 50.0 ? colGreenTxt : colRedTxt, text_size=fontSize, text_halign=text.align_center)
+    totAvgPrefix = totalAvgChg > 0 ? "+" : ""
+    table.cell(weekTable, 5, sumRow, totAvgPrefix + str.tostring(math.round(totalAvgChg, 2)) + "%", bgcolor=color.new(#1e222d, 30), text_color=totalAvgChg >= 0 ? colGreenTxt : colRedTxt, text_size=fontSize, text_halign=text.align_center)
+
+else if not showWeekdayTable and not na(weekTable)
+    table.delete(weekTable)
+    weekTable := na
+
+// ------------------------------------------------------
+// 2. RENDER MONTHLY TABLE
+// ------------------------------------------------------
+var table monthTable = na
+
+if showMonthlyTable and barstate.islast
+    if not na(monthTable)
+        table.delete(monthTable)
+    
+    // 6 cột: Months | Green | Red | Total | % Green | Avg %
+    totalMRows = 1 + 12 + 1
+    monthTable := table.new(getTablePosition(monthlyPos), 6, totalMRows, color.new(#131722, 10), tblFrameColor, tblFrameWidth, tblBorderColor, tblBorderWidth)
+
+    // Headers
+    tableTitle = filterYear > 0 ? ("Months (" + str.tostring(filterYear) + ")") : "Months (All)"
+    table.cell(monthTable, 0, 0, tableTitle, width=wColName, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_left)
+    table.cell(monthTable, 1, 0, "Green", width=wColGreen, bgcolor=colHeaderBg, text_color=colGreenTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 2, 0, "Red", width=wColRed, bgcolor=colHeaderBg, text_color=colRedTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 3, 0, "Total", width=wColTotal, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 4, 0, "% Green", width=wColRate, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 5, 0, "Avg %", width=wColAvg, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+
+    mNames = array.from("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+    // Tìm tháng có Avg % lớn nhất
+    bestMonthIdx = -1
+    bestMonthAvg = -999999.0
+    for i = 0 to 11
+        tot = array.get(m_totalCount, i)
+        if tot > 0
+            cSum = array.get(m_changeSum, i)
+            avgVal = cSum / tot
+            if avgVal > bestMonthAvg
+                bestMonthAvg := avgVal
+                bestMonthIdx := i
+
+    mAllGreen = 0
+    mAllRed = 0
+    mAllBars = 0
+    mAllChange = 0.0
+
+    for i = 0 to 11
+        g = array.get(m_greenCount, i)
+        r = array.get(m_redCount, i)
+        tot = array.get(m_totalCount, i)
+        cSum = array.get(m_changeSum, i)
+
+        mAllGreen += g
+        mAllRed += r
+        mAllBars += tot
+        mAllChange += cSum
+
+        winrate = tot > 0 ? (g * 100.0 / tot) : 0.0
+        avgChg  = tot > 0 ? (cSum / tot) : 0.0
+
+        rowIdx = i + 1
+        isBestMonth = (i == bestMonthIdx)
+        rowBg = isBestMonth ? colHighlightAvg : color(na)
+
+        // Month
+        table.cell(monthTable, 0, rowIdx, array.get(mNames, i), bgcolor=rowBg, text_color=isBestMonth ? color.white : colNeutralTxt, text_size=fontSize, text_halign=text.align_left)
+        // Green
+        table.cell(monthTable, 1, rowIdx, str.tostring(g), bgcolor=rowBg, text_color=colGreenTxt, text_size=fontSize, text_halign=text.align_center)
+        // Red
+        table.cell(monthTable, 2, rowIdx, str.tostring(r), bgcolor=rowBg, text_color=colRedTxt, text_size=fontSize, text_halign=text.align_center)
+        // Total
+        table.cell(monthTable, 3, rowIdx, str.tostring(tot), bgcolor=rowBg, text_color=isBestMonth ? color.white : colNeutralTxt, text_size=fontSize, text_halign=text.align_center)
+        // % Green
+        rateCol = winrate >= 50.0 ? colGreenTxt : colRedTxt
+        table.cell(monthTable, 4, rowIdx, str.tostring(math.round(winrate, 1)) + "%", bgcolor=rowBg, text_color=rateCol, text_size=fontSize, text_halign=text.align_center)
+        // Avg %
+        avgCol = avgChg >= 0 ? colGreenTxt : colRedTxt
+        avgPrefix = avgChg > 0 ? "+" : ""
+        table.cell(monthTable, 5, rowIdx, avgPrefix + str.tostring(math.round(avgChg, 2)) + "%", bgcolor=rowBg, text_color=avgCol, text_size=fontSize, text_halign=text.align_center)
+
+    // Dòng tổng kết (Summary)
+    sumRow = 13
+    mTotalWinrate = mAllBars > 0 ? (mAllGreen * 100.0 / mAllBars) : 0.0
+    mTotalAvgChg  = mAllBars > 0 ? (mAllChange / mAllBars) : 0.0
+
+    table.cell(monthTable, 0, sumRow, "Total", bgcolor=color.new(#1e222d, 30), text_color=color.white, text_size=fontSize, text_halign=text.align_left)
+    table.cell(monthTable, 1, sumRow, str.tostring(mAllGreen), bgcolor=color.new(#1e222d, 30), text_color=colGreenTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 2, sumRow, str.tostring(mAllRed), bgcolor=color.new(#1e222d, 30), text_color=colRedTxt, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 3, sumRow, str.tostring(mAllBars), bgcolor=color.new(#1e222d, 30), text_color=color.white, text_size=fontSize, text_halign=text.align_center)
+    table.cell(monthTable, 4, sumRow, str.tostring(math.round(mTotalWinrate, 1)) + "%", bgcolor=color.new(#1e222d, 30), text_color=mTotalWinrate >= 50.0 ? colGreenTxt : colRedTxt, text_size=fontSize, text_halign=text.align_center)
+    totAvgPrefix = mTotalAvgChg > 0 ? "+" : ""
+    table.cell(monthTable, 5, sumRow, totAvgPrefix + str.tostring(math.round(mTotalAvgChg, 2)) + "%", bgcolor=color.new(#1e222d, 30), text_color=mTotalAvgChg >= 0 ? colGreenTxt : colRedTxt, text_size=fontSize, text_halign=text.align_center)
+
+else if not showMonthlyTable and not na(monthTable)
+    table.delete(monthTable)
+    monthTable := na
+
+// ------------------------------------------------------
+// 3. RENDER SPREAD TABLE (MON..FRI DỌC, 10 MỨC SPREAD NGANG)
+// ------------------------------------------------------
+var table spreadTable = na
+
+if showSpreadTable and barstate.islast
+    if not na(spreadTable)
+        table.delete(spreadTable)
+
+    // Cột ngang: 1 (Day) + 10 (Mức Spread) + (nếu không có weekend thì thêm 1 cột Total)
+    numSpreadCols = showWeekend ? (1 + 10) : (1 + 10 + 1)
+    // Dòng dọc: 1 (Header) + maxDays (Mon..Fri / Mon..Sun) + 1 (Dòng Total)
+    numSpreadRows = 1 + maxDays + 1
+    
+    spreadTable := table.new(getTablePosition(spreadPos), numSpreadCols, numSpreadRows, color.new(#131722, 10), tblFrameColor, tblFrameWidth, tblBorderColor, tblBorderWidth)
+
+    // Đơn vị spread
+    unitStr = spreadType == "High - Low (Points)" ? "" : "%"
+
+    // 1. Header Dòng 0: Cột Day và 10 Cột Mức Spread
+    table.cell(spreadTable, 0, 0, "Day", width=wSpreadDayCol, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_left)
+    
+    for s = 0 to 9
+        lowB = s * spreadStep
+        highB = (s + 1) * spreadStep
+        sHeader = s == 9 ? (">" + str.tostring(lowB, "#.#") + unitStr) : (str.tostring(lowB, "#.#") + "-" + str.tostring(highB, "#.#") + unitStr)
+        table.cell(spreadTable, s + 1, 0, sHeader, width=wSpreadLvlCol, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+
+    if not showWeekend
+        table.cell(spreadTable, 11, 0, "Total", width=wSpreadTotCol, bgcolor=colHeaderBg, text_color=colHeaderTxt, text_size=fontSize, text_halign=text.align_center)
+
+    // Tìm mức Green lớn nhất và Red lớn nhất trong bảng Spread
+    maxSpreadG = 0
+    maxSpreadR = 0
+    for d = 0 to maxDays - 1
+        for s = 0 to 9
+            arrIdx = s * 7 + d
+            gVal = array.get(sp_greenCounts, arrIdx)
+            rVal = array.get(sp_redCounts, arrIdx)
+            if gVal > maxSpreadG
+                maxSpreadG := gVal
+            if rVal > maxSpreadR
+                maxSpreadR := rVal
+
+    // 2. Các Dòng Thứ (Mon, Tue, Wed, Thu, Fri, [Sat, Sun])
+    spDays = array.from("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    for d = 0 to maxDays - 1
+        rowIdx = d + 1
+        // Cột 0: Tên Thứ
+        table.cell(spreadTable, 0, rowIdx, array.get(spDays, d), text_color=colNeutralTxt, text_size=fontSize, text_halign=text.align_left)
+
+        // 10 Cột Mức Spread
+        for s = 0 to 9
+            arrIdx = s * 7 + d
+            cVal = array.get(sp_counts, arrIdx)
+            gVal = array.get(sp_greenCounts, arrIdx)
+            rVal = array.get(sp_redCounts, arrIdx)
+
+            isMaxG = maxSpreadG > 0 and gVal == maxSpreadG
+            isMaxR = maxSpreadR > 0 and rVal == maxSpreadR
+
+            cellBg = color(na)
+            if isMaxG and isMaxR
+                cellBg := colHighlightBoth
+            else if isMaxG
+                cellBg := colHighlightGreen
+            else if isMaxR
+                cellBg := colHighlightRed
+
+            cellText = ""
+            cellTxtCol = colNeutralTxt
+
+            if spreadDisplayMode == "G/R (Xanh/Đỏ)"
+                cellText := str.tostring(gVal) + "/" + str.tostring(rVal)
+                cellTxtCol := (isMaxG or isMaxR) ? color.white : (gVal > rVal ? colGreenTxt : (rVal > gVal ? colRedTxt : colNeutralTxt))
+            else if spreadDisplayMode == "% Green (Tỷ lệ Xanh)"
+                cellWinrate = cVal > 0 ? (gVal * 100.0 / cVal) : 0.0
+                cellText := cVal > 0 ? (str.tostring(math.round(cellWinrate, 0)) + "%") : "-"
+                cellTxtCol := (isMaxG or isMaxR) ? color.white : (cellWinrate >= 50.0 ? colGreenTxt : colRedTxt)
+            else // "Total (Tổng nến)"
+                cellText := str.tostring(cVal)
+                cellTxtCol := (isMaxG or isMaxR) ? color.white : (cVal > 0 ? colNeutralTxt : color.new(#787b86, 60))
+
+            table.cell(spreadTable, s + 1, rowIdx, cellText, bgcolor=cellBg, text_color=cellTxtCol, text_size=fontSize, text_halign=text.align_center)
+
+        // Cột Total cho ngày d (nếu không bật weekend)
+        if not showWeekend
+            dTot = array.get(sp_dayTotals, d)
+            dGrn = array.get(sp_dayGreen, d)
+            dRed = array.get(sp_dayRed, d)
+
+            dayTotText = ""
+            dayTotCol = color.white
+
+            if spreadDisplayMode == "G/R (Xanh/Đỏ)"
+                dayTotText := str.tostring(dGrn) + "/" + str.tostring(dRed)
+                dayTotCol := dGrn > dRed ? colGreenTxt : (dRed > dGrn ? colRedTxt : color.white)
+            else if spreadDisplayMode == "% Green (Tỷ lệ Xanh)"
+                dWinrate = dTot > 0 ? (dGrn * 100.0 / dTot) : 0.0
+                dayTotText := str.tostring(math.round(dWinrate, 0)) + "%"
+                dayTotCol := dWinrate >= 50.0 ? colGreenTxt : colRedTxt
+            else
+                dayTotText := str.tostring(dTot)
+
+            table.cell(spreadTable, 11, rowIdx, dayTotText, text_color=dayTotCol, text_size=fontSize, text_halign=text.align_center)
+
+    // 3. Dòng Tổng kết (Summary Row) ở dưới cùng
+    sumRowIdx = maxDays + 1
+    table.cell(spreadTable, 0, sumRowIdx, "Total", bgcolor=color.new(#1e222d, 30), text_color=color.white, text_size=fontSize, text_halign=text.align_left)
+
+    allSpreadBars  = 0
+    allSpreadGreen = 0
+    allSpreadRed   = 0
+
+    // Tổng cộng cho từng cột mức Spread
+    for s = 0 to 9
+        lvlTot = array.get(sp_levelTotals, s)
+        lvlGrn = array.get(sp_levelGreen, s)
+        lvlRed = array.get(sp_levelRed, s)
+
+        allSpreadBars  += lvlTot
+        allSpreadGreen += lvlGrn
+        allSpreadRed   += lvlRed
+
+        lvlSumText = ""
+        lvlSumCol = color.white
+
+        if spreadDisplayMode == "G/R (Xanh/Đỏ)"
+            lvlSumText := str.tostring(lvlGrn) + "/" + str.tostring(lvlRed)
+            lvlSumCol := lvlGrn > lvlRed ? colGreenTxt : (lvlRed > lvlGrn ? colRedTxt : color.white)
+        else if spreadDisplayMode == "% Green (Tỷ lệ Xanh)"
+            lvlWinrate = lvlTot > 0 ? (lvlGrn * 100.0 / lvlTot) : 0.0
+            lvlSumText := lvlTot > 0 ? (str.tostring(math.round(lvlWinrate, 0)) + "%") : "-"
+            lvlSumCol := lvlWinrate >= 50.0 ? colGreenTxt : colRedTxt
+        else
+            lvlSumText := str.tostring(lvlTot)
+
+        table.cell(spreadTable, s + 1, sumRowIdx, lvlSumText, bgcolor=color.new(#1e222d, 30), text_color=lvlSumCol, text_size=fontSize, text_halign=text.align_center)
+
+    // Ô tổng kết góc dưới cùng bên phải
+    if not showWeekend
+        allSumText = ""
+        allSumCol = color.white
+        if spreadDisplayMode == "G/R (Xanh/Đỏ)"
+            allSumText := str.tostring(allSpreadGreen) + "/" + str.tostring(allSpreadRed)
+            allSumCol := allSpreadGreen > allSpreadRed ? colGreenTxt : (allSpreadRed > allSpreadGreen ? colRedTxt : color.white)
+        else if spreadDisplayMode == "% Green (Tỷ lệ Xanh)"
+            allWinrate = allSpreadBars > 0 ? (allSpreadGreen * 100.0 / allSpreadBars) : 0.0
+            allSumText := str.tostring(math.round(allWinrate, 0)) + "%"
+            allSumCol := allWinrate >= 50.0 ? colGreenTxt : colRedTxt
+        else
+            allSumText := str.tostring(allSpreadBars)
+
+        table.cell(spreadTable, 11, sumRowIdx, allSumText, bgcolor=color.new(#1e222d, 30), text_color=allSumCol, text_size=fontSize, text_halign=text.align_center)
+
+else if not showSpreadTable and not na(spreadTable)
+    table.delete(spreadTable)
+    spreadTable := na
