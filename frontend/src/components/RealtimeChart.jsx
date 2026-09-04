@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
-import { getFuturesHistory } from '../services/tcbs';
+import { getDerivativeHistory } from '../services/24hmoney';
 import { evaluateRule } from '../utils/ruleEngine';
 import { calculateVWAP } from '../indicators/vwap';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
@@ -346,18 +346,19 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         setStatus(wsStatus || 'Connecting...');
     }, [wsStatus]);
 
-    // Load & Synchronize Historical Candles from REST
+    // Load & Synchronize Historical Candles from 24hMoney
     const loadHistory = useCallback(async (isRefresh = false) => {
-        if (!symbol || !seriesRef.current) return;
+        if (!seriesRef.current) return;
         try {
             if (!isRefresh) setStatus('Loading Historical Data...');
             setRefreshingHistory(true);
 
-            const hisData = await getFuturesHistory(symbol, 'derivative', '1');
+            const targetSymbol = (symbol && !symbol.startsWith('41I')) ? symbol : 'VN30F1M';
+            const hisData = await getDerivativeHistory(targetSymbol, '1', 350);
 
             if (Array.isArray(hisData) && hisData.length > 0) {
                 const mappedData = hisData.map(item => {
-                    const timeStamp = parseTradingDateToTimestamp(item.tradingDate || item.date || item.time);
+                    const timeStamp = parseTradingDateToTimestamp(item.time || item.tradingDate || item.date);
                     return {
                         time: timeStamp,
                         date: item.tradingDate || item.date || new Date((timeStamp || 0) * 1000).toISOString(),
@@ -381,7 +382,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                 }
             }
         } catch (error) {
-            console.error("Failed to load REST historical data:", error);
+            console.error("Failed to load 24hMoney historical data:", error);
         } finally {
             setRefreshingHistory(false);
         }
@@ -396,12 +397,11 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
 
     // Auto-sync historical candles periodically (every 30s) to guarantee no missing minutes
     useEffect(() => {
-        if (!symbol || !jwtToken) return;
         const interval = setInterval(() => {
             loadHistory(true);
         }, 30000);
         return () => clearInterval(interval);
-    }, [symbol, jwtToken, loadHistory]);
+    }, [loadHistory]);
 
     // Process buffered WS tick via RAF
     const processTick = useCallback(() => {
@@ -485,13 +485,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
 
     // Initialize chart
     useEffect(() => {
-        if (!symbol) return;
         if (!chartContainerRef.current) return;
-        if (!jwtToken) {
-            setStatus('Authentication Required');
-            setShowOtpModal(true);
-            return;
-        }
 
         // Initialize lightweight chart
         const chart = createChart(chartContainerRef.current, {
@@ -596,7 +590,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             vwapBandsSeriesRef.current = [];
             supertrendSeriesRef.current = [];
         };
-    }, [symbol, jwtToken, loadHistory]);
+    }, [symbol, loadHistory]);
 
     return (
         <div className="flex flex-col w-full h-full relative min-h-[300px]">

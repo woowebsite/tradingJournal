@@ -1,7 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { getCryptoHistory } from '../services/binance';
-import { getStockHistory } from '../services/24hmoney';
+import { getStockHistory, getDerivativeHistory } from '../services/24hmoney';
 
 import { getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
@@ -220,7 +220,7 @@ export const loadExternalHistory = createAsyncThunk(
             if (marketType === 'Crypto') {
                 externalData = await getCryptoHistory(symbol);
             } else if (String(marketType || '').toLowerCase() === 'derivative') {
-                externalData = await getFuturesHistory(symbol.split(':')[0], 'derivative', resolution || '1');
+                externalData = await getDerivativeHistory(symbol.split(':')[0], resolution || '1', 350);
             } else {
                 // Default to TCBS (Stocks)
                 const ticket = symbol.split(':')[0];
@@ -402,7 +402,7 @@ export const fetchBatchLatestMinutePrices = createAsyncThunk(
                     const minuteBars = isCrypto
                         ? await getCryptoHistory(ticker, '1m', 2)
                         : isDerivative
-                            ? await getFuturesHistory(ticker, 'derivative', '1')
+                            ? await getDerivativeHistory(ticker, '1', 2)
                             : await getStockHistory(ticker, 'stock', '1');
 
                     if (!Array.isArray(minuteBars) || minuteBars.length === 0) return;

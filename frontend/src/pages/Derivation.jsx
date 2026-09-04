@@ -50,11 +50,11 @@ const Derivation = () => {
 
 
     const activeSymbol = (() => {
-        if (!derivativeData) return null;
+        if (!derivativeData) return 'VN30F1M';
         const info = Array.isArray(derivativeData) && derivativeData.length > 0
             ? derivativeData[0]
             : typeof derivativeData === 'object' ? derivativeData : null;
-        return info ? (info.symbol || info.sec) : null;
+        return info ? (info.symbol || info.sec || 'VN30F1M') : 'VN30F1M';
     })();
 
     // Helper to ensure consistent date matching
