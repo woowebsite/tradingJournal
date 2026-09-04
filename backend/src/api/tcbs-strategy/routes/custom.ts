@@ -36,5 +36,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/tcbs-strategies/update-token',
+      handler: 'tcbs-strategy.updateToken',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

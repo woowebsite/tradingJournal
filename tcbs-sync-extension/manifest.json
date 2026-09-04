@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "TradingJournal - TCBS Token Sync",
+  "version": "1.0",
+  "description": "Tự động đồng bộ token TCBS sang TradingJournal localhost",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost:1337/*",
+    "http://127.0.0.1:1337/*",
+    "https://tcinvest.tcbs.com.vn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://tcinvest.tcbs.com.vn/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

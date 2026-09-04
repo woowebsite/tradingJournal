@@ -3,6 +3,8 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import fs from 'fs';
+import path from 'path';
 import { factories } from '@strapi/strapi';
 import { fetchTcbs } from '../../../utils/tcbs-client';
 
@@ -357,5 +359,113 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     ctx.body = {
       data: existing || null,
     };
+  },
+
+  async updateToken(ctx) {
+    try {
+      let rawData = ctx.request.body;
+      if (typeof rawData === 'string') {
+        try {
+          rawData = JSON.parse(rawData);
+        } catch {
+          // Plain token string
+        }
+      }
+
+      let authToken = '';
+      let cookieObject: any = {};
+
+      if (typeof rawData === 'string') {
+        authToken = rawData.trim();
+        cookieObject = { authToken };
+      } else if (rawData && typeof rawData === 'object') {
+        authToken = rawData.authToken || rawData.token || rawData.accessToken || rawData.jwt ||
+                    rawData.userInfo?.authToken || rawData.user?.authToken || rawData.data?.authToken;
+        cookieObject = { ...rawData };
+        if (!cookieObject.authToken && authToken) {
+          cookieObject.authToken = authToken;
+        }
+      }
+
+      if (!authToken) {
+        ctx.status = 400;
+        ctx.body = { error: { message: "Không tìm thấy authToken trong dữ liệu gửi lên" } };
+        return;
+      }
+
+      const backendRoot = process.cwd();
+      const frontendRoot = path.resolve(backendRoot, '../frontend');
+      const cookiePath = path.join(frontendRoot, 'tcbs-cookie.json');
+
+      // 1. Write/Update tcbs-cookie.json
+      try {
+        fs.writeFileSync(cookiePath, JSON.stringify(cookieObject, null, 2), 'utf8');
+      } catch (err: any) {
+        strapi.log.warn(`Could not write tcbs-cookie.json: ${err.message}`);
+      }
+
+      // 2. Update frontend .env files
+      if (fs.existsSync(frontendRoot)) {
+        try {
+          const files = fs.readdirSync(frontendRoot);
+          const envFiles = files.filter(file => file === '.env' || (file.startsWith('.env.') && !file.endsWith('.example')));
+          
+          if (envFiles.length === 0) {
+            const defaultEnvPath = path.join(frontendRoot, '.env');
+            fs.writeFileSync(defaultEnvPath, `VITE_TCBS_TOKEN=${authToken}\n`, 'utf8');
+          } else {
+            for (const file of envFiles) {
+              const filePath = path.join(frontendRoot, file);
+              let envContent = fs.readFileSync(filePath, 'utf8');
+              const tokenRegex = /^VITE_TCBS_TOKEN=.*$/m;
+              if (tokenRegex.test(envContent)) {
+                envContent = envContent.replace(tokenRegex, `VITE_TCBS_TOKEN=${authToken}`);
+              } else {
+                envContent = envContent.trim() + `\nVITE_TCBS_TOKEN=${authToken}\n`;
+              }
+              fs.writeFileSync(filePath, envContent, 'utf8');
+            }
+          }
+        } catch (err: any) {
+          strapi.log.warn(`Could not update frontend .env: ${err.message}`);
+        }
+      }
+
+      // 3. Update backend/.env
+      const backendEnvPath = path.join(backendRoot, '.env');
+      if (fs.existsSync(backendEnvPath)) {
+        try {
+          let backendEnvContent = fs.readFileSync(backendEnvPath, 'utf8');
+          const backendTokenRegex = /^TCBS_TOKEN=.*$/m;
+          if (backendTokenRegex.test(backendEnvContent)) {
+            backendEnvContent = backendEnvContent.replace(backendTokenRegex, `TCBS_TOKEN=${authToken}`);
+          } else {
+            backendEnvContent = backendEnvContent.trim() + `\nTCBS_TOKEN=${authToken}\n`;
+          }
+          fs.writeFileSync(backendEnvPath, backendEnvContent, 'utf8');
+        } catch (err: any) {
+          strapi.log.warn(`Could not update backend .env: ${err.message}`);
+        }
+      }
+
+      // 4. Update runtime environment variables in Node.js process
+      process.env.TCBS_TOKEN = authToken;
+      process.env.VITE_TCBS_TOKEN = authToken;
+
+      strapi.log.info(`[tcbs-strategy] TCBS Token updated successfully`);
+
+      ctx.body = {
+        success: true,
+        message: 'Đã đồng bộ Token TCBS thành công!',
+        authTokenPrefix: authToken.substring(0, 15) + '...',
+        fullName: cookieObject.fullName || undefined,
+        custodyId: cookieObject.custodyId || undefined,
+      };
+    } catch (error: any) {
+      strapi.log.error(`[tcbs-strategy] Error updating token: ${error.message}`);
+      ctx.status = 500;
+      ctx.body = { error: { message: error.message } };
+    }
   }
 }));
+
