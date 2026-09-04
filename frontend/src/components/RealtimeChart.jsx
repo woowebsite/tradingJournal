@@ -139,15 +139,26 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             unknown: '#9ca3af'
         };
 
+        const getRuleClassification = (rule) => {
+            if (!rule) return 'entry';
+            const t = (rule.strategyType || rule.actionType || rule.Type || rule.type || '').toLowerCase();
+            if (t.includes('profit') || t.includes('tp') || t === 'takeprofit') return 'takeprofit';
+            if (t.includes('loss') || t.includes('sl') || t === 'stoploss') return 'stoploss';
+            if (t.includes('exit')) return 'exit';
+            if (t.includes('entry')) return 'entry';
+            return 'entry';
+        };
+
         const markers = generatedSignals.map(sig => {
-            const rawType = (sig.rule.Type || sig.rule.type || '').toLowerCase();
+            const rawType = getRuleClassification(sig.rule);
             const isEntry = rawType === 'entry';
+            const displayText = (sig.rule.signalText || sig.rule.signal_text)?.trim() || sig.rule.Name || sig.rule.name || rawType.toUpperCase();
             return {
                 time: sig.time,
                 position: isEntry ? 'belowBar' : 'aboveBar',
                 color: colors[rawType] || colors.unknown,
                 shape: isEntry ? 'arrowUp' : 'arrowDown',
-                text: sig.rule.Name || sig.rule.name || rawType.toUpperCase(),
+                text: displayText,
                 size: 2
             };
         });
@@ -220,16 +231,27 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             unknown: '#9ca3af'
         };
 
+        const getRuleClassification = (rule) => {
+            if (!rule) return 'entry';
+            const t = (rule.strategyType || rule.actionType || rule.Type || rule.type || '').toLowerCase();
+            if (t.includes('profit') || t.includes('tp') || t === 'takeprofit') return 'takeprofit';
+            if (t.includes('loss') || t.includes('sl') || t === 'stoploss') return 'stoploss';
+            if (t.includes('exit')) return 'exit';
+            if (t.includes('entry')) return 'entry';
+            return 'entry';
+        };
+
         const existingWithoutCurrent = historicalMarkersRef.current.filter(m => m.time !== current.time);
         liveSignals.forEach(sig => {
-            const rawType = (sig.rule.Type || sig.rule.type || '').toLowerCase();
+            const rawType = getRuleClassification(sig.rule);
             const isEntry = rawType === 'entry';
+            const displayText = (sig.rule.signalText || sig.rule.signal_text)?.trim() || sig.rule.Name || sig.rule.name || rawType.toUpperCase();
             existingWithoutCurrent.push({
                 time: current.time,
                 position: isEntry ? 'belowBar' : 'aboveBar',
                 color: colors[rawType] || colors.unknown,
                 shape: isEntry ? 'arrowUp' : 'arrowDown',
-                text: sig.rule.Name || sig.rule.name || rawType.toUpperCase(),
+                text: displayText,
                 size: 2
             });
         });
@@ -497,10 +519,51 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                 vertLines: { color: '#1f2937', visible: true },
                 horzLines: { color: '#1f2937', visible: true },
             },
+            localization: {
+                locale: 'vi-VN',
+                dateFormat: 'dd/MM/yyyy',
+                timeFormatter: (timestamp) => {
+                    if (!timestamp) return '';
+                    const d = new Date(typeof timestamp === 'number' ? timestamp * 1000 : timestamp);
+                    return d.toLocaleString('vi-VN', {
+                        timeZone: 'Asia/Ho_Chi_Minh',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                },
+            },
             timeScale: {
                 borderColor: '#374151',
                 timeVisible: true,
                 secondsVisible: false,
+                tickMarkFormatter: (time, tickMarkType) => {
+                    const timestampSec = typeof time === 'number' ? time : (time && time.timestamp) ? time.timestamp : null;
+                    if (!timestampSec) return '';
+                    const d = new Date(timestampSec * 1000);
+                    const tz = 'Asia/Ho_Chi_Minh';
+
+                    switch (tickMarkType) {
+                        case 0: // Year
+                            return d.toLocaleDateString('vi-VN', { timeZone: tz, year: 'numeric' });
+                        case 1: // Month
+                            return d.toLocaleDateString('vi-VN', { timeZone: tz, month: '2-digit', year: '2-digit' });
+                        case 2: // DayOfMonth
+                            return d.toLocaleDateString('vi-VN', { timeZone: tz, day: '2-digit', month: '2-digit' });
+                        case 3: // Time
+                        case 4: // TimeWithSeconds
+                        default:
+                            return d.toLocaleTimeString('vi-VN', {
+                                timeZone: tz,
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false
+                            });
+                    }
+                }
             },
             rightPriceScale: {
                 borderColor: '#374151',

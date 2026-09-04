@@ -3,12 +3,13 @@ import { X, Save, Code, Sliders } from 'lucide-react';
 import RuleBuilder from './RuleBuilder';
 import useEscapeKey from '../hooks/useEscapeKey';
 
-const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
+const RuleModal = ({ isOpen, onClose, onSubmit, initialData, zIndex = 'z-50' }) => {
     const [formData, setFormData] = useState({
         Name: '',
         Description: '',
         Type: '',
         Active: 'Enable',
+        signalText: '',
         Rule: JSON.stringify({
             condition: "AND",
             rules: []
@@ -25,6 +26,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
                 Description: initialData.Description || '',
                 Type: initialData.Type || '',
                 Active: initialData.Active || 'Enable',
+                signalText: initialData.signalText || initialData.signal_text || '',
                 Rule: initialData.Rule ? JSON.stringify(initialData.Rule, null, 2) : JSON.stringify({
                     condition: "AND",
                     rules: []
@@ -36,6 +38,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
                 Description: '',
                 Type: '',
                 Active: 'Enable',
+                signalText: '',
                 Rule: JSON.stringify({
                     condition: "AND",
                     rules: []
@@ -67,7 +70,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className={`fixed inset-0 ${zIndex} flex items-center justify-center bg-black/50 backdrop-blur-sm p-4`}>
             <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <h3 className="text-xl font-bold text-white">
@@ -92,7 +95,7 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Type</label>
                             <input
@@ -102,6 +105,17 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData }) => {
                                 onChange={handleChange}
                                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
                                 placeholder="e.g. priceaction, indicator, volume"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">Signal Text (Chart)</label>
+                            <input
+                                type="text"
+                                name="signalText"
+                                value={formData.signalText}
+                                onChange={handleChange}
+                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white"
+                                placeholder="Optional chart label..."
                             />
                         </div>
                         <div>

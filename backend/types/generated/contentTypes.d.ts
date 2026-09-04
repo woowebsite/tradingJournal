@@ -954,6 +954,7 @@ export interface ApiRuleRule extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     Rule: Schema.Attribute.JSON;
     signals: Schema.Attribute.Relation<'manyToMany', 'api::signal.signal'>;
+    signalText: Schema.Attribute.String;
     strategies: Schema.Attribute.Relation<
       'manyToMany',
       'api::strategy.strategy'

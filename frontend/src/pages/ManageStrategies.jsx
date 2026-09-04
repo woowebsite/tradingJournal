@@ -4,6 +4,7 @@ import { Plus, Edit, Trash2, Save, X, Search } from 'lucide-react';
 import { fetchStrategies, createStrategy, updateStrategy, deleteStrategy } from '../features/strategySlice';
 import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
+import RuleModal from '../components/RuleModal';
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
@@ -49,7 +50,9 @@ const RuleGroupSelector = ({
     setRuleSearchTerms,
     handleAddRule,
     handleRemoveRule,
-    handleRulePercentChange
+    handleRulePercentChange,
+    handleRuleSignalTextChange,
+    onEditRule
 }) => {
     const selectedIds = formData[group.key] || [];
     const searchTerm = ruleSearchTerms[group.key] || '';
@@ -94,17 +97,27 @@ const RuleGroupSelector = ({
                     <tbody className="divide-y divide-gray-700/50">
                         {selectedRules.length === 0 ? (
                             <tr>
-                                <td colSpan={supportsPercent ? 4 : 3} className="p-4 text-center text-gray-500">No rules added yet.</td>
+                                <td colSpan={supportsPercent ? 5 : 4} className="p-4 text-center text-gray-500">No rules added yet.</td>
                             </tr>
                         ) : (
                             selectedRules.map(rule => {
                                 const ruleId = getRuleId(rule);
                                 return (
                                     <tr key={ruleId}>
-                                        <td className="p-3 text-white">{rule.Name}</td>
+                                        <td className="p-3 text-white font-medium">{rule.Name}</td>
                                         <td className="p-3"><TypeBadge type={rule.Type} /></td>
+                                        <td className="p-3 w-36">
+                                            <input
+                                                type="text"
+                                                value={formData.ruleSignalTexts?.[ruleId] ?? ''}
+                                                onChange={event => handleRuleSignalTextChange(ruleId, event.target.value)}
+                                                className="w-full rounded border border-gray-600 bg-gray-700 px-2 py-1 text-xs text-white focus:border-blue-500 focus:outline-none placeholder-gray-500"
+                                                placeholder="Signal text..."
+                                                title="Text hiển thị trên Chart (để trống sẽ dùng Rule Name)"
+                                            />
+                                        </td>
                                         {supportsPercent && (
-                                            <td className="p-3 w-32">
+                                             <td className="p-3 w-28">
                                                 <label className="flex items-center gap-1 text-xs text-gray-400">
                                                     <input
                                                         type="number"
@@ -113,7 +126,7 @@ const RuleGroupSelector = ({
                                                         step="0.01"
                                                         value={formData.rulePercents?.[ruleId] ?? ''}
                                                         onChange={event => handleRulePercentChange(ruleId, event.target.value)}
-                                                        className="w-20 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-right text-white focus:border-blue-500 focus:outline-none"
+                                                        className="w-16 rounded border border-gray-600 bg-gray-700 px-2 py-1 text-right text-white focus:border-blue-500 focus:outline-none"
                                                         placeholder="0"
                                                     />
                                                     <span>%</span>
@@ -121,13 +134,24 @@ const RuleGroupSelector = ({
                                             </td>
                                         )}
                                         <td className="p-3 text-right">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveRule(group.key, ruleId)}
-                                                className="text-red-500 hover:text-red-400"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
+                                            <div className="flex items-center justify-end gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onEditRule?.(rule)}
+                                                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 rounded transition"
+                                                    title="Edit Rule"
+                                                >
+                                                    <Edit size={16} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveRule(group.key, ruleId)}
+                                                    className="p-1.5 text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded transition"
+                                                    title="Remove Rule"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 );
@@ -186,6 +210,7 @@ const RuleGroupSelector = ({
 };
 
 export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules = [], availableWebhooks = [] }) => {
+    const dispatch = useDispatch();
     const [formData, setFormData] = useState({
         name: '',
         description: '',
@@ -199,6 +224,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
     });
     const [openRuleGroup, setOpenRuleGroup] = useState(null);
     const [ruleSearchTerms, setRuleSearchTerms] = useState({});
+    const [editingRule, setEditingRule] = useState(null);
+    const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
 
     useEffect(() => {
         if (initialData) {
@@ -221,12 +248,16 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                     .filter(Boolean);
             };
             const rulePercents = {};
-            [...(initialData.entryRules || []), ...(initialData.takeProfitRules || []), ...(initialData.stoplossRules || [])]
+            const ruleSignalTexts = {};
+            [...(initialData.entryRules || []), ...(initialData.takeProfitRules || []), ...(initialData.stoplossRules || []), ...(initialData.exitRules || []), ...(initialData.rules || [])]
                 .forEach(rule => {
                     const rawId = getRuleId(rule);
                     const matched = findAvailableRule(rawId, availableRules);
                     const ruleId = matched ? (matched.documentId || matched.id) : rawId;
-                    if (ruleId) rulePercents[ruleId] = (typeof rule === 'object' ? rule.percent : matched?.percent) ?? '';
+                    if (ruleId) {
+                        rulePercents[ruleId] = (typeof rule === 'object' ? rule.percent : matched?.percent) ?? '';
+                        ruleSignalTexts[ruleId] = (typeof rule === 'object' ? (rule.signalText || rule.signal_text) : (matched?.signalText || matched?.signal_text)) ?? '';
+                    }
                 });
 
             const rawWebhook = initialData.webhook;
@@ -242,7 +273,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 takeProfitRules: getInitialRules('takeProfitRules'),
                 stoplossRules: getInitialRules('stoplossRules'),
                 exitRules: getInitialRules('exitRules'),
-                rulePercents
+                rulePercents,
+                ruleSignalTexts
             });
         } else {
             setFormData({
@@ -255,7 +287,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 takeProfitRules: [],
                 stoplossRules: [],
                 exitRules: [],
-                rulePercents: {}
+                rulePercents: {},
+                ruleSignalTexts: {}
             });
         }
         setOpenRuleGroup(null);
@@ -297,7 +330,11 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 [fieldName]: [...prev[fieldName], ruleId],
                 rulePercents: fieldName === 'exitRules'
                     ? prev.rulePercents
-                    : { ...prev.rulePercents, [ruleId]: '' }
+                    : { ...prev.rulePercents, [ruleId]: '' },
+                ruleSignalTexts: {
+                    ...prev.ruleSignalTexts,
+                    [ruleId]: (typeof rule === 'object' ? (rule.signalText || rule.signal_text) : '') ?? ''
+                }
             }));
         }
         setOpenRuleGroup(null);
@@ -315,7 +352,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 }
                 return true;
             }),
-            rulePercents: { ...prev.rulePercents, [ruleId]: undefined }
+            rulePercents: { ...prev.rulePercents, [ruleId]: undefined },
+            ruleSignalTexts: { ...prev.ruleSignalTexts, [ruleId]: undefined }
         }));
     };
 
@@ -324,6 +362,36 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
             ...prev,
             rulePercents: { ...prev.rulePercents, [ruleId]: value }
         }));
+    };
+
+    const handleRuleSignalTextChange = (ruleId, value) => {
+        setFormData(prev => ({
+            ...prev,
+            ruleSignalTexts: { ...prev.ruleSignalTexts, [ruleId]: value }
+        }));
+    };
+
+    const handleEditRule = (rule) => {
+        const rawId = getRuleId(rule);
+        const fullRule = findAvailableRule(rawId, availableRules) || (typeof rule === 'object' ? rule : null);
+        if (fullRule) {
+            setEditingRule(fullRule);
+            setIsRuleModalOpen(true);
+        }
+    };
+
+    const handleRuleModalSubmit = async (data) => {
+        try {
+            if (editingRule) {
+                const id = editingRule.documentId || editingRule.id;
+                await dispatch(updateRule({ id, data })).unwrap();
+            }
+            dispatch(fetchRules());
+            setIsRuleModalOpen(false);
+        } catch (error) {
+            console.error('Failed to save rule:', error);
+            alert('Failed to save rule');
+        }
     };
 
     const handleSubmit = (e) => {
@@ -358,7 +426,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
             takeProfitRules,
             stoplossRules,
             exitRules,
-            rulePercents: formData.rulePercents
+            rulePercents: formData.rulePercents,
+            ruleSignalTexts: formData.ruleSignalTexts
         });
     };
 
@@ -471,6 +540,8 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                                     handleAddRule={handleAddRule}
                                     handleRemoveRule={handleRemoveRule}
                                     handleRulePercentChange={handleRulePercentChange}
+                                    handleRuleSignalTextChange={handleRuleSignalTextChange}
+                                    onEditRule={handleEditRule}
                                 />
                             ))}
                         </div>
@@ -495,6 +566,16 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                     </button>
                 </div>
             </div>
+
+            {isRuleModalOpen && (
+                <RuleModal
+                    isOpen={isRuleModalOpen}
+                    onClose={() => setIsRuleModalOpen(false)}
+                    onSubmit={handleRuleModalSubmit}
+                    initialData={editingRule}
+                    zIndex="z-[60]"
+                />
+            )}
         </div>
     );
 };
@@ -535,7 +616,7 @@ const ManageStrategies = () => {
 
     const handleModalSubmit = async (data) => {
         try {
-            const { rulePercents = {}, ...strategyData } = data;
+            const { rulePercents = {}, ruleSignalTexts = {}, ...strategyData } = data;
             if (editingStrategy) {
                 const id = editingStrategy.documentId || editingStrategy.id;
                 await dispatch(updateStrategy({ id, data: strategyData })).unwrap();
@@ -543,16 +624,29 @@ const ManageStrategies = () => {
                 await dispatch(createStrategy(strategyData)).unwrap();
             }
 
-            await Promise.all(Object.entries(rulePercents)
+            const ruleUpdates = new Map();
+            Object.entries(rulePercents)
                 .filter(([, percent]) => percent !== '' && percent !== undefined && percent !== null)
-                .map(([ruleId, percent]) => dispatch(updateRule({
-                    id: ruleId,
-                    data: { percent: Number(percent) }
-                })).unwrap()));
+                .forEach(([ruleId, percent]) => {
+                    ruleUpdates.set(ruleId, { ...(ruleUpdates.get(ruleId) || {}), percent: Number(percent) });
+                });
 
-            if (Object.keys(rulePercents).length > 0) {
+            Object.entries(ruleSignalTexts)
+                .forEach(([ruleId, signalText]) => {
+                    if (signalText !== undefined && signalText !== null) {
+                        ruleUpdates.set(ruleId, { ...(ruleUpdates.get(ruleId) || {}), signalText: String(signalText).trim() });
+                    }
+                });
+
+            if (ruleUpdates.size > 0) {
+                await Promise.all(
+                    Array.from(ruleUpdates.entries()).map(([ruleId, updateData]) =>
+                        dispatch(updateRule({ id: ruleId, data: updateData })).unwrap()
+                    )
+                );
                 dispatch(fetchRules());
             }
+
             setIsModalOpen(false);
             dispatch(fetchStrategies()); // Refetch to ensure everything is up to date (optional, but safer for relations)
         } catch (error) {

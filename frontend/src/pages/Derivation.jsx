@@ -6,6 +6,7 @@ import { getTCBSToken, getTCBSDerivatives, placeTCBSConditionOrder } from '../se
 import RealtimeChart from '../components/RealtimeChart';
 import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import { getStrategyId } from '../utils/roadmapCalculations';
 import OtpModal from '../components/otpModal';
 import IntradayBSAPanel from '../components/IntradayBSAPanel';
 import IntradayBidAskPanel from '../components/IntradayBidAskPanel';
@@ -72,10 +73,34 @@ const Derivation = () => {
         dispatch(fetchRules());
     }, [dispatch]);
 
+    // Automatically set default strategy from selected account
+    useEffect(() => {
+        if (!selectedAccount?.strategy || !strategies || strategies.length === 0) return;
+        const accountStratId = getStrategyId(selectedAccount.strategy);
+        if (!accountStratId) return;
+
+        const matched = strategies.find(s => {
+            const sId = getStrategyId(s);
+            return (
+                String(sId) === String(accountStratId) ||
+                String(s.documentId) === String(accountStratId) ||
+                String(s.id) === String(accountStratId)
+            );
+        });
+
+        if (matched) {
+            setStrategy(String(matched.id || matched.documentId));
+        }
+    }, [selectedAccount?.strategy, strategies]);
+
     // Derive full rule objects directly from the selected strategy for Derivatives
     const strategyRules = React.useMemo(() => {
         if (!strategy || !strategies || strategies.length === 0) return [];
-        const selectedStrat = strategies.find(s => (s.id || s.documentId)?.toString() === strategy.toString());
+        const selectedStrat = strategies.find(s => 
+            (s.id || s.documentId)?.toString() === strategy.toString() ||
+            s.documentId?.toString() === strategy.toString() ||
+            s.id?.toString() === strategy.toString()
+        );
         if (!selectedStrat) return [];
 
         // Build lookup map from Redux rules items to ensure full rule details exist
@@ -86,24 +111,26 @@ const Derivation = () => {
         });
 
         const ruleCategories = [
-            { field: 'entryRules', defaultType: 'entry' },
-            { field: 'takeProfitRules', defaultType: 'takeprofit' },
-            { field: 'stoplossRules', defaultType: 'stoploss' },
-            { field: 'exitRules', defaultType: 'exit' },
-            { field: 'rules', defaultType: 'entry' }
+            { field: 'entryRules', type: 'entry' },
+            { field: 'takeProfitRules', type: 'takeprofit' },
+            { field: 'stoplossRules', type: 'stoploss' },
+            { field: 'exitRules', type: 'exit' },
+            { field: 'rules', type: 'entry' }
         ];
 
         const extracted = [];
-        const seenIds = new Set();
+        const seenKeys = new Set();
 
-        ruleCategories.forEach(({ field, defaultType }) => {
+        ruleCategories.forEach(({ field, type }) => {
             const list = selectedStrat[field];
             if (!Array.isArray(list)) return;
 
             list.forEach(item => {
                 const id = (item?.documentId || item?.id || item)?.toString();
-                if (!id || seenIds.has(id)) return;
-                seenIds.add(id);
+                if (!id) return;
+                const uniqueKey = `${type}_${id}`;
+                if (seenKeys.has(uniqueKey)) return;
+                seenKeys.add(uniqueKey);
 
                 const baseRule = ruleMap.get(id) || (typeof item === 'object' ? item : null);
                 if (!baseRule) return;
@@ -121,7 +148,10 @@ const Derivation = () => {
                     extracted.push({
                         ...baseRule,
                         Rule: parsedRule,
-                        Type: (baseRule.Type || baseRule.type || defaultType).toLowerCase(),
+                        strategyType: type,
+                        strategyCategory: field,
+                        Type: type,
+                        ruleDefinitionType: baseRule.Type || baseRule.type || '',
                         Name: baseRule.Name || baseRule.name || 'Signal'
                     });
                 }

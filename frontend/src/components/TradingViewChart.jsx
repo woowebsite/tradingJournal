@@ -62,7 +62,7 @@ const TradingViewChart = ({
 
             const list = map.get(sigDate) || [];
             list.push({
-                name: rule.Name || 'Signal',
+                name: (rule.signalText || rule.signal_text)?.trim() || rule.Name || 'Signal',
                 type,
                 date: sigDate,
                 color: colors[type] || colors.unknown,

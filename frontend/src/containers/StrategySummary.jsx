@@ -72,17 +72,29 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
         if (!strategyId) return;
 
         try {
-            const { rulePercents = {}, ...sanitizedStrategyData } = strategyData;
+            const { rulePercents = {}, ruleSignalTexts = {}, ...sanitizedStrategyData } = strategyData;
             await dispatch(updateStrategy({ id: strategyId, data: sanitizedStrategyData })).unwrap();
 
-            await Promise.all(Object.entries(rulePercents)
+            const ruleUpdates = new Map();
+            Object.entries(rulePercents)
                 .filter(([, percent]) => percent !== '' && percent !== undefined && percent !== null)
-                .map(([ruleId, percent]) => dispatch(updateRule({
-                    id: ruleId,
-                    data: { percent: Number(percent) }
-                })).unwrap()));
+                .forEach(([ruleId, percent]) => {
+                    ruleUpdates.set(ruleId, { ...(ruleUpdates.get(ruleId) || {}), percent: Number(percent) });
+                });
 
-            if (Object.keys(rulePercents).length > 0) {
+            Object.entries(ruleSignalTexts)
+                .forEach(([ruleId, signalText]) => {
+                    if (signalText !== undefined && signalText !== null) {
+                        ruleUpdates.set(ruleId, { ...(ruleUpdates.get(ruleId) || {}), signalText: String(signalText).trim() });
+                    }
+                });
+
+            if (ruleUpdates.size > 0) {
+                await Promise.all(
+                    Array.from(ruleUpdates.entries()).map(([ruleId, updateData]) =>
+                        dispatch(updateRule({ id: ruleId, data: updateData })).unwrap()
+                    )
+                );
                 dispatch(fetchRules());
             }
 
