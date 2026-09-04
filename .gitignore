@@ -1,5 +1,6 @@
 node_modules
 .env
+.env.*
 .tmp
 .strapi
 dist
@@ -7,5 +8,7 @@ build
 .DS_Store
 .vscode
 coverage
-frontend/.env.fe
+frontend/.env*
 frontend/tcbs-cookie.json
+backend/.env*
+
