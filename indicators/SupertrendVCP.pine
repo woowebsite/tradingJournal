@@ -1,0 +1,468 @@
+//@version=6
+strategy(
+     title                   = "Supertrend VCP Consolidation Breakout Strategy",
+     shorttitle              = "Supertrend VCP",
+     overlay                 = true,
+     initial_capital         = 1000000,
+     default_qty_type        = strategy.percent_of_equity,
+     default_qty_value       = 10,
+     margin_long             = 0,
+     margin_short            = 0,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.05,
+     process_orders_on_close = true,
+     max_boxes_count         = 500,
+     max_labels_count        = 500,
+     max_lines_count         = 500
+ )
+
+// ==============================================================================
+// 1. INPUTS & SETTINGS
+// ==============================================================================
+
+// --- Group 1: Cấu hình ---
+grp_st          = "1. Cấu hình"
+stAtrPeriod     = input.int(10, "Supertrend ATR Period", minval = 1, group = grp_st, tooltip = "Chu kỳ tính ATR cho Supertrend.")
+stFactor        = input.float(3.0, "Supertrend Factor (Hệ số)", minval = 0.1, step = 0.1, group = grp_st, tooltip = "Hệ số nhân độ lệch dải ATR của Supertrend.")
+allowLong       = input.bool(true, "Long Trade", group = grp_st)
+allowShort      = input.bool(true, "Short Trade", group = grp_st)
+
+// --- Group 2.1: Nhận diện theo ATR dưới SMA ---
+grp_vcp_atr     = "2.1 Nhận diện Tích lũy: ATR dưới SMA (ATR vs SMA)"
+useAtrSmaMode   = input.bool(true, "Kích hoạt mô hình ATR dưới SMA", group = grp_vcp_atr, tooltip = "Bật để nhận diện tích lũy khi ATR nén dưới SMA của nó rồi cắt lên kết hợp giá bứt phá đỉnh (Long) hoặc đáy (Short).")
+atrSmaLen_atr   = input.int(6, "Chu kỳ ATR nén (ATR Length)", minval = 1, group = grp_vcp_atr, tooltip = "Chu kỳ ATR đo biến động ngắn hạn (Mặc định: 6).")
+atrSmaLen_sma   = input.int(6, "Chu kỳ SMA của ATR", minval = 1, group = grp_vcp_atr, tooltip = "Chu kỳ đường trung bình SMA của ATR (Mặc định: 14).")
+atrSmaCrossMode = input.string("ATR cắt lên SMA (Crossover)", "Điều kiện bùng nổ ATR", 
+                     options = ["ATR cắt lên SMA (Crossover)", "ATR trước đó < SMA & hiện tại >= SMA"], 
+                     group = grp_vcp_atr,
+                     tooltip = "Crossover: ATR vừa cắt lên SMA trên nến hiện tại.\nTrước đó < SMA: Nến trước ATR dưới SMA và nến này ATR lớn hơn hoặc bằng SMA.")
+atrSmaLookback  = input.int(6, "Số nến tham chiếu đỉnh/đáy (N)", minval = 1, maxval = 30, group = grp_vcp_atr, tooltip = "Số nến trước đó dùng để xác định đỉnh/đáy Breakout và SL.")
+
+// --- Group 2.2: Nhận diện theo Biên độ Hộp ATR ---
+grp_vcp_box     = "2.2 Nhận diện Tích lũy: Biên độ Hộp ATR (Box ATR)"
+useBoxAtrMode   = input.bool(true, "Kích hoạt mô hình Hộp ATR", group = grp_vcp_box, tooltip = "Bật để nhận diện tích lũy khi chiều cao cả vùng N nến <= X * ATR.")
+boxAtrBars      = input.int(3, "Số nến tích lũy trong hộp (N)", minval = 2, maxval = 30, group = grp_vcp_box, tooltip = "Số lượng nến nén trước nến Breakout.")
+boxAtrThreshold = input.float(1.5, "Ngưỡng chiều cao Hộp (x ATR)", minval = 0.2, step = 0.1, group = grp_vcp_box, tooltip = "Chiều cao vùng N nến (Highest High - Lowest Low) <= ATR * Hệ số này.")
+
+// --- Group 2.3: Nhận diện theo Nến hẹp liên tiếp ---
+grp_vcp_narrow  = "2.3 Nhận diện Tích lũy: Nến hẹp liên tiếp (Narrow Bars)"
+useNarrowMode   = input.bool(true, "Kích hoạt mô hình Nến hẹp liên tiếp", group = grp_vcp_narrow, tooltip = "Bật để nhận diện tích lũy khi từng cây nến trong chuỗi N nến đều có biên độ hẹp.")
+narrowBarsCount = input.int(3, "Số nến hẹp liên tiếp (N)", minval = 2, maxval = 30, group = grp_vcp_narrow, tooltip = "Số lượng nến hẹp liên tiếp.")
+barAtrThreshold = input.float(0.85, "Ngưỡng từng nến hẹp (x ATR)", minval = 0.1, step = 0.05, group = grp_vcp_narrow, tooltip = "Biên độ (High - Low) của từng nến <= ATR * Hệ số này.")
+
+// --- Group 2.4: Nhận diện theo Biên độ Phần trăm (%) ---
+grp_vcp_pct     = "2.4 Nhận diện Tích lũy: Biên độ Phần trăm (%)"
+usePctMode      = input.bool(true, "Kích hoạt mô hình Biên độ Phần trăm (%)", group = grp_vcp_pct, tooltip = "Bật để nhận diện tích lũy khi biên độ dao động cả vùng N nến <= X%.")
+pctBars         = input.int(3, "Số nến tích lũy (N)", minval = 2, maxval = 30, group = grp_vcp_pct, tooltip = "Số nến tích lũy.")
+pctThreshold    = input.float(2.0, "Ngưỡng biến động tối đa (%)", minval = 0.1, step = 0.1, group = grp_vcp_pct, tooltip = "Biên độ dao động (Highest - Lowest) / Lowest * 100 <= Ngưỡng này.")
+
+// --- Group 3: Cấu hình Vào lệnh Breakout ---
+grp_entry       = "3. Cấu hình Vào lệnh (Entry Logic)"
+followTrend     = input.bool(true, "Follow Trend (Lọc xu hướng theo SMA)", group = grp_entry, tooltip = "Bật để chỉ Long khi Close > SMA Trend, chỉ Short khi Close < SMA Trend.")
+smaTrendLen     = input.int(288, "Chu kỳ SMA Trend", minval = 1, group = grp_entry, tooltip = "Chu kỳ SMA dùng để xác định xu hướng lớn.")
+breakoutType    = input.string("Đóng cửa vượt đỉnh/đáy (Close)", "Tiêu chuẩn Breakout/Breakdown", 
+                     options = ["Đóng cửa vượt đỉnh/đáy (Close)", "Râu nến vượt đỉnh/đáy (High/Low)"], 
+                     group = grp_entry)
+requireColoredBar = input.bool(true, "Yêu cầu nến thuận chiều (Xanh khi Long / Đỏ khi Short)", group = grp_entry)
+useVolFilter    = input.bool(true, "Kích hoạt bộ lọc Khối lượng (Volume Filter)", group = grp_entry, tooltip = "Bật nếu muốn nến Breakout phải có Volume cao hơn trung bình SMA Volume.")
+volSmaLen       = input.int(10, "Chu kỳ SMA Volume", minval = 1, group = grp_entry)
+volMultiplier   = input.float(1.1, "Hệ số Volume tối thiểu (x SMA Vol)", minval = 0.5, step = 0.1, group = grp_entry)
+
+// --- Group 4: Quản trị rủi ro & Thoát lệnh ---
+grp_exit        = "4. Thoát lệnh & Quản trị rủi ro (Exit & Risk Management)"
+exitOnStFlip    = input.bool(true, "Thoát lệnh khi Supertrend đảo chiều (Primary Exit)", group = grp_exit, tooltip = "Đóng lệnh Long khi Supertrend sang Đỏ, đóng lệnh Short khi Supertrend sang Xanh.")
+useStopLoss     = input.bool(true, "Sử dụng Stop Loss (Cắt lỗ)", group = grp_exit)
+slType          = input.string("Đáy/Đỉnh hộp tích lũy", "Cách tính Stop Loss", 
+                     options = ["Đáy/Đỉnh hộp tích lũy", "Dưới/Trên đường Supertrend", "Theo ATR"], 
+                     group = grp_exit)
+slAtrMultiplier = input.float(1.5, "Hệ số ATR Stop Loss", minval = 0.5, step = 0.1, group = grp_exit, tooltip = "Chỉ dùng khi chọn SL Theo ATR.")
+slBufferTicks   = input.int(2, "Số tick đệm dưới/trên mức SL", minval = 0, group = grp_exit)
+useTakeProfit   = input.bool(false, "Sử dụng Take Profit (Chốt lời cố định)", group = grp_exit)
+tpRrr           = input.float(2.0, "Tỷ lệ Risk : Reward (RRR)", minval = 0.5, step = 0.1, group = grp_exit, tooltip = "Take Profit tính theo khoảng cách rủi ro của Stop Loss.")
+
+// --- Group 5: Hiển thị Đồ họa & Dashboard ---
+grp_visual      = "5. Trực quan hóa & Bảng thống kê (Visuals & Dashboard)"
+showConsolBoxes = input.bool(true, "Vẽ hộp vùng tích lũy (Consolidation Boxes)", group = grp_visual)
+showTpSlLines   = input.bool(true, "Vẽ đường mục tiêu TP / SL", group = grp_visual)
+showDashboard   = input.bool(true, "Hiển thị bảng Dashboard thông tin", group = grp_visual)
+dashPosInput    = input.string("Top Right", "Vị trí bảng Dashboard", 
+                     options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right"], 
+                     group = grp_visual)
+
+// ==============================================================================
+// 2. SUPERTREND ENGINE
+// ==============================================================================
+
+[stValue, stDirection] = ta.supertrend(stFactor, stAtrPeriod)
+bool isStBullish       = stDirection < 0
+bool isStBearish       = stDirection > 0
+bool stFlippedToBear   = ta.change(stDirection) > 0
+bool stFlippedToBull   = ta.change(stDirection) < 0
+
+// Màu sắc Supertrend
+color stColorBull    = #089981 // Xanh lục ngọc
+color stColorBear    = #f23645 // Đỏ coral
+color currentStColor = isStBullish ? stColorBull : stColorBear
+
+p_price = plot(close, "Close Price Reference", display = display.none)
+p_st    = plot(stValue, "Supertrend Line", color = currentStColor, linewidth = 2)
+
+// Vùng mây Supertrend
+fill(p_price, p_st, 
+     color = isStBullish ? color.new(stColorBull, 88) : color.new(stColorBear, 88), 
+     title = "Supertrend Cloud Fill")
+
+// Đường SMA Trend
+float smaTrendVal = ta.sma(close, smaTrendLen)
+plot(followTrend ? smaTrendVal : na, "SMA Trend Line", color = color.new(#ff9800, 20), linewidth = 2)
+
+// ==============================================================================
+// 3. THUẬT TOÁN NHẬN DIỆN TÍCH LŨY & TÍN HIỆU LONG / SHORT
+// ==============================================================================
+
+float atr14      = ta.atr(14)
+float volSma     = ta.sma(volume, volSmaLen)
+bool  isVolValid = not useVolFilter or (volume >= volSma * volMultiplier)
+bool  isLongCandleOk  = not requireColoredBar or (close > open)
+bool  isShortCandleOk = not requireColoredBar or (close < open)
+bool  isSmaLongOk     = not followTrend or (close > smaTrendVal)
+bool  isSmaShortOk    = not followTrend or (close < smaTrendVal)
+
+// --- Group 2.1: ATR dưới SMA ---
+float atrVcpVal         = ta.atr(atrSmaLen_atr)
+float atrVcpSmaVal      = ta.sma(atrVcpVal, atrSmaLen_sma)
+bool  atrCrossUp        = ta.crossover(atrVcpVal, atrVcpSmaVal)
+bool  atrWasUnder       = atrVcpVal[1] < atrVcpSmaVal[1] and atrVcpVal >= atrVcpSmaVal
+bool  isAtrSmaExpansion = (atrSmaCrossMode == "ATR cắt lên SMA (Crossover)") ? atrCrossUp : atrWasUnder
+
+float high21 = ta.highest(high[1], atrSmaLookback)
+float low21  = ta.lowest(low[1], atrSmaLookback)
+bool  breakout21  = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high21) : (high > high21)
+bool  breakdown21 = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low21)  : (low < low21)
+bool  triggerLong21  = useAtrSmaMode and isAtrSmaExpansion and breakout21
+bool  triggerShort21 = useAtrSmaMode and isAtrSmaExpansion and breakdown21
+
+// --- Group 2.2: Biên độ Hộp ATR ---
+float high22     = ta.highest(high[1], boxAtrBars)
+float low22      = ta.lowest(low[1], boxAtrBars)
+float boxHeight  = high22 - low22
+bool  isBoxValid = boxHeight <= (atr14[1] * boxAtrThreshold)
+bool  breakout22  = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high22) : (high > high22)
+bool  breakdown22 = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low22)  : (low < low22)
+bool  triggerLong22  = useBoxAtrMode and isBoxValid and breakout22
+bool  triggerShort22 = useBoxAtrMode and isBoxValid and breakdown22
+
+// --- Group 2.3: Nến hẹp liên tiếp ---
+int narrowCount = 0
+for i = 1 to narrowBarsCount
+    if (high[i] - low[i]) <= (atr14[i] * barAtrThreshold)
+        narrowCount += 1
+bool  isNarrowValid = narrowCount == narrowBarsCount
+float high23        = ta.highest(high[1], narrowBarsCount)
+float low23         = ta.lowest(low[1], narrowBarsCount)
+bool  breakout23    = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high23) : (high > high23)
+bool  breakdown23   = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low23)  : (low < low23)
+bool  triggerLong23  = useNarrowMode and isNarrowValid and breakout23
+bool  triggerShort23 = useNarrowMode and isNarrowValid and breakdown23
+
+// --- Group 2.4: Biên độ % ---
+float high24    = ta.highest(high[1], pctBars)
+float low24     = ta.lowest(low[1], pctBars)
+float pctHeight = high24 - low24
+bool  isPctValid = (low24 > 0 ? (pctHeight / low24) * 100.0 : 999.0) <= pctThreshold
+bool  breakout24  = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high24) : (high > high24)
+bool  breakdown24 = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low24)  : (low < low24)
+bool  triggerLong24  = usePctMode and isPctValid and breakout24
+bool  triggerShort24 = usePctMode and isPctValid and breakdown24
+
+// --- Tổng hợp tín hiệu LONG ---
+bool anyLongTrigger = triggerLong21 or triggerLong22 or triggerLong23 or triggerLong24
+float longConsolHigh = 0.0
+float longConsolLow  = 0.0
+int   longBoxBars    = 3
+
+if triggerLong21
+    longConsolHigh := high21
+    longConsolLow  := low21
+    longBoxBars    := atrSmaLookback
+else if triggerLong22
+    longConsolHigh := high22
+    longConsolLow  := low22
+    longBoxBars    := boxAtrBars
+else if triggerLong23
+    longConsolHigh := high23
+    longConsolLow  := low23
+    longBoxBars    := narrowBarsCount
+else if triggerLong24
+    longConsolHigh := high24
+    longConsolLow  := low24
+    longBoxBars    := pctBars
+
+string buyLabelText = ""
+if triggerLong21
+    buyLabelText += (buyLabelText == "" ? "Buy 2.1" : "+2.1")
+if triggerLong22
+    buyLabelText += (buyLabelText == "" ? "Buy 2.2" : "+2.2")
+if triggerLong23
+    buyLabelText += (buyLabelText == "" ? "Buy 2.3" : "+2.3")
+if triggerLong24
+    buyLabelText += (buyLabelText == "" ? "Buy 2.4" : "+2.4")
+if buyLabelText == ""
+    buyLabelText := "Buy Breakout"
+
+// --- Tổng hợp tín hiệu SHORT ---
+bool anyShortTrigger = triggerShort21 or triggerShort22 or triggerShort23 or triggerShort24
+float shortConsolHigh = 0.0
+float shortConsolLow  = 0.0
+int   shortBoxBars    = 3
+
+if triggerShort21
+    shortConsolHigh := high21
+    shortConsolLow  := low21
+    shortBoxBars    := atrSmaLookback
+else if triggerShort22
+    shortConsolHigh := high22
+    shortConsolLow  := low22
+    shortBoxBars    := boxAtrBars
+else if triggerShort23
+    shortConsolHigh := high23
+    shortConsolLow  := low23
+    shortBoxBars    := narrowBarsCount
+else if triggerShort24
+    shortConsolHigh := high24
+    shortConsolLow  := low24
+    shortBoxBars    := pctBars
+
+string sellLabelText = ""
+if triggerShort21
+    sellLabelText += (sellLabelText == "" ? "Sell 2.1" : "+2.1")
+if triggerShort22
+    sellLabelText += (sellLabelText == "" ? "Sell 2.2" : "+2.2")
+if triggerShort23
+    sellLabelText += (sellLabelText == "" ? "Sell 2.3" : "+2.3")
+if triggerShort24
+    sellLabelText += (sellLabelText == "" ? "Sell 2.4" : "+2.4")
+if sellLabelText == ""
+    sellLabelText := "Sell Breakdown"
+
+// Điều kiện kích hoạt lệnh
+bool isPositionFlat = strategy.position_size == 0
+bool longSignal     = allowLong and isStBullish and isSmaLongOk and anyLongTrigger and isLongCandleOk and isVolValid and isPositionFlat
+bool shortSignal    = allowShort and isStBearish and isSmaShortOk and anyShortTrigger and isShortCandleOk and isVolValid and isPositionFlat
+
+// ==============================================================================
+// 4. THỰC THI CHIẾN LƯỢC (STRATEGY EXECUTION)
+// ==============================================================================
+
+var float activeEntry = na
+var float activeSl    = na
+var float activeTp    = na
+var line  lineEntry   = na
+var line  lineSl      = na
+var line  lineTp      = na
+
+// --------------------------- XỬ LÝ LỆNH LONG ---------------------------
+if longSignal
+    // Tính toán Stop Loss cho Long
+    float slPrice = na
+    if slType == "Đáy/Đỉnh hộp tích lũy"
+        slPrice := longConsolLow - (slBufferTicks * syminfo.mintick)
+    else if slType == "Dưới/Trên đường Supertrend"
+        slPrice := stValue - (slBufferTicks * syminfo.mintick)
+    else // Theo ATR
+        slPrice := close - (atr14 * slAtrMultiplier)
+
+    if na(slPrice) or slPrice >= close
+        slPrice := close - (atr14 * 1.5)
+
+    float riskDist = close - slPrice
+    float tpPrice  = close + (riskDist * tpRrr)
+
+    activeEntry := close
+    activeSl    := slPrice
+    activeTp    := tpPrice
+
+    strategy.entry("Long", strategy.long, comment = buyLabelText)
+
+    // Vẽ Hộp tích lũy Long (Xanh Cyan)
+    if showConsolBoxes and longConsolHigh > 0
+        box.new(
+             left         = bar_index - longBoxBars,
+             top          = longConsolHigh,
+             right        = bar_index,
+             bottom       = longConsolLow,
+             border_color = color.new(#00BCD4, 20),
+             border_width = 1,
+             border_style = line.style_solid,
+             bgcolor      = color.new(#00BCD4, 85)
+         )
+
+    // Vẽ đường TP / SL
+    if showTpSlLines
+        if not na(lineEntry)
+            line.delete(lineEntry)
+        if not na(lineSl)
+            line.delete(lineSl)
+        if not na(lineTp)
+            line.delete(lineTp)
+
+        lineEntry := line.new(bar_index, activeEntry, bar_index + 10, activeEntry, color = color.white, style = line.style_dashed, width = 1)
+        if useStopLoss
+            lineSl := line.new(bar_index, activeSl, bar_index + 10, activeSl, color = color.new(#f23645, 20), style = line.style_solid, width = 2)
+        if useTakeProfit
+            lineTp := line.new(bar_index, activeTp, bar_index + 10, activeTp, color = color.new(#089981, 20), style = line.style_solid, width = 2)
+
+// --------------------------- XỬ LÝ LỆNH SHORT ---------------------------
+if shortSignal
+    // Tính toán Stop Loss cho Short (Đặt phía trên đỉnh hộp / trên Supertrend)
+    float slPriceShort = na
+    if slType == "Đáy/Đỉnh hộp tích lũy"
+        slPriceShort := shortConsolHigh + (slBufferTicks * syminfo.mintick)
+    else if slType == "Dưới/Trên đường Supertrend"
+        slPriceShort := stValue + (slBufferTicks * syminfo.mintick)
+    else // Theo ATR
+        slPriceShort := close + (atr14 * slAtrMultiplier)
+
+    if na(slPriceShort) or slPriceShort <= close
+        slPriceShort := close + (atr14 * 1.5)
+
+    float riskDistShort = slPriceShort - close
+    float tpPriceShort  = close - (riskDistShort * tpRrr)
+
+    activeEntry := close
+    activeSl    := slPriceShort
+    activeTp    := tpPriceShort
+
+    strategy.entry("Short", strategy.short, comment = sellLabelText)
+
+    // Vẽ Hộp tích lũy Short (Đỏ Coral)
+    if showConsolBoxes and shortConsolHigh > 0
+        box.new(
+             left         = bar_index - shortBoxBars,
+             top          = shortConsolHigh,
+             right        = bar_index,
+             bottom       = shortConsolLow,
+             border_color = color.new(#f23645, 20),
+             border_width = 1,
+             border_style = line.style_solid,
+             bgcolor      = color.new(#f23645, 85)
+         )
+
+    // Vẽ đường TP / SL cho Short
+    if showTpSlLines
+        if not na(lineEntry)
+            line.delete(lineEntry)
+        if not na(lineSl)
+            line.delete(lineSl)
+        if not na(lineTp)
+            line.delete(lineTp)
+
+        lineEntry := line.new(bar_index, activeEntry, bar_index + 10, activeEntry, color = color.white, style = line.style_dashed, width = 1)
+        if useStopLoss
+            lineSl := line.new(bar_index, activeSl, bar_index + 10, activeSl, color = color.new(#f23645, 20), style = line.style_solid, width = 2)
+        if useTakeProfit
+            lineTp := line.new(bar_index, activeTp, bar_index + 10, activeTp, color = color.new(#089981, 20), style = line.style_solid, width = 2)
+
+// Quản lý lệnh Thoát SL / TP trong suốt thời gian giữ vị thế LONG
+if strategy.position_size > 0
+    if useStopLoss or useTakeProfit
+        strategy.exit(
+             id             = "Exit Long TP/SL",
+             from_entry     = "Long",
+             stop           = useStopLoss ? activeSl : na,
+             limit          = useTakeProfit ? activeTp : na,
+             comment_loss   = "SL Hit",
+             comment_profit = "TP Hit"
+         )
+
+// Quản lý lệnh Thoát SL / TP trong suốt thời gian giữ vị thế SHORT
+if strategy.position_size < 0
+    if useStopLoss or useTakeProfit
+        strategy.exit(
+             id             = "Exit Short TP/SL",
+             from_entry     = "Short",
+             stop           = useStopLoss ? activeSl : na,
+             limit          = useTakeProfit ? activeTp : na,
+             comment_loss   = "SL Hit",
+             comment_profit = "TP Hit"
+         )
+
+// Thoát lệnh khi Supertrend đảo chiều (Primary Exit)
+if exitOnStFlip and stFlippedToBear and (strategy.position_size > 0)
+    strategy.close("Long", comment = "Supertrend Flip Exit")
+
+if exitOnStFlip and stFlippedToBull and (strategy.position_size < 0)
+    strategy.close("Short", comment = "Supertrend Flip Exit")
+
+// Reset trạng thái khi vị thế đóng
+bool justClosed = strategy.position_size[1] != 0 and strategy.position_size == 0
+if justClosed
+    activeEntry := na
+    activeSl    := na
+    activeTp    := na
+
+// ==============================================================================
+// 5. BẢNG THỐNG KÊ DASHBOARD (HUD ANALYTICS)
+// ==============================================================================
+
+getTablePosition(string posStr) =>
+    pos = position.top_right
+    if posStr == "Top Right"
+        pos := position.top_right
+    else if posStr == "Bottom Right"
+        pos := position.bottom_right
+    else if posStr == "Top Left"
+        pos := position.top_left
+    else if posStr == "Bottom Left"
+        pos := position.bottom_left
+    else if posStr == "Middle Right"
+        pos := position.middle_right
+    pos
+
+var table dashTable = na
+if showDashboard and barstate.islast
+    dashTable := table.new(getTablePosition(dashPosInput), 2, 7, 
+                           bgcolor      = color.new(#131722, 10), 
+                           border_color = color.new(#363c4e, 30), 
+                           border_width = 1, 
+                           frame_color  = color.new(#4a5060, 20), 
+                           frame_width  = 1)
+
+    // Tiêu đề Dashboard
+    table.cell(dashTable, 0, 0, "SUPERTREND VCP", bgcolor = color.new(#1e222d, 0), text_color = #00BCD4, text_size = size.small)
+    table.cell(dashTable, 1, 0, "STATUS",         bgcolor = color.new(#1e222d, 0), text_color = #d1d4dc, text_size = size.small)
+
+    // 1. Supertrend Trend
+    string stStatusText  = isStBullish ? "BULLISH (TĂNG)" : "BEARISH (GIẢM)"
+    color  stStatusColor = isStBullish ? #089981 : #f23645
+    table.cell(dashTable, 0, 1, "Supertrend",       text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 1, stStatusText,       text_color = stStatusColor, text_size = size.small)
+
+    // 2. Trạng thái Tích lũy (VCP)
+    bool   anyVcpActive   = (useAtrSmaMode and isAtrSmaExpansion) or (useBoxAtrMode and isBoxValid) or (useNarrowMode and isNarrowValid) or (usePctMode and isPctValid)
+    string vcpStatusText  = anyVcpActive ? "NÉN & BÙNG NỔ ⚡" : "THEO DÕI ⚪"
+    color  vcpStatusColor = anyVcpActive ? #FFEB3B : #9E9E9E
+    table.cell(dashTable, 0, 2, "VCP Pattern",     text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 2, vcpStatusText,     text_color = vcpStatusColor, text_size = size.small)
+
+    // 3. Vị thế hiện tại (Position)
+    string posText  = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size) + ")" : (strategy.position_size < 0 ? "SHORT (" + str.tostring(strategy.position_size) + ")" : "FLAT (KHÔNG)")
+    color  posColor = strategy.position_size > 0 ? #089981 : (strategy.position_size < 0 ? #f23645 : #9E9E9E)
+    table.cell(dashTable, 0, 3, "Vị thế hiện tại", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 3, posText,           text_color = posColor, text_size = size.small)
+
+    // 4. Tổng số lệnh (Total Trades)
+    table.cell(dashTable, 0, 4, "Tổng số lệnh",    text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 4, str.tostring(strategy.closedtrades), text_color = #ffffff, text_size = size.small)
+
+    // 5. Tỷ lệ Thắng (Winrate)
+    float winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100.0 : 0.0
+    color winRateColor = winRate >= 50.0 ? #089981 : (strategy.closedtrades > 0 ? #f23645 : #9E9E9E)
+    table.cell(dashTable, 0, 5, "Tỷ lệ thắng (Winrate)", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 5, str.tostring(winRate, "#.##") + "%", text_color = winRateColor, text_size = size.small)
+
+    // 6. Lợi nhuận ròng (Net Profit)
+    float netProfit = strategy.netprofit
+    color netProfitColor = netProfit > 0 ? #089981 : (netProfit < 0 ? #f23645 : #9E9E9E)
+    table.cell(dashTable, 0, 6, "Lợi nhuận ròng",   text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 6, str.tostring(netProfit, "#.##") + " (" + str.tostring(strategy.netprofit_percent, "#.##") + "%)", text_color = netProfitColor, text_size = size.small)
