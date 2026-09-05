@@ -1,0 +1,249 @@
+//@version=6
+strategy(
+     title                   = "Sideway Range Donchian Strategy",
+     shorttitle              = "Sideway Donchian",
+     overlay                 = true,
+     initial_capital         = 10000,
+     currency                = currency.USD,
+     default_qty_type        = strategy.percent_of_equity,
+     default_qty_value       = 100,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.05,
+     process_orders_on_close = true,
+     max_lines_count         = 500,
+     max_labels_count        = 500
+)
+
+// ==============================================================================
+// 1. INPUTS & SETTINGS
+// ==============================================================================
+
+// --- Group 1: Donchian Channel Settings ---
+grp_dc      = "1. Cấu hình Donchian Channels"
+lenShort    = input.int(20, "Chu kỳ Donchian Ngắn (Short Cycle)", minval = 1, group = grp_dc, tooltip = "Chu kỳ Donchian ngắn để xác định vị thế giá cục bộ (Mặc định: 20).")
+lenLong     = input.int(50, "Chu kỳ Donchian Dài (Long Cycle)", minval = 1, group = grp_dc, tooltip = "Chu kỳ Donchian dài để xác định biên độ Sideway tổng thể (Mặc định: 50).")
+
+// --- Group 2: Trade Directions & Spread Filter ---
+grp_trade     = "2. Cấu hình Vào lệnh & Bộ lọc Khoảng cách"
+allowLong     = input.bool(true, "Cho phép lệnh Long", group = grp_trade)
+allowShort    = input.bool(true, "Cho phép lệnh Short", group = grp_trade)
+spreadMode    = input.string("Auto", "Cách tính khoảng cách Basis", options = ["Phần trăm (%)", "Điểm giá (Points/Ticks)", "Auto"], group = grp_trade, tooltip = "Auto: Vào lệnh khi khoảng cách từ Entry tới SL < khoảng cách từ Basis 20 tới Basis 50.\nPhần trăm / Điểm giá: Yêu cầu độ tách rời giữa Basis 20 và Basis 50 >= minSpread.")
+minSpread     = input.float(1.0, "Basis 20 & Basis 50 spread (cho % hoặc Points)", minval = 0.0, step = 0.05, group = grp_trade, tooltip = "Độ tách rời giữa Basis 20 và Basis 50 phải đạt tối thiểu mức này (Chỉ áp dụng khi chọn kiểu Phần trăm hoặc Điểm giá).")
+
+// --- Group 3: Exit & Risk Management ---
+grp_exit      = "3. Quản lý Thoát lệnh (Exit & Risk Management)"
+useTimeExit   = input.bool(true, "Take Profit theo thời gian (TP Bars 50 nến)", group = grp_exit, tooltip = "Đóng lệnh sau một số lượng nến nhất định (Mặc định: 50 nến theo chu kỳ Donchian dài).")
+exitBars      = input.int(50, "Số nến giữ lệnh tối đa (TP Bars)", minval = 1, group = grp_exit, tooltip = "Số nến tối đa trước khi thực hiện Take Profit thời gian.")
+useBandExit   = input.bool(true, "Take Profit khi giá chạm Upper50 hoặc Lower50", group = grp_exit, tooltip = "Long TP khi giá chạm Upper Band Donchian 50; Short TP khi giá chạm Lower Band Donchian 50.")
+useCrossExit  = input.bool(false, "Cross Donchian", group = grp_exit, tooltip = "Đóng lệnh Long khi đường Basis Donchian 20 cắt lên trên Basis Donchian 50. Đóng lệnh Short khi Basis Donchian 20 cắt xuống dưới Basis Donchian 50.")
+slType        = input.string("Cố định tại thời điểm vào lệnh", "Kiểu Stop Loss", options = ["Cố định tại thời điểm vào lệnh", "Bám theo dải Donchian 50 (Dynamic)", "Bám theo dải Donchian 20 (Dynamic)"], group = grp_exit, tooltip = "Cố định: SL giữ nguyên mức Lower/Upper Band 50 tại thời điểm mở vị thế.\nDonchian 50: SL trượt theo Lower/Upper Band 50 của từng nến.\nDonchian 20: SL trượt theo Lower/Upper Band 20 của từng nến.")
+slBufferTicks = input.int(0, "Khoảng cách đệm SL (SL Buffer Ticks)", minval = 0, group = grp_exit, tooltip = "Số tick cộng thêm vào mức SL (dưới LowerBand cho Long, trên UpperBand cho Short).")
+
+// --- Group 4: Visuals & Table ---
+grp_vis     = "4. Hiển thị & Bảng trạng thái"
+showTpSl    = input.bool(true, "Hiển thị mức TP / SL trên biểu đồ", group = grp_vis)
+showTable   = input.bool(true, "Hiển thị bảng Dashboard thông tin", group = grp_vis)
+tablePos    = input.string("Top Right", "Vị trí bảng Dashboard", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = grp_vis)
+
+// ==============================================================================
+// 2. DONCHIAN CHANNELS CALCULATION
+// ==============================================================================
+
+// Donchian 20
+upper20 = ta.highest(high, lenShort)
+lower20 = ta.lowest(low, lenShort)
+basis20 = math.avg(upper20, lower20)
+
+// Donchian 50
+upper50 = ta.highest(high, lenLong)
+lower50 = ta.lowest(low, lenLong)
+basis50 = math.avg(upper50, lower50)
+
+// ==============================================================================
+// 3. STRATEGY CONDITIONS
+// ==============================================================================
+
+// Tính khoảng cách chênh lệch giữa Basis 20 và Basis 50
+float basisDiffLong  = basis50 - basis20
+float basisDiffShort = basis20 - basis50
+
+// Tính mức Stop Loss dự kiến trước khi vào lệnh
+float expectedSlLong  = (slType == "Bám theo dải Donchian 20 (Dynamic)") ? (lower20 - (slBufferTicks * syminfo.mintick)) : (lower50 - (slBufferTicks * syminfo.mintick))
+float expectedSlShort = (slType == "Bám theo dải Donchian 20 (Dynamic)") ? (upper20 + (slBufferTicks * syminfo.mintick)) : (upper50 + (slBufferTicks * syminfo.mintick))
+
+// Khoảng cách từ giá vào lệnh (Close) tới Stop Loss
+float distEntryToSlLong  = close - expectedSlLong
+float distEntryToSlShort = expectedSlShort - close
+
+// Khoảng cách theo % hoặc Points
+float basisSpreadLong  = (spreadMode == "Phần trăm (%)") ? (basis50 != 0 ? (basisDiffLong / basis50 * 100) : 0.0) : basisDiffLong
+float basisSpreadShort = (spreadMode == "Phần trăm (%)") ? (basis50 != 0 ? (basisDiffShort / basis50 * 100) : 0.0) : basisDiffShort
+
+// Đánh giá điều kiện khoảng cách theo mode đã chọn
+bool validSpreadLong  = false
+bool validSpreadShort = false
+
+if spreadMode == "Auto"
+    validSpreadLong  := (basis20 < basis50) and (distEntryToSlLong < basisDiffLong) and (distEntryToSlLong > 0)
+    validSpreadShort := (basis20 > basis50) and (distEntryToSlShort < basisDiffShort) and (distEntryToSlShort > 0)
+else
+    validSpreadLong  := (basis20 < basis50) and (basisSpreadLong >= minSpread)
+    validSpreadShort := (basis20 > basis50) and (basisSpreadShort >= minSpread)
+
+// Điều kiện Long: Donchian 20 < Donchian 50 (thỏa khoảng cách tách rời) VÀ Giá đóng cửa > Donchian 20
+longCondition  = validSpreadLong and (close > basis20) and allowLong
+
+// Điều kiện Short: Donchian 20 > Donchian 50 (thỏa khoảng cách tách rời) VÀ Giá đóng cửa < Donchian 20
+shortCondition = validSpreadShort and (close < basis20) and allowShort
+
+// ==============================================================================
+// 4. POSITION & RISK TRACKING
+// ==============================================================================
+
+// Lưu trữ giá trị SL / TP và Nến vào lệnh
+var float entrySl = na
+var float entryTp = na
+var int   entryBar = na
+
+// Khi có vị thế mới được kích hoạt
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    entryBar := bar_index
+    if strategy.position_size > 0
+        entrySl := lower50 - (slBufferTicks * syminfo.mintick)
+        entryTp := upper50
+    else
+        entrySl := upper50 + (slBufferTicks * syminfo.mintick)
+        entryTp := lower50
+
+// Khi đóng toàn bộ vị thế
+if strategy.position_size == 0
+    entrySl  := na
+    entryTp  := na
+    entryBar := na
+
+// Xác định mức Stop Loss và Take Profit hiện hành (Fixed hoặc Dynamic 50 / Dynamic 20)
+float currentSlLong  = (slType == "Cố định tại thời điểm vào lệnh") ? entrySl :
+                       (slType == "Bám theo dải Donchian 20 (Dynamic)") ? (lower20 - (slBufferTicks * syminfo.mintick)) :
+                       (lower50 - (slBufferTicks * syminfo.mintick))
+
+float currentSlShort = (slType == "Cố định tại thời điểm vào lệnh") ? entrySl :
+                       (slType == "Bám theo dải Donchian 20 (Dynamic)") ? (upper20 + (slBufferTicks * syminfo.mintick)) :
+                       (upper50 + (slBufferTicks * syminfo.mintick))
+float currentTpLong  = upper50
+float currentTpShort = lower50
+
+// Số nến đã giữ lệnh
+int barsHeld = (strategy.position_size != 0 and not na(entryBar)) ? (bar_index - entryBar) : 0
+
+// ==============================================================================
+// 5. STRATEGY EXECUTION (ENTRY & EXIT)
+// ==============================================================================
+
+// --- LỆNH LONG ---
+if longCondition
+    strategy.entry("Long", strategy.long)
+
+if strategy.position_size > 0
+    // 1. Take Profit khi giá chạm Upper Band của Donchian 50 & Stop Loss tại Lower Band của Donchian 50
+    float tpLimitLong = useBandExit ? currentTpLong : na
+    strategy.exit("Exit Long", from_entry = "Long", limit = tpLimitLong, stop = currentSlLong)
+    
+    // 2. Cross Donchian: Exit Long khi Basis 20 cắt lên Basis 50
+    if useCrossExit and (ta.crossover(basis20, basis50) or basis20 >= basis50)
+        strategy.close("Long", comment = "TP Cross DC (Basis20 > Basis50)")
+    
+    // 3. Take Profit theo thời gian: Thoát lệnh sau 50 nến
+    if useTimeExit and barsHeld >= exitBars
+        strategy.close("Long", comment = "TP Sau " + str.tostring(exitBars) + " Nến")
+
+// --- LỆNH SHORT ---
+if shortCondition
+    strategy.entry("Short", strategy.short)
+
+if strategy.position_size < 0
+    // 1. Take Profit khi giá chạm Lower Band của Donchian 50 & Stop Loss tại Upper Band của Donchian 50
+    float tpLimitShort = useBandExit ? currentTpShort : na
+    strategy.exit("Exit Short", from_entry = "Short", limit = tpLimitShort, stop = currentSlShort)
+    
+    // 2. Cross Donchian: Exit Short khi Basis 20 cắt xuống Basis 50
+    if useCrossExit and (ta.crossunder(basis20, basis50) or basis20 <= basis50)
+        strategy.close("Short", comment = "TP Cross DC (Basis20 < Basis50)")
+    
+    // 3. Take Profit theo thời gian: Thoát lệnh sau 50 nến
+    if useTimeExit and barsHeld >= exitBars
+        strategy.close("Short", comment = "TP Sau " + str.tostring(exitBars) + " Nến")
+
+// ==============================================================================
+// 6. CHART VISUALIZATION
+// ==============================================================================
+
+// --- Donchian 20 Plotting ---
+p_u20 = plot(upper20, "DC 20 Upper", color = color.new(#29b6f6, 60), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dotted)
+p_b20 = plot(basis20, "DC 20 Basis (Đường Donchian 20)", color = color.new(#00bcd4, 0), linewidth = 2)
+p_l20 = plot(lower20, "DC 20 Lower", color = color.new(#29b6f6, 60), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dotted)
+fill(p_u20, p_l20, color = color.new(#00bcd4, 94), title = "DC 20 Background")
+
+// --- Donchian 50 Plotting ---
+p_u50 = plot(upper50, "DC 50 Upper (TP Long / SL Short)", color = color.new(#ff7043, 20), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dotted)
+p_b50 = plot(basis50, "DC 50 Basis (Đường Donchian 50)", color = color.new(#ff9800, 0), linewidth = 2)
+p_l50 = plot(lower50, "DC 50 Lower (TP Short / SL Long)", color = color.new(#ab47bc, 20), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dotted)
+fill(p_u50, p_l50, color = color.new(#ff9800, 95), title = "DC 50 Background")
+
+// --- Hiển thị mức TP / SL hiện tại của vị thế ---
+plot(showTpSl and strategy.position_size > 0 and useBandExit ? currentTpLong : na, "Mục tiêu TP Long (Upper 50)", color = color.new(#00e676, 0), linewidth = 2, style = plot.style_linebr)
+plot(showTpSl and strategy.position_size > 0 ? currentSlLong : na, "Mức Cắt Lỗ SL Long (Lower 50)", color = color.new(#ff1744, 0), linewidth = 2, style = plot.style_linebr)
+
+plot(showTpSl and strategy.position_size < 0 and useBandExit ? currentTpShort : na, "Mục tiêu TP Short (Lower 50)", color = color.new(#00e676, 0), linewidth = 2, style = plot.style_linebr)
+plot(showTpSl and strategy.position_size < 0 ? currentSlShort : na, "Mức Cắt Lỗ SL Short (Upper 50)", color = color.new(#ff1744, 0), linewidth = 2, style = plot.style_linebr)
+
+// ==============================================================================
+// 7. DASHBOARD STATS TABLE
+// ==============================================================================
+
+var table infoTable = na
+
+if showTable and barstate.islast
+    string posString = tablePos == "Top Right" ? position.top_right :
+                       tablePos == "Bottom Right" ? position.bottom_right :
+                       tablePos == "Top Left" ? position.top_left : position.bottom_left
+    
+    infoTable := table.new(posString, 2, 8, bgcolor = color.new(#1e222d, 10), border_width = 1, border_color = color.new(#374151, 0))
+    
+    // Header
+    table.cell(infoTable, 0, 0, "THÔNG SỐ", bgcolor = color.new(#2563eb, 20), text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 0, "GIÁ TRỊ", bgcolor = color.new(#2563eb, 20), text_color = color.white, text_size = size.small)
+    
+    // Vị thế hiện tại
+    string posText  = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT (Không lệnh)"
+    color  posColor = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    table.cell(infoTable, 0, 1, "Vị thế hiện tại", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 1, posText, bgcolor = posColor, text_color = color.white, text_size = size.small)
+    
+    // Tình trạng Donchian
+    string dcRel = basis20 < basis50 ? "DC 20 < DC 50 (Vùng Đáy)" : basis20 > basis50 ? "DC 20 > DC 50 (Vùng Đỉnh)" : "DC 20 = DC 50"
+    color  dcColor = basis20 < basis50 ? color.new(#00e676, 0) : color.new(#ff5252, 0)
+    table.cell(infoTable, 0, 2, "Trạng thái Donchian", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 2, dcRel, text_color = dcColor, text_size = size.small)
+    
+    // Donchian 20 Basis vs Close
+    string closeRel = close > basis20 ? "Close > DC 20 (Tăng)" : "Close < DC 20 (Giảm)"
+    table.cell(infoTable, 0, 3, "Giá so với DC 20", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 3, closeRel, text_color = close > basis20 ? color.green : color.red, text_size = size.small)
+    
+    // Số nến đã giữ
+    table.cell(infoTable, 0, 4, "Số nến giữ lệnh", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 4, str.tostring(barsHeld) + " / " + str.tostring(exitBars), text_color = color.white, text_size = size.small)
+    
+    // Tổng số lệnh đã đóng
+    table.cell(infoTable, 0, 5, "Tổng số lệnh đóng", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 5, str.tostring(strategy.closedtrades), text_color = color.white, text_size = size.small)
+    
+    // Win Rate
+    float winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100 : 0.0
+    table.cell(infoTable, 0, 6, "Tỷ lệ thắng (Win Rate)", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 6, str.tostring(winRate, "#.##") + "%", text_color = winRate >= 50 ? color.green : color.orange, text_size = size.small)
+    
+    // Lợi nhuận ròng
+    color pnlColor = strategy.netprofit >= 0 ? color.green : color.red
+    table.cell(infoTable, 0, 7, "Lợi nhuận ròng (USD)", text_color = color.white, text_size = size.small)
+    table.cell(infoTable, 1, 7, str.tostring(strategy.netprofit, "#.##") + " USD", text_color = pnlColor, text_size = size.small)
