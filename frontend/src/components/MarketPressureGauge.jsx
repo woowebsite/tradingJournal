@@ -2,61 +2,117 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, Activity, Zap, Scale, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { getIntradayBSA, getIntradayBidAsk } from '../services/tcbs';
 
-const isTodayRecord = (item) => {
-    if (!item) return false;
-
-    // 1. If timestamp `s` exists (unix timestamp in seconds)
-    if (item.s) {
-        const itemDate = new Date(Number(item.s) * 1000);
-        if (!isNaN(itemDate.getTime())) {
-            const itemDateStr = itemDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
-            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
-            return itemDateStr === todayStr;
-        }
-    }
-
-    // 2. If date string exists (e.g. item.date or item.tradingDate or item.d)
-    const rawDate = item.date || item.tradingDate || item.d;
-    if (rawDate) {
-        const itemDate = new Date(rawDate);
-        if (!isNaN(itemDate.getTime())) {
-            const itemDateStr = itemDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
-            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
-            return itemDateStr === todayStr;
-        }
-    }
-
-    // 3. Intraday items with only `t` format (e.g. "09:15") from intraday session
-    return true;
+const normalizeTicker = (t) => {
+    if (!t) return '41I1G9000';
+    const clean = String(t).trim().toUpperCase();
+    if (clean === 'VN30F1M' || clean.startsWith('VN30')) return '41I1G9000';
+    return clean;
 };
 
-const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) => {
-    const [ticker, setTicker] = useState(defaultTicker);
-    const [bsaData, setBsaData] = useState([]);
-    const [bidAskData, setBidAskData] = useState([]);
+// Smart session extractor: extracts records from today if present, or fallback to the latest available trading session
+const filterLatestSessionRecords = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return { records: [], sessionLabel: '--/--/----', isToday: false };
+
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }); // "YYYY-MM-DD"
+
+    const getItemDateStr = (item) => {
+        if (!item) return null;
+        if (item.s) {
+            const d = new Date(Number(item.s) * 1000);
+            if (!isNaN(d.getTime())) {
+                return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+            }
+        }
+        const rawDate = item.date || item.tradingDate || item.d;
+        if (rawDate) {
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) {
+                return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+            }
+        }
+        return null;
+    };
+
+    // 1. Check if records matching today exist
+    const todayItems = items.filter(i => getItemDateStr(i) === todayStr);
+    if (todayItems.length > 0) {
+        const [y, m, d] = todayStr.split('-');
+        return {
+            records: todayItems,
+            sessionLabel: `${d}/${m}/${y}`,
+            isToday: true,
+        };
+    }
+
+    // 2. If no today records, find the most recent date available in dataset
+    const datesWithItems = new Map();
+    items.forEach(i => {
+        const dStr = getItemDateStr(i);
+        if (dStr) {
+            if (!datesWithItems.has(dStr)) datesWithItems.set(dStr, []);
+            datesWithItems.get(dStr).push(i);
+        }
+    });
+
+    if (datesWithItems.size > 0) {
+        // Sort dates descending to get the latest trading session
+        const sortedDates = Array.from(datesWithItems.keys()).sort((a, b) => b.localeCompare(a));
+        const latestDate = sortedDates[0];
+        const [y, m, d] = latestDate.split('-');
+        return {
+            records: datesWithItems.get(latestDate) || [],
+            sessionLabel: `${d}/${m}/${y}`,
+            isToday: false,
+        };
+    }
+
+    // 3. Intraday dataset without timestamp s (e.g. only time 't' like "09:15")
+    const todayFormatted = new Date().toLocaleDateString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    });
+
+    return {
+        records: items,
+        sessionLabel: todayFormatted,
+        isToday: true,
+    };
+};
+
+const MarketPressureGauge = ({
+    defaultTicker = '41I1G9000',
+    bsaData: externalBsaData = null,
+    bidAskData: externalBidAskData = null,
+    className = ''
+}) => {
+    const [ticker, setTicker] = useState(() => normalizeTicker(defaultTicker));
+    const [internalBsaData, setInternalBsaData] = useState([]);
+    const [internalBidAskData, setInternalBidAskData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
 
     // Sync with prop changes
     useEffect(() => {
-        if (defaultTicker) setTicker(defaultTicker);
+        if (defaultTicker) setTicker(normalizeTicker(defaultTicker));
     }, [defaultTicker]);
 
     const fetchData = useCallback(async () => {
-        if (!ticker) return;
+        const cleanTicker = normalizeTicker(ticker);
+        if (!cleanTicker) return;
         setLoading(true);
         try {
-            // Use tWindow: '1d' to get all intraday data for today's trading session
             const [resBsa, resBa] = await Promise.allSettled([
-                getIntradayBSA(ticker, { timeWindow: '5', tWindow: '1d', type: 'all' }),
-                getIntradayBidAsk(ticker, { mode: 'baAll' }),
+                getIntradayBSA(cleanTicker, { timeWindow: '5', tWindow: '1d', type: 'all' }),
+                getIntradayBidAsk(cleanTicker, { mode: 'baAll' }),
             ]);
 
             // 1. Process BSA
             if (resBsa.status === 'fulfilled' && resBsa.value) {
                 const val = resBsa.value;
                 const list = Array.isArray(val?.data) ? val.data : (Array.isArray(val) ? val : []);
-                setBsaData(list);
+                setInternalBsaData(list);
             }
 
             // 2. Process Bid-Ask
@@ -84,7 +140,7 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
                     unifiedMap.set(String(i.t), { ...existing, ...i });
                 });
 
-                setBidAskData(Array.from(unifiedMap.values()));
+                setInternalBidAskData(Array.from(unifiedMap.values()));
             }
 
             setLastUpdated(new Date().toLocaleTimeString('vi-VN'));
@@ -95,31 +151,53 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
         }
     }, [ticker]);
 
+    // If external data is not provided, fetch internally and set interval
+    const hasExternalData = (Array.isArray(externalBsaData) && externalBsaData.length > 0) ||
+        (Array.isArray(externalBidAskData) && externalBidAskData.length > 0);
+
     useEffect(() => {
-        fetchData();
-        // Auto refresh every 30s
-        const interval = setInterval(fetchData, 30000);
-        return () => clearInterval(interval);
-    }, [fetchData]);
+        if (!hasExternalData) {
+            fetchData();
+            const interval = setInterval(fetchData, 30000);
+            return () => clearInterval(interval);
+        }
+    }, [fetchData, hasExternalData]);
 
-    // Calculate aggregated Metrics & Gauge Position STRICTLY FOR TODAY
+    // Effective datasets (prioritize external props from Derivation page)
+    const effectiveBsa = useMemo(() => {
+        return (Array.isArray(externalBsaData) && externalBsaData.length > 0) ? externalBsaData : internalBsaData;
+    }, [externalBsaData, internalBsaData]);
+
+    const effectiveBidAsk = useMemo(() => {
+        return (Array.isArray(externalBidAskData) && externalBidAskData.length > 0) ? externalBidAskData : internalBidAskData;
+    }, [externalBidAskData, internalBidAskData]);
+
+    // Calculate aggregated Metrics & Gauge Position for the active session
     const metrics = useMemo(() => {
-        // Filter datasets to ONLY include data for today
-        const todayBsa = bsaData.filter(isTodayRecord);
-        const todayBidAsk = bidAskData.filter(isTodayRecord);
+        const bsaSession = filterLatestSessionRecords(effectiveBsa);
+        const bidAskSession = filterLatestSessionRecords(effectiveBidAsk);
 
-        // --- 1. Market Order Pressure (BSA) ---
+        const targetBsa = bsaSession.records;
+        const targetBidAsk = bidAskSession.records;
+
+        // --- 1. Market Order Pressure (BSA / Khớp Chủ Động) ---
         let totalBms = 0;
         let totalSms = 0;
         let totalBu = 0;
         let totalSd = 0;
 
-        if (todayBsa.length > 0) {
-            todayBsa.forEach(item => {
-                totalBms += Number(item.bms ?? item.bu ?? item.raw?.bms ?? item.raw?.bu) || 0;
-                totalSms += Number(item.sms ?? item.sd ?? item.raw?.sms ?? item.raw?.sd) || 0;
-                totalBu += Number(item.bu ?? item.raw?.bu) || 0;
-                totalSd += Number(item.sd ?? item.raw?.sd) || 0;
+        if (targetBsa.length > 0) {
+            targetBsa.forEach(item => {
+                const bms = Number(item.bms ?? item.raw?.bms) || 0;
+                const sms = Number(item.sms ?? item.raw?.sms) || 0;
+                const bu = Number(item.bu ?? item.raw?.bu) || 0;
+                const sd = Number(item.sd ?? item.raw?.sd) || 0;
+
+                // If bms/sms volume is available, accumulate it; otherwise fallback to order count bu/sd
+                totalBms += bms > 0 ? bms : bu;
+                totalSms += sms > 0 ? sms : sd;
+                totalBu += bu;
+                totalSd += sd;
             });
         }
 
@@ -130,14 +208,16 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
         const buyMarketPct = totalMarketVol > 0 ? (totalBms / totalMarketVol) * 100 : 50;
         const sellMarketPct = 100 - buyMarketPct;
 
-        // --- 2. Limit Order Pressure (Bid-Ask) ---
+        // --- 2. Limit Order Pressure (Bid-Ask / Sổ Lệnh Chờ) ---
         let totalBs = 0;
         let totalOa = 0;
 
-        if (todayBidAsk.length > 0) {
-            todayBidAsk.forEach(item => {
-                totalBs += Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv) || 0;
-                totalOa += Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av) || 0;
+        if (targetBidAsk.length > 0) {
+            targetBidAsk.forEach(item => {
+                const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv) || 0;
+                const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av) || 0;
+                totalBs += bs;
+                totalOa += oa;
             });
         }
 
@@ -149,8 +229,15 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
         const askLimitPct = 100 - bidLimitPct;
 
         // --- 3. Combined Score (-1.0 to +1.0) ---
-        // 55% Market Order weight + 45% Limit Order weight
-        const compositeScore = (marketScore * 0.55) + (limitScore * 0.45);
+        // 55% Market Order weight + 45% Limit Order weight (or fallback if one has no data)
+        let compositeScore = 0;
+        if (totalMarketVol > 0 && totalLimitVol > 0) {
+            compositeScore = (marketScore * 0.55) + (limitScore * 0.45);
+        } else if (totalMarketVol > 0) {
+            compositeScore = marketScore;
+        } else if (totalLimitVol > 0) {
+            compositeScore = limitScore;
+        }
 
         // Map to 0 - 100 scale (0: Max Sell, 50: Neutral, 100: Max Buy)
         const gaugeValue = Math.min(100, Math.max(0, (compositeScore + 1) * 50));
@@ -165,7 +252,7 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
         let stanceBg = 'rgba(107, 114, 128, 0.2)';
         let stanceBorder = '#6B7280';
 
-        if (gaugeValue >= 70) {
+        if (gaugeValue >= 68) {
             stanceText = 'Mua Mạnh';
             stanceColor = '#00E676';
             stanceBg = 'rgba(0, 230, 118, 0.15)';
@@ -175,7 +262,7 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
             stanceColor = '#34D399';
             stanceBg = 'rgba(52, 211, 153, 0.15)';
             stanceBorder = '#34D399';
-        } else if (gaugeValue <= 30) {
+        } else if (gaugeValue <= 32) {
             stanceText = 'Bán Mạnh';
             stanceColor = '#FF3B30';
             stanceBg = 'rgba(255, 59, 48, 0.15)';
@@ -187,12 +274,12 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
             stanceBorder = '#F87171';
         }
 
-        const todayDateStr = new Date().toLocaleDateString('vi-VN', {
-            timeZone: 'Asia/Ho_Chi_Minh',
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric'
-        });
+        const sessionDate = bsaSession.sessionLabel !== '--/--/----'
+            ? bsaSession.sessionLabel
+            : (bidAskSession.sessionLabel !== '--/--/----' ? bidAskSession.sessionLabel : bsaSession.sessionLabel);
+
+        const isTodaySession = bsaSession.isToday || bidAskSession.isToday;
+        const sessionPrefix = isTodaySession ? 'Hôm nay' : 'Phiên';
 
         return {
             totalBms,
@@ -210,10 +297,10 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
             stanceColor,
             stanceBg,
             stanceBorder,
-            todayDateStr,
-            recordsCount: todayBsa.length,
+            sessionLabel: `${sessionPrefix}: ${sessionDate}`,
+            recordsCount: targetBsa.length || targetBidAsk.length,
         };
-    }, [bsaData, bidAskData]);
+    }, [effectiveBsa, effectiveBidAsk]);
 
     return (
         <div className={`bg-gray-800 border border-gray-700 rounded-xl shadow-lg flex flex-col overflow-hidden ${className}`}>
@@ -223,7 +310,7 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
                     <Zap size={16} className="text-amber-400" />
                     <span className="font-bold text-white text-sm">Lực Cung Cầu Phái Sinh</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 font-mono border border-amber-500/20">
-                        Hôm nay: {metrics.todayDateStr}
+                        {metrics.sessionLabel}
                     </span>
                 </div>
                 <button
@@ -231,7 +318,7 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
                     onClick={fetchData}
                     disabled={loading}
                     className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition disabled:opacity-50 border border-gray-700 cursor-pointer"
-                    title="Làm mới lực cung cầu hôm nay"
+                    title="Làm mới lực cung cầu"
                 >
                     <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                 </button>
@@ -410,3 +497,4 @@ const MarketPressureGauge = ({ defaultTicker = '41I1G9000', className = '' }) =>
 };
 
 export default MarketPressureGauge;
+

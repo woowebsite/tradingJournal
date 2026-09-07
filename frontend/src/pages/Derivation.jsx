@@ -22,10 +22,24 @@ const Derivation = () => {
     const { selectedAccount } = useAccount();
 
     const [entryPrice, setEntryPrice] = useState('');
+    const [isAutoEntryPrice, setIsAutoEntryPrice] = useState(true);
+    const isAutoEntryPriceRef = React.useRef(true);
     const [strategy, setStrategy] = useState('');
+    const [positionSide, setPositionSide] = useState('');
+    const positionSideRef = React.useRef('');
+    const [vwapBands, setVwapBands] = useState(null);
+    const vwapBandsRef = React.useRef(null);
     const [stoploss, setStoploss] = useState('');
     const [takeProfit, setTakeProfit] = useState('');
     const [volume, setVolume] = useState(1);
+
+    useEffect(() => {
+        isAutoEntryPriceRef.current = isAutoEntryPrice;
+    }, [isAutoEntryPrice]);
+
+    useEffect(() => {
+        positionSideRef.current = positionSide;
+    }, [positionSide]);
 
     // Live Intraday tables data for AI decision making
     const [bsaData, setBsaData] = useState([]);
@@ -96,7 +110,7 @@ const Derivation = () => {
     // Derive full rule objects directly from the selected strategy for Derivatives
     const strategyRules = React.useMemo(() => {
         if (!strategy || !strategies || strategies.length === 0) return [];
-        const selectedStrat = strategies.find(s => 
+        const selectedStrat = strategies.find(s =>
             (s.id || s.documentId)?.toString() === strategy.toString() ||
             s.documentId?.toString() === strategy.toString() ||
             s.id?.toString() === strategy.toString()
@@ -161,6 +175,73 @@ const Derivation = () => {
         return extracted;
     }, [strategy, strategies, rules]);
 
+    const handleLivePriceTick = React.useCallback((tick) => {
+        if (!tick) return;
+        const price = Number(tick.close || tick.matchPrice || tick.mp || tick.price || 0);
+        if (!price || isNaN(price)) return;
+
+        // Auto update entry price in realtime if auto-follow is active
+        if (isAutoEntryPriceRef.current) {
+            setEntryPrice(price.toFixed(1));
+        }
+
+        // Update UI header with live tick
+        setDerivativeData(prev => {
+            const current = Array.isArray(prev) ? prev[0] : (prev || {});
+            const openPrice = Number(tick.open || current.open || price);
+            const changeVal = price - openPrice;
+            const changePct = openPrice > 0 ? (changeVal / openPrice) * 100 : 0;
+
+            const updated = {
+                ...current,
+                symbol: current.symbol || 'VN30F1M',
+                matchPrice: price,
+                price: price,
+                open: current.open || openPrice,
+                high: Math.max(Number(current.high || price), Number(tick.high || price)),
+                low: Math.min(Number(current.low || price), Number(tick.low || price)),
+                change: current.change !== undefined && current.change !== 0 ? current.change : changeVal,
+                changePercent: current.changePercent !== undefined && current.changePercent !== 0 ? current.changePercent : changePct,
+                bidPrice01: current.bidPrice01 || (price - 0.1).toFixed(1),
+                bidQtty01: current.bidQtty01 || 10,
+                offerPrice01: current.offerPrice01 || (price + 0.1).toFixed(1),
+                offerQtty01: current.offerQtty01 || 10,
+                volume: tick.volume || current.volume || 1
+            };
+            return Array.isArray(prev) ? [updated] : updated;
+        });
+    }, []);
+
+    const handleVwapUpdate = React.useCallback((bands) => {
+        if (!bands) return;
+        setVwapBands(bands);
+        vwapBandsRef.current = bands;
+
+        // Automatically calculate and set SL and TP based on selected position side and VWAP bands
+        if (positionSideRef.current === 'Long') {
+            if (bands.lower1 !== undefined) setStoploss(Number(bands.lower1).toFixed(1));
+            if (bands.upper2 !== undefined) setTakeProfit(Number(bands.upper2).toFixed(1));
+        } else if (positionSideRef.current === 'Short') {
+            if (bands.upper1 !== undefined) setStoploss(Number(bands.upper1).toFixed(1));
+            if (bands.lower2 !== undefined) setTakeProfit(Number(bands.lower2).toFixed(1));
+        }
+    }, []);
+
+    const handlePositionSideChange = (side) => {
+        setPositionSide(side);
+        positionSideRef.current = side;
+        const bands = vwapBandsRef.current;
+        if (!bands) return;
+
+        if (side === 'Long') {
+            if (bands.lower1 !== undefined) setStoploss(Number(bands.lower1).toFixed(1));
+            if (bands.upper2 !== undefined) setTakeProfit(Number(bands.upper2).toFixed(1));
+        } else if (side === 'Short') {
+            if (bands.upper1 !== undefined) setStoploss(Number(bands.upper1).toFixed(1));
+            if (bands.lower2 !== undefined) setTakeProfit(Number(bands.lower2).toFixed(1));
+        }
+    };
+
     useEffect(() => {
         if (jwtToken && !derivativeData) {
             handleFetchPrice();
@@ -169,21 +250,19 @@ const Derivation = () => {
     }, [jwtToken]);
 
     const handleFetchPrice = async () => {
-        if (!jwtToken) {
-            setShowOtpModal(true);
-            return;
-        }
-
         setLoadingPrice(true);
         setError('');
         setRefreshTrigger(prev => prev + 1);
+
+        if (!jwtToken) {
+            setLoadingPrice(false);
+            return;
+        }
+
         try {
             const data = await getTCBSDerivatives(jwtToken);
             setDerivativeData(data);
 
-            // Assume the API returns an array of derivatives or a single object.
-            // If it's an array, we find VN30F1M or similar. For now, we just try to get the 'price' or 'matchPrice'.
-            // Often derivatives list has fields like 'matchPrice' or 'lastPrice'
             let priceToSet = '';
             const activeDeriv = (Array.isArray(data) && data.length > 0) ? data[0] : (data && typeof data === 'object') ? data : null;
 
@@ -219,7 +298,8 @@ const Derivation = () => {
         // If WebSocket is already connected, send new subscription without reconnecting
         if (activeSymbol && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             try {
-                wsRef.current.send(`d|s|tk|bp+bi+tm+mp+op+fe |${activeSymbol}`);
+                const target = activeSymbol.startsWith('41I') ? activeSymbol : '41I1G9000';
+                wsRef.current.send(`d|s|tk|bp+bi+tm+mp+op+fe|${target}`);
             } catch (e) { }
         }
     }, [activeSymbol]);
@@ -227,7 +307,7 @@ const Derivation = () => {
     // WebSocket Connection Lifecycle
     useEffect(() => {
         if (!jwtToken) {
-            setWsStatus('Authentication Required');
+            setWsStatus('LIVE');
             return;
         }
 
@@ -247,7 +327,7 @@ const Derivation = () => {
             }
 
             console.log('Derivation WS connecting to:', wsUrl);
-            setWsStatus('Connecting...');
+            setWsStatus('Connecting TCBS WS...');
 
             let ws;
             try {
@@ -255,7 +335,7 @@ const Derivation = () => {
                 wsRef.current = ws;
             } catch (err) {
                 console.error('Failed to create WebSocket:', err);
-                setWsStatus('Connection Error');
+                setWsStatus('LIVE');
                 reconnectTimer = setTimeout(connectWebSocket, 5000);
                 return;
             }
@@ -266,7 +346,7 @@ const Derivation = () => {
                     return;
                 }
                 reconnectAttempts = 0;
-                setWsStatus('Authenticating...');
+                setWsStatus('Authenticating TCBS...');
                 try {
                     const base64Jwt = btoa(jwtToken);
                     ws.send(`d|a|||${base64Jwt}`);
@@ -290,12 +370,13 @@ const Derivation = () => {
                     try {
                         const payload = JSON.parse(event.data.substring(4));
                         if (payload.success) {
-                            setWsStatus('Connected');
-                            const target = activeSymbolRef.current || '41I1G9000';
-                            ws.send(`d|s|tk|bp+bi+tm+mp+op+fe |${target}`);
+                            setWsStatus('Connected (TCBS)');
+                            const curSym = activeSymbolRef.current;
+                            const target = (curSym && curSym.startsWith('41I')) ? curSym : '41I1G9000';
+                            ws.send(`d|s|tk|bp+bi+tm+mp+op+fe|${target}`);
                         } else {
                             console.warn('WS Auth Failed:', payload.error);
-                            setWsStatus('Auth Failed');
+                            setWsStatus('LIVE');
                             if (payload.error?.message?.toLowerCase().includes('invalid') || payload.error?.message?.toLowerCase().includes('expired')) {
                                 setShowOtpModal(true);
                             }
@@ -350,15 +431,14 @@ const Derivation = () => {
                         });
                     }
 
-                    // 3. Auto fill entry price ONCE if currently empty
-                    setEntryPrice(prevPrice => {
-                        if (!prevPrice) {
-                            const tickPrice = lastItem.mp || lastItem.matchPrice || lastItem.price ||
-                                lastItem.bp1 || lastItem.bidPrice01 || lastItem.op1 || lastItem.offerPrice01 || '';
-                            return tickPrice ? tickPrice.toString() : prevPrice;
+                    // 3. Auto update entry price in realtime if auto-follow is active
+                    if (isAutoEntryPriceRef.current) {
+                        const tickPrice = lastItem.mp || lastItem.matchPrice || lastItem.price ||
+                            lastItem.bp1 || lastItem.bidPrice01 || lastItem.op1 || lastItem.offerPrice01 || '';
+                        if (tickPrice && !isNaN(Number(tickPrice))) {
+                            setEntryPrice(Number(tickPrice).toFixed(1));
                         }
-                        return prevPrice; // Do not overwrite user input
-                    });
+                    }
 
                 } catch (e) {
                     console.error('Derivation WS Data Error:', e);
@@ -372,14 +452,14 @@ const Derivation = () => {
                 console.warn('Derivation WS closed:', ev.code, ev.reason);
                 reconnectAttempts++;
                 const delay = Math.min(2000 * Math.pow(1.5, reconnectAttempts), 10000);
-                setWsStatus('Disconnected. Reconnecting...');
+                setWsStatus('LIVE');
                 reconnectTimer = setTimeout(connectWebSocket, delay);
             };
 
             ws.onerror = (err) => {
                 if (isUnmounted) return;
                 console.error('Derivation WS error:', err);
-                setWsStatus('Error connecting WS');
+                setWsStatus('LIVE');
             };
         };
 
@@ -398,11 +478,18 @@ const Derivation = () => {
 
     const handlePlaceOrder = (side) => {
         const price = Number(entryPrice);
-        const slOffset = Number(stoploss) || 0;
-        const tpOffset = Number(takeProfit) || 0;
+        const slVal = Number(stoploss) || 0;
+        const tpVal = Number(takeProfit) || 0;
 
-        const calculatedSL = side === 'Long' ? (price - slOffset) : (price + slOffset);
-        const calculatedTP = side === 'Long' ? (price + tpOffset) : (price - tpOffset);
+        const calculatedSL = slVal > 500
+            ? slVal
+            : (side === 'Long' ? (price - slVal) : (price + slVal));
+        const calculatedTP = tpVal > 500
+            ? tpVal
+            : (side === 'Long' ? (price + tpVal) : (price - tpVal));
+
+        const slUnit = slVal > 500 ? Math.abs(price - slVal).toFixed(1) : (slVal > 0 ? slVal.toString() : '3');
+        const tpUnit = tpVal > 500 ? Math.abs(tpVal - price).toFixed(1) : (tpVal > 0 ? tpVal.toString() : '3');
 
         setConfirmData({
             side,
@@ -410,6 +497,8 @@ const Derivation = () => {
             volume,
             stoploss: calculatedSL,
             takeprofit: calculatedTP,
+            slUnit,
+            tpUnit,
             symbol: activeSymbol
         });
         setShowConfirmModal(true);
@@ -455,8 +544,8 @@ const Derivation = () => {
                 cmd: "Web.newOrder",
                 condition: {
                     orderType: "SLP",
-                    stopLossUnit: stoploss,
-                    takeProfitUnit: takeProfit
+                    stopLossUnit: confirmData.slUnit || "3",
+                    takeProfitUnit: confirmData.tpUnit || "3"
                 }
             };
 
@@ -552,6 +641,8 @@ const Derivation = () => {
                                     wsTick={wsTick}
                                     wsStatus={wsStatus}
                                     refreshTrigger={refreshTrigger}
+                                    onPriceTick={handleLivePriceTick}
+                                    onVwapUpdate={handleVwapUpdate}
                                 />
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-500 italic text-sm absolute inset-0">
@@ -617,32 +708,74 @@ const Derivation = () => {
                                 </select>
                             </div>
 
+                            {/* Vị Thế / Hướng Giao Dịch (Long / Short) */}
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block">
+                                        Long / Short
+                                    </label>
+                                    {vwapBands && (
+                                        <span className="text-[9px] text-sky-400 font-mono">
+                                            VWAP: {Number(vwapBands.value || 0).toFixed(1)}
+                                        </span>
+                                    )}
+                                </div>
+                                <select
+                                    className={`w-full bg-gray-900 border rounded-lg px-3 py-1.5 text-xs outline-none transition ${positionSide === 'Long'
+                                        ? 'border-blue-500/50 text-blue-300 font-bold'
+                                        : positionSide === 'Short'
+                                            ? 'border-rose-500/50 text-rose-300 font-bold'
+                                            : 'border-gray-700 text-white'
+                                        }`}
+                                    value={positionSide}
+                                    onChange={(e) => handlePositionSideChange(e.target.value)}
+                                >
+                                    <option value="" className="bg-gray-900 text-gray-400">Chọn Vị Thế (Long / Short)...</option>
+                                    <option value="Long" className="bg-gray-900 text-blue-400 font-semibold">
+                                        📈 Long (SL: LowerBand1, TP: UpperBand2)
+                                    </option>
+                                    <option value="Short" className="bg-gray-900 text-rose-400 font-semibold">
+                                        📉 Short (SL: UpperBand1, TP: LowerBand2)
+                                    </option>
+                                </select>
+                            </div>
+
                             {/* Entry Price & Volume */}
                             <div className="grid grid-cols-2 gap-2">
                                 <div>
                                     <div className="flex items-center justify-between mb-1">
                                         <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block">
-                                            Giá Mở (Entry)
+                                            Giá
                                         </label>
                                         <button
                                             type="button"
                                             onClick={() => {
                                                 const info = Array.isArray(derivativeData) ? derivativeData[0] : derivativeData;
                                                 const p = info?.matchPrice || info?.price || info?.bidPrice01 || '';
-                                                if (p) setEntryPrice(p.toString());
+                                                if (p && !isNaN(Number(p))) {
+                                                    setEntryPrice(Number(p).toFixed(1));
+                                                }
+                                                setIsAutoEntryPrice(prev => !prev);
                                             }}
-                                            className="text-[9px] text-blue-400 hover:text-blue-300 font-medium px-1 bg-blue-500/10 rounded border border-blue-500/20 cursor-pointer"
-                                            title="Điền giá khớp thị trường hiện tại"
+                                            className={`text-[9px] font-medium px-1.5 py-0.5 rounded border transition cursor-pointer flex items-center gap-1 ${isAutoEntryPrice
+                                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                                                : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
+                                                }`}
+                                            title={isAutoEntryPrice ? "Đang tự động bám theo giá thị trường Realtime (Nhấn để khóa giá)" : "Nhấn để tự động bám theo giá thị trường Realtime"}
                                         >
-                                            Giá TT
+                                            <span className={`w-1.5 h-1.5 rounded-full ${isAutoEntryPrice ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
+                                            <span>{isAutoEntryPrice ? 'Auto' : 'Giá TT'}</span>
                                         </button>
                                     </div>
                                     <input
                                         type="number"
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-mono"
+                                        className={`w-full bg-gray-900 border rounded-lg px-3 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none font-mono transition ${isAutoEntryPrice ? 'border-emerald-500/40 focus:border-emerald-500' : 'border-gray-700'}`}
                                         placeholder="Giá Entry..."
                                         value={entryPrice}
-                                        onChange={(e) => setEntryPrice(e.target.value)}
+                                        onChange={(e) => {
+                                            setEntryPrice(e.target.value);
+                                            setIsAutoEntryPrice(false);
+                                        }}
                                         step="0.1"
                                     />
                                 </div>
@@ -664,9 +797,21 @@ const Derivation = () => {
                             {/* Stoploss & Take Profit */}
                             <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-rose-400 mb-1 block">
-                                        Cắt Lỗ (SL)
-                                    </label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-[10px] font-semibold uppercase tracking-wider text-rose-400 block">
+                                            Cắt Lỗ (SL)
+                                        </label>
+                                        {positionSide === 'Long' && vwapBands?.lower1 && (
+                                            <span className="text-[9px] text-rose-400/90 font-mono font-medium" title="Lower Band 1 (VWAP - 1 SD)">
+                                                LB1: {Number(vwapBands.lower1).toFixed(1)}
+                                            </span>
+                                        )}
+                                        {positionSide === 'Short' && vwapBands?.upper1 && (
+                                            <span className="text-[9px] text-rose-400/90 font-mono font-medium" title="Upper Band 1 (VWAP + 1 SD)">
+                                                UB1: {Number(vwapBands.upper1).toFixed(1)}
+                                            </span>
+                                        )}
+                                    </div>
                                     <input
                                         type="number"
                                         className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-rose-300 placeholder-gray-500 focus:ring-1 focus:ring-rose-500 outline-none font-mono"
@@ -677,9 +822,21 @@ const Derivation = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1 block">
-                                        Chốt Lời (TP)
-                                    </label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 block">
+                                            Chốt Lời (TP)
+                                        </label>
+                                        {positionSide === 'Long' && vwapBands?.upper2 && (
+                                            <span className="text-[9px] text-emerald-400/90 font-mono font-medium" title="Upper Band 2 (VWAP + 2 SD)">
+                                                UB2: {Number(vwapBands.upper2).toFixed(1)}
+                                            </span>
+                                        )}
+                                        {positionSide === 'Short' && vwapBands?.lower2 && (
+                                            <span className="text-[9px] text-emerald-400/90 font-mono font-medium" title="Lower Band 2 (VWAP - 2 SD)">
+                                                LB2: {Number(vwapBands.lower2).toFixed(1)}
+                                            </span>
+                                        )}
+                                    </div>
                                     <input
                                         type="number"
                                         className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-emerald-300 placeholder-gray-500 focus:ring-1 focus:ring-emerald-500 outline-none font-mono"
@@ -717,7 +874,12 @@ const Derivation = () => {
 
                     {/* Lực Cung Cầu Phái Sinh (Market Pressure Gauge) */}
                     <div className="flex-1 min-h-[360px] w-full">
-                        <MarketPressureGauge defaultTicker={activeSymbol || '41I1G9000'} className="h-full w-full" />
+                        <MarketPressureGauge
+                            defaultTicker="41I1G9000"
+                            bsaData={bsaData}
+                            bidAskData={bidAskData}
+                            className="h-full w-full"
+                        />
                     </div>
                 </div>
             </div>

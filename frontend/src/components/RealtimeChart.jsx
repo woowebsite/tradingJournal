@@ -33,10 +33,15 @@ const parseTradingDateToTimestamp = (dateInput) => {
     return isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
 };
 
-const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], wsTick, wsStatus, refreshTrigger = 0 }) => {
+const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], wsTick, wsStatus, refreshTrigger = 0, onPriceTick, onVwapUpdate }) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
+
+    const onVwapUpdateRef = useRef(onVwapUpdate);
+    useEffect(() => {
+        onVwapUpdateRef.current = onVwapUpdate;
+    }, [onVwapUpdate]);
 
     // Persistent indicator series refs
     const vwapMainSeriesRef = useRef(null);
@@ -306,7 +311,9 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                     }
                 });
 
-                latestVwapVal = vwapData[vwapData.length - 1]?.value;
+                const lastVwap = vwapData[vwapData.length - 1];
+                latestVwapVal = lastVwap?.value;
+                onVwapUpdateRef.current?.(lastVwap);
             }
         } catch (err) {
             console.error('Failed to calculate VWAP:', err);
@@ -365,7 +372,9 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
     }, [strategyRules, computeAllMarkers]);
 
     useEffect(() => {
-        setStatus(wsStatus || 'Connecting...');
+        if (wsStatus && wsStatus.toLowerCase().includes('connected')) {
+            setStatus('LIVE (WS)');
+        }
     }, [wsStatus]);
 
     // Load & Synchronize Historical Candles from 24hMoney
@@ -393,14 +402,16 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                 }).filter(item => item.time !== null).sort((a, b) => a.time - b.time);
 
                 if (mappedData.length > 0) {
-                    const lastCandle = mappedData.pop();
-                    currentCandleRef.current = lastCandle;
-                    candleDataRef.current = mappedData;
-                    seriesRef.current.setData([...mappedData, lastCandle]);
+                    const lastCandle = mappedData[mappedData.length - 1];
+                    currentCandleRef.current = { ...lastCandle };
+                    candleDataRef.current = mappedData.slice(0, -1);
+                    seriesRef.current.setData(mappedData);
 
                     // Update indicators & markers
                     updateIndicatorsData();
                     computeAllMarkers();
+                    setStatus('LIVE');
+                    onPriceTick?.(lastCandle);
                 }
             }
         } catch (error) {
@@ -408,7 +419,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         } finally {
             setRefreshingHistory(false);
         }
-    }, [symbol, computeAllMarkers, updateIndicatorsData]);
+    }, [symbol, computeAllMarkers, updateIndicatorsData, onPriceTick]);
 
     // Refresh history on external trigger (e.g. user clicked Refresh Price button in parent)
     useEffect(() => {
@@ -417,13 +428,112 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         }
     }, [refreshTrigger, loadHistory]);
 
-    // Auto-sync historical candles periodically (every 30s) to guarantee no missing minutes
+    // 24hMoney Realtime Live Stream Polling Engine (every 1.5s)
     useEffect(() => {
-        const interval = setInterval(() => {
-            loadHistory(true);
-        }, 30000);
-        return () => clearInterval(interval);
-    }, [loadHistory]);
+        let isCancelled = false;
+        let isFetching = false;
+        const targetSymbol = (symbol && !symbol.startsWith('41I')) ? symbol : 'VN30F1M';
+
+        const pollRealtimeStream = async () => {
+            if (isCancelled || isFetching || !seriesRef.current) return;
+            isFetching = true;
+
+            try {
+                // Fetch recent 3 bars for fast tick synchronization
+                const recentBars = await getDerivativeHistory(targetSymbol, '1', 3);
+                if (isCancelled || !Array.isArray(recentBars) || recentBars.length === 0) {
+                    isFetching = false;
+                    return;
+                }
+
+                const mappedBars = recentBars.map(item => {
+                    const timeStamp = parseTradingDateToTimestamp(item.time || item.tradingDate || item.date);
+                    return {
+                        time: timeStamp,
+                        date: item.tradingDate || item.date || new Date((timeStamp || 0) * 1000).toISOString(),
+                        open: Number(item.open),
+                        high: Number(item.high),
+                        low: Number(item.low),
+                        close: Number(item.close),
+                        volume: Number(item.volume || item.v || 1)
+                    };
+                }).filter(item => item.time !== null).sort((a, b) => a.time - b.time);
+
+                if (mappedBars.length === 0) {
+                    isFetching = false;
+                    return;
+                }
+
+                const latestBar = mappedBars[mappedBars.length - 1];
+                let current = currentCandleRef.current;
+
+                if (!current) {
+                    currentCandleRef.current = { ...latestBar };
+                    seriesRef.current.update(latestBar);
+                    setStatus('LIVE');
+                    onPriceTick?.(latestBar);
+                } else if (latestBar.time === current.time) {
+                    // Update active forming candle in real-time
+                    const isChanged = current.close !== latestBar.close ||
+                        current.high !== latestBar.high ||
+                        current.low !== latestBar.low ||
+                        current.volume !== latestBar.volume;
+
+                    if (isChanged) {
+                        current.open = latestBar.open;
+                        current.high = Math.max(current.high, latestBar.high);
+                        current.low = Math.min(current.low, latestBar.low);
+                        current.close = latestBar.close;
+                        current.volume = latestBar.volume;
+                        current.date = latestBar.date;
+
+                        seriesRef.current.update(current);
+                        updateLiveMarker();
+                        setStatus('LIVE');
+                        onPriceTick?.(current);
+                    }
+                } else if (latestBar.time > current.time) {
+                    // New 1-minute candle started!
+                    candleDataRef.current.push({ ...current });
+
+                    // Append intermediate bars if any were missed
+                    for (let i = 0; i < mappedBars.length - 1; i++) {
+                        const bar = mappedBars[i];
+                        if (bar.time > current.time && !candleDataRef.current.some(c => c.time === bar.time)) {
+                            candleDataRef.current.push(bar);
+                        }
+                    }
+
+                    currentCandleRef.current = { ...latestBar };
+                    seriesRef.current.update(latestBar);
+                    updateIndicatorsData();
+                    computeAllMarkers();
+                    setStatus('LIVE');
+                    onPriceTick?.(latestBar);
+                }
+            } catch (e) {
+                // Silently handle temporary network errors
+            } finally {
+                isFetching = false;
+            }
+        };
+
+        const intervalId = setInterval(pollRealtimeStream, 1500);
+
+        // Immediate poll when browser tab becomes active
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                pollRealtimeStream();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            isCancelled = true;
+            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [symbol, updateIndicatorsData, computeAllMarkers, updateLiveMarker, onPriceTick]);
 
     // Process buffered WS tick via RAF
     const processTick = useCallback(() => {
@@ -462,7 +572,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
         let current = currentCandleRef.current;
         let isNewCandle = false;
 
-        if (current && current.time === timeStamp) {
+        if (current && (current.time === timeStamp || timeStamp < current.time)) {
             current.high = Math.max(current.high, price);
             current.low = Math.min(current.low, price);
             current.close = price;
@@ -485,6 +595,8 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
 
         // 1. Fast direct O(1) chart update
         seriesRef.current.update(current);
+        setStatus('LIVE');
+        onPriceTick?.(current);
 
         // 2. If new candle formed, update indicators & full markers
         if (isNewCandle) {
@@ -494,7 +606,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
             // Otherwise quick live marker check
             updateLiveMarker();
         }
-    }, [computeAllMarkers, updateIndicatorsData, updateLiveMarker]);
+    }, [computeAllMarkers, updateIndicatorsData, updateLiveMarker, onPriceTick]);
 
     // Receive wsTick and schedule RAF
     useEffect(() => {
