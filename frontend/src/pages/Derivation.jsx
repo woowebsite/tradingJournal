@@ -477,6 +477,11 @@ const Derivation = () => {
     }, [jwtToken]);
 
     const handlePlaceOrder = (side) => {
+        if (!jwtToken) {
+            setShowOtpModal(true);
+            return;
+        }
+
         const price = Number(entryPrice);
         const slVal = Number(stoploss) || 0;
         const tpVal = Number(takeProfit) || 0;
@@ -672,6 +677,15 @@ const Derivation = () => {
                                     {activeSymbol || 'VN30F1M'}
                                 </span>
                             </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowOtpModal(true)}
+                                className={`text-[10px] px-2 py-0.5 rounded-md border flex items-center gap-1 transition cursor-pointer ${jwtToken ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'}`}
+                                title={jwtToken ? "TCBS đã xác thực OTP (Nhấn để đổi OTP)" : "Chưa có OTP TCBS (Nhấn để xác thực)"}
+                            >
+                                <Key size={11} />
+                                <span>{jwtToken ? 'OTP OK' : 'Nhập OTP'}</span>
+                            </button>
                         </div>
 
                         {/* Inline alerts */}

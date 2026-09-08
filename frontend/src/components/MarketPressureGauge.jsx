@@ -98,50 +98,71 @@ const MarketPressureGauge = ({
         if (defaultTicker) setTicker(normalizeTicker(defaultTicker));
     }, [defaultTicker]);
 
+    const hasExternalBsa = Array.isArray(externalBsaData) && externalBsaData.length > 0;
+    const hasExternalBidAsk = Array.isArray(externalBidAskData) && externalBidAskData.length > 0;
+
     const fetchData = useCallback(async () => {
         const cleanTicker = normalizeTicker(ticker);
         if (!cleanTicker) return;
         setLoading(true);
         try {
-            const [resBsa, resBa] = await Promise.allSettled([
-                getIntradayBSA(cleanTicker, { timeWindow: '5', tWindow: '1d', type: 'all' }),
-                getIntradayBidAsk(cleanTicker, { mode: 'baAll' }),
-            ]);
+            const promises = [];
+            const shouldFetchBsa = !hasExternalBsa;
+            const shouldFetchBidAsk = !hasExternalBidAsk;
 
-            // 1. Process BSA
-            if (resBsa.status === 'fulfilled' && resBsa.value) {
-                const val = resBsa.value;
-                const list = Array.isArray(val?.data) ? val.data : (Array.isArray(val) ? val : []);
-                setInternalBsaData(list);
+            if (shouldFetchBsa) {
+                promises.push(
+                    getIntradayBSA(cleanTicker, { timeWindow: '5', tWindow: '1d', type: 'all' })
+                        .then(res => ({ type: 'bsa', res }))
+                        .catch(err => ({ type: 'bsa', err }))
+                );
+            }
+            if (shouldFetchBidAsk) {
+                promises.push(
+                    getIntradayBidAsk(cleanTicker, { mode: 'baAll' })
+                        .then(res => ({ type: 'bidAsk', res }))
+                        .catch(err => ({ type: 'bidAsk', err }))
+                );
             }
 
-            // 2. Process Bid-Ask
-            if (resBa.status === 'fulfilled' && resBa.value) {
-                const val = resBa.value;
-                const raw = val?.data && !Array.isArray(val.data) ? val.data : val;
-                const obLog = Array.isArray(raw?.overBidAskLog)
-                    ? raw.overBidAskLog
-                    : (Array.isArray(val?.overBidAskLog) ? val.overBidAskLog : []);
-                const avgOB = Array.isArray(raw?.avgOBPercent)
-                    ? raw.avgOBPercent
-                    : (Array.isArray(val?.avgOBPercent) ? val.avgOBPercent : []);
-                const list = Array.isArray(val?.data) ? val.data : (Array.isArray(val) ? val : []);
+            const results = await Promise.all(promises);
+            results.forEach(item => {
+                if (item.type === 'bsa' && item.res) {
+                    const val = item.res;
+                    const list = Array.isArray(val?.data) ? val.data : (Array.isArray(val) ? val : []);
+                    setInternalBsaData(list);
+                }
+                if (item.type === 'bidAsk' && item.res) {
+                    const val = item.res;
+                    const raw = val?.data && !Array.isArray(val.data) ? val.data : val;
+                    const obLog = Array.isArray(raw?.overBidAskLog)
+                        ? raw.overBidAskLog
+                        : (Array.isArray(val?.overBidAskLog) ? val.overBidAskLog : []);
+                    const avgOB = Array.isArray(raw?.avgOBPercent)
+                        ? raw.avgOBPercent
+                        : (Array.isArray(val?.avgOBPercent) ? val.avgOBPercent : []);
+                    const list = Array.isArray(val?.data) ? val.data : (Array.isArray(val) ? val : []);
 
-                const unifiedMap = new Map();
-                list.forEach(i => i?.t && unifiedMap.set(String(i.t), { ...i, t: String(i.t) }));
-                obLog.forEach(i => {
-                    if (!i?.t) return;
-                    const existing = unifiedMap.get(String(i.t)) || { t: String(i.t) };
-                    unifiedMap.set(String(i.t), { ...existing, ...i, bs: Number(i.bs) || existing.bs || 0, oa: Number(i.oa) || existing.oa || 0 });
-                });
-                avgOB.forEach(i => {
-                    if (!i?.t) return;
-                    const existing = unifiedMap.get(String(i.t)) || { t: String(i.t) };
-                    unifiedMap.set(String(i.t), { ...existing, ...i });
-                });
+                    const unifiedMap = new Map();
+                    list.forEach(i => i?.t && unifiedMap.set(String(i.t), { ...i, t: String(i.t) }));
+                    obLog.forEach(i => {
+                        if (!i?.t) return;
+                        const existing = unifiedMap.get(String(i.t)) || { t: String(i.t) };
+                        const bs = Number(i.bs ?? i.bv) || existing.bs || 0;
+                        const oa = Number(i.oa ?? i.av) || existing.oa || 0;
+                        const obp = typeof i.obp === 'number' ? i.obp : existing.obp;
+                        const osp = typeof i.osp === 'number' ? i.osp : existing.osp;
+                        unifiedMap.set(String(i.t), { ...existing, ...i, bs, oa, obp, osp });
+                    });
+                    avgOB.forEach(i => {
+                        if (!i?.t) return;
+                        const existing = unifiedMap.get(String(i.t)) || { t: String(i.t) };
+                        unifiedMap.set(String(i.t), { ...existing, ...i });
+                    });
 
-                setInternalBidAskData(Array.from(unifiedMap.values()));
-            }
+                    setInternalBidAskData(Array.from(unifiedMap.values()));
+                }
+            });
 
             setLastUpdated(new Date().toLocaleTimeString('vi-VN'));
         } catch (err) {
@@ -149,36 +170,33 @@ const MarketPressureGauge = ({
         } finally {
             setLoading(false);
         }
-    }, [ticker]);
+    }, [ticker, hasExternalBsa, hasExternalBidAsk]);
 
-    // If external data is not provided, fetch internally and set interval
-    const hasExternalData = (Array.isArray(externalBsaData) && externalBsaData.length > 0) ||
-        (Array.isArray(externalBidAskData) && externalBidAskData.length > 0);
-
+    // If any external dataset is missing, fetch internally and set interval
     useEffect(() => {
-        if (!hasExternalData) {
+        if (!hasExternalBsa || !hasExternalBidAsk) {
             fetchData();
-            const interval = setInterval(fetchData, 30000);
+            const interval = setInterval(fetchData, 20000);
             return () => clearInterval(interval);
         }
-    }, [fetchData, hasExternalData]);
+    }, [fetchData, hasExternalBsa, hasExternalBidAsk]);
 
     // Effective datasets (prioritize external props from Derivation page)
     const effectiveBsa = useMemo(() => {
-        return (Array.isArray(externalBsaData) && externalBsaData.length > 0) ? externalBsaData : internalBsaData;
-    }, [externalBsaData, internalBsaData]);
+        return hasExternalBsa ? externalBsaData : internalBsaData;
+    }, [hasExternalBsa, externalBsaData, internalBsaData]);
 
     const effectiveBidAsk = useMemo(() => {
-        return (Array.isArray(externalBidAskData) && externalBidAskData.length > 0) ? externalBidAskData : internalBidAskData;
-    }, [externalBidAskData, internalBidAskData]);
+        return hasExternalBidAsk ? externalBidAskData : internalBidAskData;
+    }, [hasExternalBidAsk, externalBidAskData, internalBidAskData]);
 
     // Calculate aggregated Metrics & Gauge Position for the active session
     const metrics = useMemo(() => {
         const bsaSession = filterLatestSessionRecords(effectiveBsa);
         const bidAskSession = filterLatestSessionRecords(effectiveBidAsk);
 
-        const targetBsa = bsaSession.records;
-        const targetBidAsk = bidAskSession.records;
+        const targetBsa = (bsaSession.records && bsaSession.records.length > 0) ? bsaSession.records : effectiveBsa;
+        const targetBidAsk = (bidAskSession.records && bidAskSession.records.length > 0) ? bidAskSession.records : effectiveBidAsk;
 
         // --- 1. Market Order Pressure (BSA / Khớp Chủ Động) ---
         let totalBms = 0;
@@ -211,31 +229,64 @@ const MarketPressureGauge = ({
         // --- 2. Limit Order Pressure (Bid-Ask / Sổ Lệnh Chờ) ---
         let totalBs = 0;
         let totalOa = 0;
+        let sumObp = 0;
+        let sumOsp = 0;
+        let countObp = 0;
 
         if (targetBidAsk.length > 0) {
             targetBidAsk.forEach(item => {
-                const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv) || 0;
-                const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av) || 0;
+                const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv ?? item.bidVolume ?? item.overBid) || 0;
+                const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av ?? item.askVolume ?? item.overAsk) || 0;
                 totalBs += bs;
                 totalOa += oa;
+
+                const obp = typeof item.obp === 'number'
+                    ? item.obp
+                    : (typeof item.raw?.obp === 'number'
+                        ? item.raw.obp
+                        : (bs + oa > 0 ? bs / (bs + oa) : null));
+                const osp = typeof item.osp === 'number'
+                    ? item.osp
+                    : (typeof item.raw?.osp === 'number'
+                        ? item.raw.osp
+                        : (bs + oa > 0 ? oa / (bs + oa) : (obp !== null ? 1 - obp : null)));
+
+                if (obp !== null && !isNaN(obp)) {
+                    sumObp += obp;
+                    sumOsp += (osp !== null && !isNaN(osp) ? osp : (1 - obp));
+                    countObp++;
+                }
             });
         }
 
         const totalLimitVol = totalBs + totalOa;
-        const limitScore = totalLimitVol > 0
-            ? (totalBs - totalOa) / totalLimitVol
-            : 0;
-        const bidLimitPct = totalLimitVol > 0 ? (totalBs / totalLimitVol) * 100 : 50;
-        const askLimitPct = 100 - bidLimitPct;
+        let limitScore = 0;
+        let bidLimitPct = 50;
+        let askLimitPct = 50;
+
+        if (totalLimitVol > 0) {
+            limitScore = (totalBs - totalOa) / totalLimitVol;
+            bidLimitPct = (totalBs / totalLimitVol) * 100;
+            askLimitPct = 100 - bidLimitPct;
+        } else if (countObp > 0) {
+            const avgObp = sumObp / countObp;
+            const avgOsp = sumOsp / countObp;
+            const totalPct = avgObp + avgOsp;
+            if (totalPct > 0) {
+                bidLimitPct = (avgObp / totalPct) * 100;
+                askLimitPct = 100 - bidLimitPct;
+                limitScore = (avgObp - avgOsp) / totalPct;
+            }
+        }
 
         // --- 3. Combined Score (-1.0 to +1.0) ---
         // 55% Market Order weight + 45% Limit Order weight (or fallback if one has no data)
         let compositeScore = 0;
-        if (totalMarketVol > 0 && totalLimitVol > 0) {
+        if (totalMarketVol > 0 && (totalLimitVol > 0 || countObp > 0)) {
             compositeScore = (marketScore * 0.55) + (limitScore * 0.45);
         } else if (totalMarketVol > 0) {
             compositeScore = marketScore;
-        } else if (totalLimitVol > 0) {
+        } else if (totalLimitVol > 0 || countObp > 0) {
             compositeScore = limitScore;
         }
 
@@ -473,10 +524,10 @@ const MarketPressureGauge = ({
                         </div>
                         <div className="flex items-center justify-between text-[10px] text-gray-300">
                             <span className="text-emerald-400 font-semibold">
-                                Dư Mua: {metrics.bidLimitPct.toFixed(1)}% ({metrics.totalBs.toLocaleString()} CP)
+                                Dư Mua: {metrics.bidLimitPct.toFixed(1)}% ({metrics.totalBs > 0 ? `${metrics.totalBs.toLocaleString()} HĐ` : `${metrics.bidLimitPct.toFixed(1)}%`})
                             </span>
                             <span className="text-rose-400 font-semibold">
-                                Dư Bán: {metrics.askLimitPct.toFixed(1)}% ({metrics.totalOa.toLocaleString()} CP)
+                                Dư Bán: {metrics.askLimitPct.toFixed(1)}% ({metrics.totalOa > 0 ? `${metrics.totalOa.toLocaleString()} HĐ` : `${metrics.askLimitPct.toFixed(1)}%`})
                             </span>
                         </div>
                         <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden flex border border-gray-700/40">

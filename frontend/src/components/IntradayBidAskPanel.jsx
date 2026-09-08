@@ -19,8 +19,8 @@ const MODE_OPTIONS = [
 
 // Memoized Table Row for high performance
 const BidAskTableRow = React.memo(({ row, idx }) => {
-    const bs = Number(row.bs ?? row.bv ?? row.raw?.bs ?? row.raw?.bv) || 0;
-    const oa = Number(row.oa ?? row.av ?? row.raw?.oa ?? row.raw?.av) || 0;
+    const bs = Number(row.bs ?? row.bv ?? row.raw?.bs ?? row.raw?.bv ?? row.bidVolume ?? row.overBid) || 0;
+    const oa = Number(row.oa ?? row.av ?? row.raw?.oa ?? row.raw?.av ?? row.askVolume ?? row.overAsk) || 0;
     const diffVol = bs - oa;
     const totalVol = bs + oa;
 
@@ -44,6 +44,7 @@ const BidAskTableRow = React.memo(({ row, idx }) => {
     // avsp: Trung bình spread
     const avsp = typeof row.avsp === 'number' ? row.avsp : (typeof row.raw?.avsp === 'number' ? row.raw.avsp : 0);
 
+    const diffPct = (obp - osp) * 100;
     const ratio = osp > 0 ? (obp / osp) : (oa > 0 ? (bs / oa) : 1);
     const isBull = ratio >= 1;
 
@@ -54,25 +55,50 @@ const BidAskTableRow = React.memo(({ row, idx }) => {
             </td>
             {/* Dư Mua (bs & obp) */}
             <td className="py-1.5 px-3 text-right text-emerald-300">
-                <span className="font-semibold">{bs.toLocaleString()}</span>
-                <span className="text-[10px] text-emerald-400 font-semibold ml-1.5">
-                    ({(obp * 100).toFixed(1)}%)
-                </span>
+                {bs > 0 ? (
+                    <>
+                        <span className="font-semibold">{bs.toLocaleString()}</span>
+                        <span className="text-[10px] text-emerald-400 font-semibold ml-1.5">
+                            ({(obp * 100).toFixed(1)}%)
+                        </span>
+                    </>
+                ) : (
+                    <span className="font-semibold text-emerald-400 font-mono">
+                        {(obp * 100).toFixed(1)}%
+                    </span>
+                )}
             </td>
             {/* Dư Bán (oa & osp) */}
             <td className="py-1.5 px-3 text-right text-rose-300">
-                <span className="font-semibold">{oa.toLocaleString()}</span>
-                <span className="text-[10px] text-rose-400 font-semibold ml-1.5">
-                    ({(osp * 100).toFixed(1)}%)
-                </span>
+                {oa > 0 ? (
+                    <>
+                        <span className="font-semibold">{oa.toLocaleString()}</span>
+                        <span className="text-[10px] text-rose-400 font-semibold ml-1.5">
+                            ({(osp * 100).toFixed(1)}%)
+                        </span>
+                    </>
+                ) : (
+                    <span className="font-semibold text-rose-400 font-mono">
+                        {(osp * 100).toFixed(1)}%
+                    </span>
+                )}
             </td>
             {/* TB 5 Ngày Dư Mua (aobp) */}
             <td className="py-1.5 px-3 text-right text-amber-400 font-semibold">
                 {(aobp * 100).toFixed(1)}%
             </td>
-            {/* Chênh lệch KL (bs - oa) */}
-            <td className={`py-1.5 px-3 text-right font-bold ${diffVol >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {diffVol > 0 ? `+${diffVol.toLocaleString()}` : diffVol.toLocaleString()}
+            {/* Chênh lệch (KL / %) */}
+            <td className={`py-1.5 px-3 text-right font-bold ${diffPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {totalVol > 0 ? (
+                    <div className="flex flex-col items-end">
+                        <span>{diffVol > 0 ? `+${diffVol.toLocaleString()}` : diffVol.toLocaleString()}</span>
+                        <span className="text-[10px] font-normal opacity-85">
+                            {diffPct > 0 ? `+${diffPct.toFixed(1)}%` : `${diffPct.toFixed(1)}%`}
+                        </span>
+                    </div>
+                ) : (
+                    <span>{diffPct > 0 ? `+${diffPct.toFixed(1)}%` : `${diffPct.toFixed(1)}%`}</span>
+                )}
             </td>
             {/* Tỷ lệ Dư Mua / Dư Bán (Ratio) */}
             <td className={`py-1.5 px-3 text-right font-bold ${isBull ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -124,7 +150,7 @@ const BidAskTable = React.memo(({ bidAskData, loading, error }) => {
                                 <th className="py-2 px-3 text-right text-emerald-400">Dư Mua (bs / obp)</th>
                                 <th className="py-2 px-3 text-right text-rose-400">Dư Bán (oa / osp)</th>
                                 <th className="py-2 px-3 text-right text-amber-400">TB 5N (aobp)</th>
-                                <th className="py-2 px-3 text-right">Chênh Lệch KL</th>
+                                <th className="py-2 px-3 text-right">Chênh Lệch (KL / %)</th>
                                 <th className="py-2 px-3 text-right text-purple-300">Tỷ Lệ M/B (Ratio)</th>
                                 <th className="py-2 px-3 text-right">Spread (sp / avsp)</th>
                                 <th className="py-2 px-3 text-center w-24">Tương Quan</th>
@@ -175,8 +201,8 @@ const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '', onDa
             listFromData.forEach(item => {
                 const tStr = String(item?.t || '');
                 if (!tStr) return;
-                const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv) || 0;
-                const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av) || 0;
+                const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv ?? item.bidVolume ?? item.overBid) || 0;
+                const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av ?? item.askVolume ?? item.overAsk) || 0;
                 const totalVol = bs + oa;
                 const obp = typeof item.obp === 'number'
                     ? item.obp
@@ -206,8 +232,8 @@ const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '', onDa
                 const tStr = String(item?.t || '');
                 if (!tStr) return;
                 const existing = unifiedMap.get(tStr) || { t: tStr, s: Number(item.s) || 0, raw: {} };
-                const bs = Number(item.bs) || existing.bs || 0;
-                const oa = Number(item.oa) || existing.oa || 0;
+                const bs = Number(item.bs ?? item.bv ?? item.raw?.bs ?? item.raw?.bv ?? item.bidVolume ?? item.overBid) || existing.bs || 0;
+                const oa = Number(item.oa ?? item.av ?? item.raw?.oa ?? item.raw?.av ?? item.askVolume ?? item.overAsk) || existing.oa || 0;
                 const totalVol = bs + oa;
                 const obp = typeof item.obp === 'number'
                     ? item.obp
