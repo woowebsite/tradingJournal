@@ -4,37 +4,41 @@
 
 ## 1. Giới Thiệu & Bản Chất Chiến Lược
 
-Chiến lược **Sideway Range Donchian Strategy** được thiết kế chuyên biệt cho thị trường đi ngang (Sideway / Consolidation / Ranging Market), dựa trên nguyên lý **Mean Reversion (Hồi quy về giá trị trung bình & biên dao động)** kết hợp giữa hai chu kỳ Donchian:
-- **Donchian 20 (Chu kỳ ngắn):** Phản ánh trạng thái vị thế và động lượng cục bộ của giá.
-- **Donchian 50 (Chu kỳ dài):** Xác định khung biên độ tổng thể của vùng Sideway (Upper Band là đỉnh biên độ, Lower Band là đáy biên độ).
+Chiến lược **Sideway Range Donchian Strategy** được thiết kế chuyên biệt cho thị trường đi ngang (Sideway / Consolidation / Ranging Market), hỗ trợ 2 chế độ vào lệnh:
+1. **Donchian Basis Rebound (Hồi quy trung tâm):** Kết hợp chu kỳ Donchian 20 và Donchian 50. Mua khi Donchian 20 ở vùng đáy và giá vượt lên Basis 20; Bán khi Donchian 20 ở vùng đỉnh và giá thủng dưới Basis 20.
+2. **False Breakout Hit (Đánh ngược bẫy giá / SFP):** Đánh ngược bẫy giá khi xuất hiện phá vỡ biên Donchian 50 (Long khi Breakdown Lower 50, Short khi Breakout Upper 50).
 
 ---
 
-## 2. Quy Tắc Giao Dịch Chi Tiết
+## 2. Quy Tắc Vào Lệnh (Entry Rules)
 
-### 2.1. Quy Tắc Vào Lệnh (Entry Rules)
+### 2.1. Chế Độ 1: Donchian Basis Rebound
 
-#### A. Lệnh Mua (Long)
-1. **Trạng thái cấu trúc:** `Đường Donchian 20 (Basis) < Đường Donchian 50 (Basis)`
-   - *Ý nghĩa:* Vùng giá ngắn hạn 20 nến đang nằm lệch xuống nửa dưới của vùng tích lũy 50 nến (vùng quá bán/vùng hỗ trợ sideway).
-2. **Kích hoạt tín hiệu:** `Giá đóng cửa (Close) > Đường Donchian 20 (Basis)`
-   - *Ý nghĩa:* Giá bứt phá ngược lên trên đường trung tâm Donchian 20, xác nhận dòng tiền bắt đáy và động lực bật nảy (bounce) từ biên dưới hướng về biên trên.
-3. **Thực thi:** `strategy.entry("Long", strategy.long)`
-
-#### B. Lệnh Bán (Short)
-1. **Trạng thái cấu trúc:** `Đường Donchian 20 (Basis) > Đường Donchian 50 (Basis)`
-   - *Ý nghĩa:* Vùng giá ngắn hạn 20 nến đang nằm lệch lên nửa trên của vùng tích lũy 50 nến (vùng quá mua/vùng kháng cự sideway).
-2. **Kích hoạt tín hiệu:** `Giá đóng cửa (Close) < Đường Donchian 20 (Basis)`
-   - *Ý nghĩa:* Giá gãy xuống dưới đường trung tâm Donchian 20, xác nhận lực bán từ chối giá (rejection) từ biên trên hướng về biên dưới.
-3. **Thực thi:** `strategy.entry("Short", strategy.short)`
+- **Lệnh Long:**
+  - `Đường Donchian 20 (Basis) < Đường Donchian 50 (Basis)` (Vùng quá bán).
+  - `Giá đóng cửa (Close) > Đường Donchian 20 (Basis)` (Xác nhận lực bật nảy).
+- **Lệnh Short:**
+  - `Đường Donchian 20 (Basis) > Đường Donchian 50 (Basis)` (Vùng quá mua).
+  - `Giá đóng cửa (Close) < Đường Donchian 20 (Basis)` (Xác nhận từ chối giá).
 
 ---
 
-### 2.2. Quy Tắc Thoát Lệnh (Exit & Risk Management)
+### 2.2. Chế Độ 2: False Breakout Hit
 
-Chiến lược hỗ trợ **3 tùy chọn Chốt lời (Take Profit) độc lập** có thể bật/tắt bằng checkbox:
+- **Lệnh Mua (Long):**
+  - Kích hoạt khi giá **Breakdown Lower 50** (`Close < Lower50[1]` hoặc `Low < Lower50[1]`).
+  - **Bộ lọc độ giãn Basis (`validSpreadLong`):** Phải thỏa mãn điều kiện độ lệch giữa Basis 20 và Basis 50 theo cấu hình `spreadMode` (Auto / % / Điểm giá).
+- **Lệnh Bán (Short):**
+  - Kích hoạt khi giá **Breakout Upper 50** (`Close > Upper50[1]` hoặc `High > Upper50[1]`).
+  - **Bộ lọc độ giãn Basis (`validSpreadShort`):** Phải thỏa mãn điều kiện độ lệch giữa Basis 20 và Basis 50 theo cấu hình `spreadMode` (Auto / % / Điểm giá).
 
-| Tùy chọn Take Profit | Lệnh Long | Lệnh Short | Cơ chế thực thi |
+---
+
+## 3. Quy Tắc Thoát Lệnh (Exit & Risk Management)
+
+Toàn bộ các chế độ vào lệnh đều tuân thủ và đồng bộ theo cấu hình quản lý thoát lệnh tại **Mục 3**:
+
+| Tùy chọn Thoát lệnh | Lệnh Long | Lệnh Short | Cơ chế thực thi |
 | :--- | :--- | :--- | :--- |
 | **1. Chạm Upper50 / Lower50 (`useBandExit`)** | Giá chạm **Upper Band Donchian 50** | Giá chạm **Lower Band Donchian 50** | `strategy.exit(..., limit = target)` |
 | **2. Cross Donchian (`useCrossExit`)** | Đường **Basis 20 cắt lên Basis 50** | Đường **Basis 20 cắt xuống Basis 50** | `strategy.close(..., comment = "TP Cross DC")` |
@@ -44,25 +48,18 @@ Chiến lược hỗ trợ **3 tùy chọn Chốt lời (Take Profit) độc l�
 
 ---
 
-## 3. Tuân Thủ Ràng Buộc & Yêu Cầu
-
-1. **Không sử dụng `plotshape`:** Script không vẽ các mũi tên hoặc nhãn tín hiệu bằng `plotshape`, hoàn toàn sử dụng cơ chế lệnh chuẩn của TradingView Strategy Engine.
-2. **Hỗ trợ Backtest toàn diện:** Tích hợp đầy đủ `strategy.entry`, `strategy.exit` (hỗ trợ cả `limit` và `stop`), và `strategy.close`.
-3. **Đơn vị tiền tệ mặc định:** Đặt mặc định là **USD** (`currency = currency.USD`).
-4. **Không phụ thuộc chỉ báo ngoài:** Không dùng RSI, MACD, EMA, Volume, ATR hay bất kỳ chỉ báo ngoài nào khác, thuần túy dựa trên 2 đường Donchian 20 và 50.
-
----
-
 ## 4. Các Thông Số Cấu Hình (Inputs)
 
 | Tham số | Mặc định | Mô tả |
 | :--- | :--- | :--- |
 | `lenShort` | `20` | Chu kỳ Donchian ngắn |
 | `lenLong` | `50` | Chu kỳ Donchian dài |
+| `entryMode` | `Donchian Basis Rebound` | Chế độ vào lệnh: `Donchian Basis Rebound` hoặc `False Breakout Hit` |
+| `fbTrigger` | `Đóng cửa ngoài dải (Close Break)` | Kiểu kích hoạt FBO: `Close Break` hoặc `High/Low Break` |
 | `allowLong` | `true` | Bật/Tắt giao dịch chiều Long |
 | `allowShort` | `true` | Bật/Tắt giao dịch chiều Short |
-| `spreadMode` | `Phần trăm (%)` | Kiểu tính khoảng cách Basis: `Phần trăm (%)`, `Điểm giá (Points/Ticks)`, `Auto` (Entry tới SL < Basis 20 tới Basis 50) |
-| `minSpread` | `1.0` | Khoảng cách tối thiểu giữa Basis 20 và Basis 50 (Áp dụng khi chọn `%` hoặc `Điểm giá`) |
+| `spreadMode` | `Auto` | Cách tính khoảng cách Basis cho Rebound |
+| `minSpread` | `1.0` | Khoảng cách tối thiểu giữa Basis 20 và Basis 50 |
 | `useTimeExit` | `true` | Checkbox: Bật/Tắt TP theo thời gian (mặc định 50 nến) |
 | `exitBars` | `50` | Số nến tối đa giữ vị thế |
 | `useBandExit` | `true` | Checkbox: Bật/Tắt TP khi chạm Upper50 (Long) hoặc Lower50 (Short) |
@@ -70,17 +67,3 @@ Chiến lược hỗ trợ **3 tùy chọn Chốt lời (Take Profit) độc l�
 | `slType` | `Cố định tại thời điểm vào lệnh` | Kiểu SL: `Cố định`, `Bám theo Donchian 50 (Dynamic)`, `Bám theo Donchian 20 (Dynamic)` |
 | `slBufferTicks` | `0` | Số tick đệm an toàn ngoài dải Band |
 | `showTable` | `true` | Hiển thị bảng Dashboard thông số trực quan |
-
----
-
-## 5. Hướng Dẫn Sử Dụng Trên TradingView
-
-1. Mở TradingView và vào phần **Pine Editor** ở thanh công cụ phía dưới.
-2. Tạo mới một **Strategy Script** hoặc sao chép toàn bộ mã nguồn từ file `SidewayRangeStrategy.pine`.
-3. Nhấn **Save** và chọn **Add to chart** (Thêm vào biểu đồ).
-4. Mở tab **Strategy Tester** (Kiểm tra chiến lược) để xem các báo cáo hiệu suất:
-   - **Net Profit (Lợi nhuận ròng)**
-   - **Win Rate (Tỷ lệ thắng)**
-   - **Profit Factor (Hệ số lợi nhuận)**
-   - **Max Drawdown (Mức sụt giảm tối đa)**
-   - **Danh sách từng lệnh giao dịch (List of Trades)**
