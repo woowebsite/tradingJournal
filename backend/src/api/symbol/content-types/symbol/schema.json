@@ -94,6 +94,12 @@
       "relation": "oneToMany",
       "target": "api::investor.investor",
       "mappedBy": "symbol"
+    },
+    "strategy_templates": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::strategy-template.strategy-template",
+      "mappedBy": "symbol"
     }
   }
 }

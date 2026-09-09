@@ -103,6 +103,11 @@ export default {
         'api::market-flow.market-flow.create',
         'api::industry.industry.find',
         'api::industry.industry.findOne',
+        'api::strategy-template.strategy-template.find',
+        'api::strategy-template.strategy-template.findOne',
+        'api::strategy-template.strategy-template.create',
+        'api::strategy-template.strategy-template.update',
+        'api::strategy-template.strategy-template.delete',
     ];
 
     const rolesToGrant = ['public', 'authenticated'];

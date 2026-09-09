@@ -1122,6 +1122,44 @@ export interface ApiStockRatioStockRatio extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiStrategyTemplateStrategyTemplate
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'strategy_templates';
+  info: {
+    description: 'Saved strategy configuration templates';
+    displayName: 'StrategyTemplate';
+    pluralName: 'strategy-templates';
+    singularName: 'strategy-template';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    account: Schema.Attribute.Relation<'manyToOne', 'api::account.account'>;
+    config: Schema.Attribute.JSON;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.String;
+    isDefault: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::strategy-template.strategy-template'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    strategyFile: Schema.Attribute.String & Schema.Attribute.Required;
+    symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    symbolName: Schema.Attribute.String;
+    timeframe: Schema.Attribute.String & Schema.Attribute.DefaultTo<'D1'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
   collectionName: 'strategies';
   info: {
@@ -1292,6 +1330,10 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     stockRatio: Schema.Attribute.Relation<
       'oneToOne',
       'api::stock-ratio.stock-ratio'
+    >;
+    strategy_templates: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::strategy-template.strategy-template'
     >;
     symbol_histories: Schema.Attribute.Relation<
       'oneToMany',
@@ -2189,6 +2231,7 @@ declare module '@strapi/strapi' {
       'api::setting.setting': ApiSettingSetting;
       'api::signal.signal': ApiSignalSignal;
       'api::stock-ratio.stock-ratio': ApiStockRatioStockRatio;
+      'api::strategy-template.strategy-template': ApiStrategyTemplateStrategyTemplate;
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
       'api::symbol-technical-analysis.symbol-technical-analysis': ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis;

@@ -24,12 +24,19 @@ import {
     Award,
     Eye,
     Sparkles,
-    RotateCcw
+    RotateCcw,
+    BookmarkPlus,
+    Bookmark,
+    Trash2,
+    Save,
+    X,
+    Check
 } from 'lucide-react';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { getPythonStrategies, scanPythonStrategy, optimizePythonStrategy } from '../services/pythonStrategy';
+import { getStrategyTemplates, createStrategyTemplate, deleteStrategyTemplate } from '../services/strategyTemplate';
 import TradingViewChart from '../components/TradingViewChart';
 import { formatNumber } from '../utils/formatNumber';
 import dayjs from 'dayjs';
@@ -46,7 +53,6 @@ const PythonStrategy = () => {
     const [selectedStrategyFile, setSelectedStrategyFile] = useState('strategy_supertrend_ma288.py');
     const [selectedWatchlistId, setSelectedWatchlistId] = useState('');
     const [selectedSymbol, setSelectedSymbol] = useState('VNINDEX');
-    const [customSymbolInput, setCustomSymbolInput] = useState('');
 
     // Supertrend Strategy States
     const [riskReward, setRiskReward] = useState(1.5);
@@ -80,11 +86,39 @@ const PythonStrategy = () => {
     const [activeTab, setActiveTab] = useState('all'); // 'all', 'Open', 'Closed', 'Long', 'Short'
     const [focusDate, setFocusDate] = useState(null);
 
+    // Strategy Template States
+    const [templates, setTemplates] = useState([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [saveModalOpen, setSaveModalOpen] = useState(false);
+    const [templateNameInput, setTemplateNameInput] = useState('');
+    const [templateDescInput, setTemplateDescInput] = useState('');
+    const [savingTemplate, setSavingTemplate] = useState(false);
+
+    // Lọc Strategy Templates chỉ thuộc về Symbol đang chọn
+    const symbolTemplates = useMemo(() => {
+        if (!selectedSymbol) return [];
+        const cleanSym = String(selectedSymbol).trim().toUpperCase();
+        return templates.filter(t => {
+            const tSymName = String(t.symbolName || t.symbol?.Name || t.symbol?.name || '').trim().toUpperCase();
+            return tSymName === cleanSym;
+        });
+    }, [templates, selectedSymbol]);
+
+    // Reset selectedTemplateId khi đổi symbol nếu template đang chọn không thuộc symbol mới
+    useEffect(() => {
+        if (selectedTemplateId) {
+            const exists = symbolTemplates.some(t => String(t.id || t.documentId) === String(selectedTemplateId));
+            if (!exists) {
+                setSelectedTemplateId('');
+            }
+        }
+    }, [selectedSymbol, symbolTemplates, selectedTemplateId]);
+
     const isVWAP = useMemo(() => {
         return String(selectedStrategyFile || '').toLowerCase().includes('vwap');
     }, [selectedStrategyFile]);
 
-    // 1. Tải danh sách Watchlists, Symbols và Python Strategies
+    // 1. Tải danh sách Watchlists, Symbols, Python Strategies và Strategy Templates
     useEffect(() => {
         dispatch(fetchWatchlists());
         dispatch(fetchSymbols());
@@ -96,7 +130,18 @@ const PythonStrategy = () => {
                 setSelectedStrategyFile(files[0].fileName);
             }
         };
+
+        const loadTemplates = async () => {
+            try {
+                const data = await getStrategyTemplates();
+                setTemplates(data || []);
+            } catch (err) {
+                console.error('Failed to load strategy templates:', err);
+            }
+        };
+
         loadStrategies();
+        loadTemplates();
     }, [dispatch]);
 
     // 2. Lọc Watchlists theo Account hiện tại
@@ -143,14 +188,13 @@ const PythonStrategy = () => {
             const currentSelectedInList = watchlistSymbols.includes(selectedSymbol);
             if (!currentSelectedInList) {
                 setSelectedSymbol(watchlistSymbols[0]);
-                setCustomSymbolInput('');
             }
         }
     }, [watchlistSymbols, selectedSymbol]);
 
     // 4. Hàm thực hiện Scan Signal qua Python Backend
     const handleScan = useCallback(async (tickerToScan = null, customCountback = null, customTimeframe = null) => {
-        const ticker = String(tickerToScan || customSymbolInput || selectedSymbol || 'VNINDEX').trim().toUpperCase();
+        const ticker = String(tickerToScan || selectedSymbol || 'VNINDEX').trim().toUpperCase();
         const currentTf = String(customTimeframe || timeframe || 'D1').trim().toUpperCase();
         if (!ticker) return;
 
@@ -217,7 +261,7 @@ const PythonStrategy = () => {
         } finally {
             setScanning(false);
         }
-    }, [customSymbolInput, selectedSymbol, allowLong, allowShort, isVWAP, tpSupertrend, tpRR, countback, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, riskReward, entryType, stPeriod, stMultiplier, maPeriod]);
+    }, [selectedSymbol, allowLong, allowShort, isVWAP, tpSupertrend, tpRR, countback, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, riskReward, entryType, stPeriod, stMultiplier, maPeriod]);
 
     // 4.1 Hàm cuộn sang trái tải thêm nến lịch sử (Infinite Scroll)
     const handleLoadMore = useCallback(async () => {
@@ -233,7 +277,7 @@ const PythonStrategy = () => {
 
         setLoadingMore(true);
         try {
-            const ticker = String(selectedSymbol || customSymbolInput || 'VNINDEX').trim().toUpperCase();
+            const ticker = String(selectedSymbol || 'VNINDEX').trim().toUpperCase();
             const payload = isVWAP ? {
                 strategyFile: selectedStrategyFile,
                 ticker,
@@ -275,11 +319,11 @@ const PythonStrategy = () => {
         } finally {
             setLoadingMore(false);
         }
-    }, [scanning, optimizing, loadingMore, hasMore, countback, scanResult, selectedSymbol, customSymbolInput, isVWAP, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, allowLong, allowShort, riskReward, entryType, stPeriod, stMultiplier, maPeriod, tpSupertrend, tpRR]);
+    }, [scanning, optimizing, loadingMore, hasMore, countback, scanResult, selectedSymbol, isVWAP, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, allowLong, allowShort, riskReward, entryType, stPeriod, stMultiplier, maPeriod, tpSupertrend, tpRR]);
 
     // 4.2 Hàm tối ưu hóa tham số (Best Params Optimizer)
     const handleOptimize = useCallback(async (tickerToOptimize) => {
-        const ticker = String(tickerToOptimize || customSymbolInput || selectedSymbol || 'VNINDEX').trim().toUpperCase();
+        const ticker = String(tickerToOptimize || selectedSymbol || 'VNINDEX').trim().toUpperCase();
         if (!ticker) return;
 
         if (!allowLong && !allowShort) {
@@ -338,14 +382,14 @@ const PythonStrategy = () => {
         } finally {
             setOptimizing(false);
         }
-    }, [customSymbolInput, selectedStrategyFile, selectedSymbol, allowLong, allowShort, isVWAP, timeframe, vwapAnchor]);
+    }, [selectedStrategyFile, selectedSymbol, allowLong, allowShort, isVWAP, timeframe, vwapAnchor]);
 
     // 4.2 Hàm reset các thông số về mặc định (Default)
     const handleResetDefault = useCallback(() => {
         setBestInfo(null);
         setErrorMessage('');
 
-        const ticker = String(customSymbolInput || selectedSymbol || 'VNINDEX').trim().toUpperCase();
+        const ticker = String(selectedSymbol || 'VNINDEX').trim().toUpperCase();
 
         if (isVWAP) {
             const defaultVWAP = {
@@ -437,7 +481,139 @@ const PythonStrategy = () => {
                     .finally(() => setScanning(false));
             }
         }
-    }, [customSymbolInput, selectedSymbol, selectedStrategyFile, isVWAP]);
+    }, [selectedSymbol, selectedStrategyFile, isVWAP]);
+
+    // 4.3 Template Handlers: Select, Save, Delete
+    const handleSelectTemplate = (templateId) => {
+        setSelectedTemplateId(templateId);
+        if (!templateId) return;
+        const tpl = templates.find(t => String(t.id || t.documentId) === String(templateId));
+        if (!tpl) return;
+
+        if (tpl.strategyFile && tpl.strategyFile !== selectedStrategyFile) {
+            setSelectedStrategyFile(tpl.strategyFile);
+        }
+        const targetTf = tpl.timeframe || timeframe;
+        if (tpl.timeframe) {
+            setTimeframe(tpl.timeframe);
+        }
+
+        const cfg = tpl.config || {};
+        const isTargetVWAP = (tpl.strategyFile || selectedStrategyFile || '').toLowerCase().includes('vwap');
+
+        if (isTargetVWAP) {
+            if (cfg.vwapMaPeriod !== undefined) setVwapMaPeriod(cfg.vwapMaPeriod);
+            if (cfg.vwapAnchor !== undefined) setVwapAnchor(cfg.vwapAnchor);
+            if (cfg.vwapTpTarget !== undefined) setVwapTpTarget(cfg.vwapTpTarget);
+            if (cfg.mult1 !== undefined) setMult1(cfg.mult1);
+            if (cfg.mult2 !== undefined) setMult2(cfg.mult2);
+            if (cfg.mult3 !== undefined) setMult3(cfg.mult3);
+        } else {
+            if (cfg.riskReward !== undefined) setRiskReward(cfg.riskReward);
+            if (cfg.entryType !== undefined) setEntryType(cfg.entryType);
+            if (cfg.stPeriod !== undefined) setStPeriod(cfg.stPeriod);
+            if (cfg.stMultiplier !== undefined) setStMultiplier(cfg.stMultiplier);
+            if (cfg.maPeriod !== undefined) setMaPeriod(cfg.maPeriod);
+            if (cfg.tpSupertrend !== undefined) setTpSupertrend(cfg.tpSupertrend);
+            if (cfg.tpRR !== undefined) setTpRR(cfg.tpRR);
+        }
+
+        if (cfg.allowLong !== undefined) setAllowLong(cfg.allowLong);
+        if (cfg.allowShort !== undefined) setAllowShort(cfg.allowShort);
+        const reqCount = cfg.countback || countback || 1000;
+        setCountback(reqCount);
+        setBestInfo(null);
+        setHasMore(true);
+
+        handleScan(selectedSymbol, reqCount, targetTf);
+    };
+
+    const handleOpenSaveModal = () => {
+        const defaultName = isVWAP
+            ? `${selectedSymbol} - VWAP MA${vwapMaPeriod} ${vwapAnchor.toUpperCase()} (${timeframe})`
+            : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
+        setTemplateNameInput(defaultName);
+        setTemplateDescInput('');
+        setSaveModalOpen(true);
+    };
+
+    const handleSaveTemplate = async (e) => {
+        if (e) e.preventDefault();
+        const name = templateNameInput.trim();
+        if (!name) return;
+
+        setSavingTemplate(true);
+        try {
+            const config = isVWAP ? {
+                vwapMaPeriod: parseInt(vwapMaPeriod) || 9,
+                vwapAnchor,
+                vwapTpTarget,
+                mult1: parseFloat(mult1) || 1.0,
+                mult2: parseFloat(mult2) || 2.0,
+                mult3: parseFloat(mult3) || 3.0,
+                allowLong,
+                allowShort,
+                countback,
+            } : {
+                riskReward: parseFloat(riskReward) || 1.5,
+                entryType,
+                stPeriod: parseInt(stPeriod) || 10,
+                stMultiplier: parseFloat(stMultiplier) || 3.0,
+                maPeriod: parseInt(maPeriod) || 288,
+                tpSupertrend,
+                tpRR,
+                allowLong,
+                allowShort,
+                countback,
+            };
+
+            const currentSymObj = symbols.find(s => String(s.Name || s.name || '').trim().toUpperCase() === String(selectedSymbol).trim().toUpperCase());
+
+            const payload = {
+                name,
+                description: templateDescInput.trim(),
+                strategyFile: selectedStrategyFile,
+                timeframe,
+                config,
+                symbol: currentSymObj?.id || currentSymObj?.documentId || null,
+                symbolName: selectedSymbol,
+                account: selectedAccount?.id || selectedAccount?.documentId || null,
+            };
+
+            const created = await createStrategyTemplate(payload);
+            const updatedTemplates = await getStrategyTemplates();
+            setTemplates(updatedTemplates);
+            if (created?.id || created?.documentId) {
+                setSelectedTemplateId(String(created.id || created.documentId));
+            }
+            setSaveModalOpen(false);
+            setTemplateNameInput('');
+            setTemplateDescInput('');
+        } catch (err) {
+            console.error('Failed to save strategy template:', err);
+            const errDetail = err?.response?.data?.error?.message || err?.message || 'Không thể lưu template chiến lược.';
+            setErrorMessage(typeof errDetail === 'object' ? JSON.stringify(errDetail) : String(errDetail));
+        } finally {
+            setSavingTemplate(false);
+        }
+    };
+
+    const handleDeleteTemplate = async (templateId, e) => {
+        if (e) e.stopPropagation();
+        if (!templateId) return;
+        if (!window.confirm('Bạn có chắc chắn muốn xóa template chiến lược này?')) return;
+
+        try {
+            await deleteStrategyTemplate(templateId);
+            const updated = await getStrategyTemplates();
+            setTemplates(updated);
+            if (String(selectedTemplateId) === String(templateId)) {
+                setSelectedTemplateId('');
+            }
+        } catch (err) {
+            console.error('Failed to delete template:', err);
+        }
+    };
 
     // Khi đổi file chiến lược, tự động scan lại với chiến lược mới
     const handleStrategyChange = (newFileName) => {
@@ -626,7 +802,7 @@ const PythonStrategy = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3.5 items-end">
                     {/* Dropdown: WatchLists của Account */}
-                    <div className="lg:col-span-4 space-y-1.5">
+                    <div className="lg:col-span-3 space-y-1.5">
                         <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                             <Layers size={14} className="text-blue-400" />
                             Account Watchlist
@@ -649,7 +825,6 @@ const PythonStrategy = () => {
                                 }
                                 if (firstSym) {
                                     setSelectedSymbol(firstSym);
-                                    setCustomSymbolInput('');
                                     setBestInfo(null);
                                     setCountback(1000);
                                     setHasMore(true);
@@ -667,49 +842,75 @@ const PythonStrategy = () => {
                         </select>
                     </div>
 
-                    {/* Dropdown: Symbol trong Watchlist & Gõ nhanh */}
-                    <div className="lg:col-span-5 space-y-1.5">
+                    {/* Dropdown: Symbol trong Watchlist */}
+                    <div className="lg:col-span-3 space-y-1.5">
                         <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                             <ListFilter size={14} className="text-emerald-400" />
                             Symbol trong Watchlist
                         </label>
-                        <div className="flex gap-2">
-                            <select
-                                value={selectedSymbol}
-                                onChange={(e) => {
-                                    const newSym = e.target.value;
-                                    setSelectedSymbol(newSym);
-                                    setCustomSymbolInput('');
-                                    setBestInfo(null);
-                                    setCountback(1000);
-                                    setHasMore(true);
-                                    handleScan(newSym, 1000, timeframe);
-                                }}
-                                className="flex-1 bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-semibold uppercase"
-                            >
-                                {watchlistSymbols.map((sym, idx) => (
-                                    <option key={`${sym}-${idx}`} value={sym}>
-                                        {sym}
-                                    </option>
-                                ))}
-                            </select>
+                        <select
+                            value={selectedSymbol}
+                            onChange={(e) => {
+                                const newSym = e.target.value;
+                                setSelectedSymbol(newSym);
+                                setBestInfo(null);
+                                setCountback(1000);
+                                setHasMore(true);
+                                handleScan(newSym, 1000, timeframe);
+                            }}
+                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-semibold uppercase"
+                        >
+                            {watchlistSymbols.map((sym, idx) => (
+                                <option key={`${sym}-${idx}`} value={sym}>
+                                    {sym}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
-                            {/* Tùy chọn nhập Symbol nhanh */}
-                            <div className="relative w-32 sm:w-40">
-                                <input
-                                    type="text"
-                                    placeholder="Hoặc gõ..."
-                                    value={customSymbolInput}
-                                    onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleScan(customSymbolInput, 1000, timeframe)}
-                                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-2.5 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-semibold uppercase"
-                                />
-                            </div>
+                    {/* Dropdown: Strategy Template */}
+                    <div className="lg:col-span-4 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                <Bookmark size={14} className="text-cyan-400" />
+                                Strategy Template ({selectedSymbol})
+                            </label>
+                            {selectedTemplateId && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => handleDeleteTemplate(selectedTemplateId, e)}
+                                    title="Xóa template đã chọn"
+                                    className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition cursor-pointer"
+                                >
+                                    <Trash2 size={12} />
+                                    <span>Xóa</span>
+                                </button>
+                            )}
                         </div>
+                        <select
+                            value={selectedTemplateId}
+                            onChange={(e) => handleSelectTemplate(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition cursor-pointer font-medium"
+                        >
+                            <option value="">
+                                {symbolTemplates.length > 0
+                                    ? `-- Chọn Template của ${selectedSymbol} (${symbolTemplates.length}) --`
+                                    : `-- Chưa có Template (${selectedSymbol}) --`}
+                            </option>
+                            {symbolTemplates.map(tpl => {
+                                const tplId = String(tpl.id || tpl.documentId);
+                                const stratShortName = String(tpl.strategyFile || '').replace('strategy_', '').replace('.py', '');
+                                return (
+                                    <option key={tplId} value={tplId}>
+                                        {tpl.name} ({stratShortName} - {tpl.timeframe || 'D1'})
+                                    </option>
+                                );
+                            })}
+                        </select>
                     </div>
 
                     {/* Dropdown: Timeframe */}
-                    <div className="lg:col-span-3 space-y-1.5">
+                    <div className="lg:col-span-2 space-y-1.5">
                         <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                             <Clock size={14} className="text-amber-400" />
                             Timeframe
@@ -1232,9 +1433,20 @@ const PythonStrategy = () => {
                             <span>Default</span>
                         </button>
 
+                        {/* Button Save Config - Lưu cấu hình thành template */}
+                        <button
+                            onClick={handleOpenSaveModal}
+                            disabled={scanning || optimizing}
+                            title="Lưu cấu hình hiện tại thành Strategy Template vào Strapi"
+                            className="h-[42px] bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 hover:text-white border border-cyan-500/40 hover:border-cyan-500 active:scale-[0.98] font-semibold rounded-xl px-3.5 sm:px-4 flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
+                        >
+                            <BookmarkPlus size={15} className="text-cyan-400" />
+                            <span>Save Config</span>
+                        </button>
+
                         {/* Button Optimize - Tìm tham số có Profit Factor cao nhất */}
                         <button
-                            onClick={() => handleOptimize(customSymbolInput || selectedSymbol)}
+                            onClick={() => handleOptimize(selectedSymbol)}
                             disabled={scanning || optimizing}
                             title="Tự động tìm bộ tham số mang lại Profit Factor cao nhất"
                             className="h-[42px] bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-white font-bold rounded-xl px-4 sm:px-5 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
@@ -1254,7 +1466,7 @@ const PythonStrategy = () => {
 
                         {/* Button Run Scan */}
                         <button
-                            onClick={() => handleScan(customSymbolInput || selectedSymbol)}
+                            onClick={() => handleScan(selectedSymbol)}
                             disabled={scanning || optimizing}
                             className="h-[42px] bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 active:scale-[0.98] text-white font-semibold rounded-xl px-5 sm:px-6 flex items-center justify-center gap-2 shadow-lg shadow-purple-600/25 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
                         >
@@ -1662,6 +1874,102 @@ const PythonStrategy = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Modal Save Strategy Template */}
+            {saveModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5">
+                        <div className="flex items-center justify-between border-b border-gray-700 pb-3">
+                            <div className="flex items-center gap-2">
+                                <BookmarkPlus size={20} className="text-cyan-400" />
+                                <h3 className="text-base font-bold text-gray-100">Lưu Strategy Template</h3>
+                            </div>
+                            <button
+                                onClick={() => setSaveModalOpen(false)}
+                                className="text-gray-400 hover:text-gray-200 p-1 rounded-lg transition cursor-pointer"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSaveTemplate} className="space-y-4">
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-gray-300">Tên Template *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="VD: VWAP M5 Scalp hoặc Supertrend H4 Trend"
+                                    value={templateNameInput}
+                                    onChange={(e) => setTemplateNameInput(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 font-medium"
+                                    autoFocus
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-gray-300">Mô tả (tùy chọn)</label>
+                                <textarea
+                                    rows={2}
+                                    placeholder="Ghi chú về thiết lập tham số hoặc thị trường áp dụng..."
+                                    value={templateDescInput}
+                                    onChange={(e) => setTemplateDescInput(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                />
+                            </div>
+
+                            <div className="bg-gray-900/80 rounded-xl p-3 border border-gray-700/50 space-y-1 text-xs text-gray-400">
+                                <div className="flex justify-between">
+                                    <span>Symbol:</span>
+                                    <span className="text-emerald-400 font-bold font-mono">{selectedSymbol}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Chiến lược:</span>
+                                    <span className="text-gray-200 font-semibold">{selectedStrategyFile}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Timeframe:</span>
+                                    <span className="text-amber-400 font-semibold">{timeframe}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Cấu hình:</span>
+                                    <span className="text-gray-300 font-mono text-[11px] truncate max-w-[210px]">
+                                        {isVWAP
+                                            ? `MA${vwapMaPeriod} | ${vwapAnchor.toUpperCase()} | ${vwapTpTarget}`
+                                            : `ST(${stPeriod}, ${stMultiplier}) | MA${maPeriod} | RR ${riskReward}`}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2.5 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setSaveModalOpen(false)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl text-sm font-semibold transition cursor-pointer"
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={savingTemplate || !templateNameInput.trim()}
+                                    className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-cyan-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+                                >
+                                    {savingTemplate ? (
+                                        <>
+                                            <RefreshCw size={14} className="animate-spin" />
+                                            <span>Đang lưu...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Save size={14} />
+                                            <span>Lưu Template</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
