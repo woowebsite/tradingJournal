@@ -24,6 +24,7 @@ export const getPythonStrategies = async () => {
 export const scanPythonStrategy = async ({
     strategyFile = 'strategy_supertrend_ma288.py',
     ticker = 'VNINDEX',
+    timeframe = 'D1',
     countback = 500,
     rr = 1.5,
     entryType = 'candle_close',
@@ -34,11 +35,17 @@ export const scanPythonStrategy = async ({
     tpRR = true,
     allowLong = true,
     allowShort = true,
+    vwapAnchor = 'year',
+    mult1 = 1.0,
+    mult2 = 2.0,
+    mult3 = 3.0,
+    tpTarget = 'tp1_vwap',
 } = {}) => {
     try {
         const response = await api.post('/python-strategies/scan', {
             strategyFile,
             ticker: String(ticker).trim().toUpperCase(),
+            timeframe: String(timeframe || 'D1').trim().toUpperCase(),
             countback,
             rr,
             entryType,
@@ -49,6 +56,11 @@ export const scanPythonStrategy = async ({
             tpRR,
             allowLong,
             allowShort,
+            vwapAnchor,
+            mult1,
+            mult2,
+            mult3,
+            tpTarget,
         });
         return response.data?.data || null;
     } catch (error) {
@@ -63,17 +75,21 @@ export const scanPythonStrategy = async ({
 export const optimizePythonStrategy = async ({
     strategyFile = 'strategy_supertrend_ma288.py',
     ticker = 'VNINDEX',
+    timeframe = 'D1',
     countback = 500,
     allowLong = true,
     allowShort = true,
+    vwapAnchor = 'year',
 } = {}) => {
     try {
         const response = await api.post('/python-strategies/optimize', {
             strategyFile,
             ticker: String(ticker).trim().toUpperCase(),
+            timeframe: String(timeframe || 'D1').trim().toUpperCase(),
             countback,
             allowLong,
             allowShort,
+            vwapAnchor,
         });
         return response.data?.data || null;
     } catch (error) {
@@ -81,4 +97,5 @@ export const optimizePythonStrategy = async ({
         throw error;
     }
 };
+
 

@@ -31,7 +31,7 @@ export const calculateIchimoku = (
         const conversionValue = midpoint(data, index, conversionPeriod);
         const baseValue = midpoint(data, index, basePeriod);
         const spanBValue = midpoint(data, index, spanBPeriod);
-        const time = String(candle.time || candle.date || '').split('T')[0];
+        const time = candle.time !== undefined ? candle.time : (candle._timeKey !== undefined ? candle._timeKey : (candle.date ? String(candle.date).split('T')[0] : ''));
 
         if (conversionValue != null) conversion.push({ time, value: conversionValue });
         if (baseValue != null) base.push({ time, value: baseValue });
@@ -39,14 +39,16 @@ export const calculateIchimoku = (
         // Senkou spans are plotted displacement periods ahead of their source candle.
         const displacedCandle = data[index + displacement];
         if (displacedCandle && conversionValue != null && baseValue != null) {
+            const displacedTime = displacedCandle.time !== undefined ? displacedCandle.time : (displacedCandle._timeKey !== undefined ? displacedCandle._timeKey : (displacedCandle.date ? String(displacedCandle.date).split('T')[0] : ''));
             spanA.push({
-                time: String(displacedCandle.time || displacedCandle.date || '').split('T')[0],
+                time: displacedTime,
                 value: (conversionValue + baseValue) / 2,
             });
         }
         if (displacedCandle && spanBValue != null) {
+            const displacedTime = displacedCandle.time !== undefined ? displacedCandle.time : (displacedCandle._timeKey !== undefined ? displacedCandle._timeKey : (displacedCandle.date ? String(displacedCandle.date).split('T')[0] : ''));
             spanB.push({
-                time: String(displacedCandle.time || displacedCandle.date || '').split('T')[0],
+                time: displacedTime,
                 value: spanBValue,
             });
         }

@@ -67,8 +67,17 @@ export default {
         allow_long,
         allowShort,
         allow_short,
+        vwapAnchor,
+        vwap_anchor,
+        mult1,
+        mult2,
+        mult3,
+        tpTarget,
+        tp_target,
+        timeframe = 'D1',
       } = ctx.request.body || {};
       
+      const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
       const cleanEntryType = entry_type || entryType || 'candle_close';
       const cleanStPeriod = st_period || stPeriod || supertrend_period || supertrendPeriod || 10;
       const cleanStMultiplier = st_multiplier || stMultiplier || supertrend_multiplier || supertrendMultiplier || 3.0;
@@ -92,17 +101,54 @@ export default {
 
       const pythonExe = process.env.PYTHON_PATH || 'python';
       const cleanTicker = String(ticker || 'VNINDEX').trim().toUpperCase();
+      const isVWAP = safeFileName.toLowerCase().includes('vwap');
+
       const args = [
         fullScriptPath,
         '--ticker', cleanTicker,
+        '--timeframe', cleanTimeframe,
         '--json',
         '--countback', String(countback),
-        '--rr', String(rr),
-        '--entry-type', String(cleanEntryType),
-        '--st-period', String(cleanStPeriod),
-        '--st-multiplier', String(cleanStMultiplier),
-        '--ma-period', String(cleanMaPeriod)
       ];
+
+      if (isVWAP) {
+        const cleanVwapMa = ma_period || maPeriod || 9;
+        const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
+        const cleanMult1 = mult1 !== undefined ? mult1 : 1.0;
+        const cleanMult2 = mult2 !== undefined ? mult2 : 2.0;
+        const cleanMult3 = mult3 !== undefined ? mult3 : 3.0;
+        const cleanTpTarget = tp_target || tpTarget || 'tp1_vwap';
+
+        args.push(
+          '--ma-period', String(cleanVwapMa),
+          '--vwap-anchor', String(cleanVwapAnchor),
+          '--mult1', String(cleanMult1),
+          '--mult2', String(cleanMult2),
+          '--mult3', String(cleanMult3),
+          '--tp-target', String(cleanTpTarget)
+        );
+      } else {
+        args.push(
+          '--rr', String(rr),
+          '--entry-type', String(cleanEntryType),
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--ma-period', String(cleanMaPeriod)
+        );
+
+        // Thêm flags chốt lời theo lựa chọn từ Frontend
+        if (isTpSupertrend === false || isTpSupertrend === 'false' || isTpSupertrend === 0) {
+          args.push('--no-tp-supertrend');
+        } else {
+          args.push('--tp-supertrend');
+        }
+
+        if (isTpRR === false || isTpRR === 'false' || isTpRR === 0) {
+          args.push('--no-tp-rr');
+        } else {
+          args.push('--tp-rr');
+        }
+      }
 
       // Thêm flags loại lệnh (Long / Short)
       if (isAllowLong === false || isAllowLong === 'false' || isAllowLong === 0) {
@@ -117,25 +163,14 @@ export default {
         args.push('--allow-short');
       }
 
-      // Thêm flags chốt lời theo lựa chọn từ Frontend
-      if (isTpSupertrend === false || isTpSupertrend === 'false' || isTpSupertrend === 0) {
-        args.push('--no-tp-supertrend');
-      } else {
-        args.push('--tp-supertrend');
-      }
-
-      if (isTpRR === false || isTpRR === 'false' || isTpRR === 0) {
-        args.push('--no-tp-rr');
-      } else {
-        args.push('--tp-rr');
-      }
-
       const { stdout, stderr } = await execFileAsync(pythonExe, args, {
-        maxBuffer: 1024 * 1024 * 15,
-        timeout: 30000,
+        maxBuffer: 1024 * 1024 * 20,
+        timeout: 45000,
         env: {
           ...process.env,
           PYTHONIOENCODING: 'utf-8',
+          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
+          STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
         },
       });
 
@@ -155,7 +190,9 @@ export default {
       const parsed = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
       return ctx.send({ data: parsed });
     } catch (error: any) {
-      return ctx.internalServerError(`Scan failed: ${error?.message || error}`);
+      const errDetail = error?.stderr || error?.stdout || error?.message || String(error);
+      console.error('Python Strategy Scan Error:', errDetail);
+      return ctx.badRequest(`Scan failed: ${errDetail}`);
     }
   },
 
@@ -164,13 +201,17 @@ export default {
       const {
         strategyFile = 'strategy_supertrend_ma288.py',
         ticker = 'VNINDEX',
-        countback = 500,
+        countback = 50000,
         allowLong,
         allow_long,
         allowShort,
         allow_short,
+        timeframe = 'D1',
+        vwapAnchor,
+        vwap_anchor,
       } = ctx.request.body || {};
 
+      const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
       const isAllowLong = allowLong !== undefined ? allowLong : (allow_long !== undefined ? allow_long : true);
       const isAllowShort = allowShort !== undefined ? allowShort : (allow_short !== undefined ? allow_short : true);
 
@@ -188,13 +229,21 @@ export default {
 
       const pythonExe = process.env.PYTHON_PATH || 'python';
       const cleanTicker = String(ticker || 'VNINDEX').trim().toUpperCase();
+      const isVWAP = safeFileName.toLowerCase().includes('vwap');
+
       const args = [
         fullScriptPath,
         '--ticker', cleanTicker,
+        '--timeframe', cleanTimeframe,
         '--json',
         '--optimize',
         '--countback', String(countback),
       ];
+
+      if (isVWAP) {
+        const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
+        args.push('--vwap-anchor', String(cleanVwapAnchor));
+      }
 
       // Thêm flags loại lệnh (Long / Short)
       if (isAllowLong === false || isAllowLong === 'false' || isAllowLong === 0) {
@@ -210,11 +259,13 @@ export default {
       }
 
       const { stdout, stderr } = await execFileAsync(pythonExe, args, {
-        maxBuffer: 1024 * 1024 * 20,
-        timeout: 60000,
+        maxBuffer: 1024 * 1024 * 30,
+        timeout: 90000,
         env: {
           ...process.env,
           PYTHONIOENCODING: 'utf-8',
+          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
+          STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
         },
       });
 
@@ -234,7 +285,9 @@ export default {
       const parsed = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
       return ctx.send({ data: parsed });
     } catch (error: any) {
-      return ctx.internalServerError(`Optimization failed: ${error?.message || error}`);
+      const errDetail = error?.stderr || error?.stdout || error?.message || String(error);
+      console.error('Python Strategy Optimize Error:', errDetail);
+      return ctx.badRequest(`Optimization failed: ${errDetail}`);
     }
   },
 };

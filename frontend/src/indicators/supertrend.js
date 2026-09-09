@@ -12,11 +12,11 @@ export const calculateSupertrend = (period, multiplier, data) => {
     const direction = new Array(length); // 1 for up, -1 for down
 
     // 1. Calculate TR
-    tr[0] = data[0].high - data[0].low;
+    tr[0] = Number(data[0].high) - Number(data[0].low);
     for (let i = 1; i < length; i++) {
-        const hl = data[i].high - data[i].low;
-        const hc = Math.abs(data[i].high - data[i - 1].close);
-        const lc = Math.abs(data[i].low - data[i - 1].close);
+        const hl = Number(data[i].high) - Number(data[i].low);
+        const hc = Math.abs(Number(data[i].high) - Number(data[i - 1].close));
+        const lc = Math.abs(Number(data[i].low) - Number(data[i - 1].close));
         tr[i] = Math.max(hl, hc, lc);
     }
 
@@ -48,7 +48,7 @@ export const calculateSupertrend = (period, multiplier, data) => {
 
     // 3. Calculate Bands and Supertrend
     for (let i = 0; i < length; i++) {
-        const src = (data[i].high + data[i].low) / 2;
+        const src = (Number(data[i].high) + Number(data[i].low)) / 2;
         basicUpper[i] = src + multiplier * atr[i];
         basicLower[i] = src - multiplier * atr[i];
     }
@@ -60,7 +60,7 @@ export const calculateSupertrend = (period, multiplier, data) => {
     direction[0] = -1;
 
     for (let i = 1; i < length; i++) {
-        const prevClose = data[i - 1].close;
+        const prevClose = Number(data[i - 1].close);
 
         // Final Upper Band
         if (basicUpper[i] < finalUpper[i - 1] || prevClose > finalUpper[i - 1]) {
@@ -77,8 +77,9 @@ export const calculateSupertrend = (period, multiplier, data) => {
         }
 
         // Supertrend direction and value
+        const currentClose = Number(data[i].close);
         if (supertrend[i - 1] === finalUpper[i - 1]) {
-            if (data[i].close > finalUpper[i]) {
+            if (currentClose > finalUpper[i]) {
                 supertrend[i] = finalLower[i];
                 direction[i] = 1;
             } else {
@@ -86,7 +87,7 @@ export const calculateSupertrend = (period, multiplier, data) => {
                 direction[i] = -1;
             }
         } else {
-            if (data[i].close < finalLower[i]) {
+            if (currentClose < finalLower[i]) {
                 supertrend[i] = finalUpper[i];
                 direction[i] = -1;
             } else {
@@ -96,11 +97,15 @@ export const calculateSupertrend = (period, multiplier, data) => {
         }
     }
 
-    return supertrend.map((val, idx) => ({
-        time: data[idx].time || data[idx].date,
-        value: +val.toFixed(2),
-        direction: direction[idx]
-    }));
+    return supertrend.map((val, idx) => {
+        const item = data[idx];
+        const timeVal = item.time !== undefined ? item.time : (item._timeKey !== undefined ? item._timeKey : (item.date || item.tradingDate));
+        return {
+            time: timeVal,
+            value: +val.toFixed(2),
+            direction: direction[idx]
+        };
+    });
 };
 
 export const drawSupertrend = (chart, LineSeries, supertrendData, options = {}) => {
@@ -111,9 +116,17 @@ export const drawSupertrend = (chart, LineSeries, supertrendData, options = {}) 
         const item = supertrendData[i];
         if (!item || item.value === undefined || item.value === null) continue;
 
-        const formattedTime = typeof item.time === 'number'
-            ? item.time
-            : (typeof item.time === 'string' && item.time.includes('T') ? item.time.split('T')[0] : item.time);
+        let formattedTime = item.time;
+        if (typeof formattedTime === 'string' && formattedTime.includes('T')) {
+            if (formattedTime.endsWith('T00:00:00.000Z') || formattedTime.endsWith('T00:00:00Z')) {
+                formattedTime = formattedTime.split('T')[0];
+            } else {
+                const dt = new Date(formattedTime);
+                if (!isNaN(dt.getTime())) {
+                    formattedTime = Math.floor(dt.getTime() / 1000);
+                }
+            }
+        }
 
         if (!currentSegment) {
             currentSegment = {

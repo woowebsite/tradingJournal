@@ -47,15 +47,31 @@ const PythonStrategy = () => {
     const [selectedWatchlistId, setSelectedWatchlistId] = useState('');
     const [selectedSymbol, setSelectedSymbol] = useState('VNINDEX');
     const [customSymbolInput, setCustomSymbolInput] = useState('');
+
+    // Supertrend Strategy States
     const [riskReward, setRiskReward] = useState(1.5);
     const [entryType, setEntryType] = useState('candle_close'); // 'candle_close' | 'st_reversal'
     const [stPeriod, setStPeriod] = useState(10);
     const [stMultiplier, setStMultiplier] = useState(3.0);
     const [maPeriod, setMaPeriod] = useState(288);
-    const [allowLong, setAllowLong] = useState(true);
-    const [allowShort, setAllowShort] = useState(true);
     const [tpSupertrend, setTpSupertrend] = useState(true);
     const [tpRR, setTpRR] = useState(true);
+
+    // VWAP + MA9 Strategy States
+    const [vwapMaPeriod, setVwapMaPeriod] = useState(9);
+    const [vwapAnchor, setVwapAnchor] = useState('year');
+    const [vwapTpTarget, setVwapTpTarget] = useState('tp1_vwap'); // 'tp1_vwap' | 'tp2_upper2' | 'tp3_upper3'
+    const [mult1, setMult1] = useState(1.0);
+    const [mult2, setMult2] = useState(2.0);
+    const [mult3, setMult3] = useState(3.0);
+
+    // Common States
+    const [timeframe, setTimeframe] = useState('D1');
+    const [countback, setCountback] = useState(1000);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const [allowLong, setAllowLong] = useState(true);
+    const [allowShort, setAllowShort] = useState(true);
     const [scanning, setScanning] = useState(false);
     const [optimizing, setOptimizing] = useState(false);
     const [bestInfo, setBestInfo] = useState(null);
@@ -63,6 +79,10 @@ const PythonStrategy = () => {
     const [errorMessage, setErrorMessage] = useState('');
     const [activeTab, setActiveTab] = useState('all'); // 'all', 'Open', 'Closed', 'Long', 'Short'
     const [focusDate, setFocusDate] = useState(null);
+
+    const isVWAP = useMemo(() => {
+        return String(selectedStrategyFile || '').toLowerCase().includes('vwap');
+    }, [selectedStrategyFile]);
 
     // 1. Tải danh sách Watchlists, Symbols và Python Strategies
     useEffect(() => {
@@ -81,46 +101,57 @@ const PythonStrategy = () => {
 
     // 2. Lọc Watchlists theo Account hiện tại
     const accountWatchlists = useMemo(() => {
-        if (!watchlists || watchlists.length === 0) return [];
         if (!selectedAccount) return watchlists;
-        const currentAccId = selectedAccount.documentId || selectedAccount.id;
-        return watchlists.filter(wl => {
-            const wlAccId = wl.account?.documentId || wl.account?.id || wl.account;
-            return !wlAccId || wlAccId.toString() === currentAccId?.toString();
+        return watchlists.filter(w => {
+            const marketMatch = !w.market || w.market.documentId === selectedAccount?.market?.documentId || w.market.id === selectedAccount?.market?.id;
+            const accountMatch = !w.account || w.account.documentId === selectedAccount.documentId || w.account.id === selectedAccount.id;
+            return marketMatch && accountMatch;
         });
     }, [watchlists, selectedAccount]);
 
-    // Tự động chọn Watchlist mặc định
-    useEffect(() => {
-        if (defaultWatchlist && !selectedWatchlistId) {
-            setSelectedWatchlistId(defaultWatchlist.documentId || defaultWatchlist.id || '');
-        } else if (accountWatchlists.length > 0 && !selectedWatchlistId) {
-            setSelectedWatchlistId(accountWatchlists[0].documentId || accountWatchlists[0].id || '');
-        }
-    }, [accountWatchlists, defaultWatchlist, selectedWatchlistId]);
-
-    // 3. Lấy danh sách Symbols trong Selected Watchlist
+    // Lấy symbols của watchlist đang chọn (chuẩn hóa thành danh sách tên symbol dạng string)
     const watchlistSymbols = useMemo(() => {
-        if (!selectedWatchlistId) {
-            return symbols.map(s => s.Name || s.name).filter(Boolean);
+        let rawList = [];
+        if (selectedWatchlistId) {
+            const wl = accountWatchlists.find(w => String(w.documentId || w.id) === String(selectedWatchlistId));
+            if (wl?.symbols && wl.symbols.length > 0) {
+                rawList = wl.symbols;
+            }
         }
-        const currentWL = accountWatchlists.find(wl => (wl.documentId || wl.id)?.toString() === selectedWatchlistId.toString());
-        if (currentWL && currentWL.symbols && currentWL.symbols.length > 0) {
-            return currentWL.symbols.map(s => s.Name || s.name || s).filter(Boolean);
+        if (!rawList || rawList.length === 0) {
+            rawList = symbols && symbols.length > 0 ? symbols : ['VNINDEX', 'VN30F1M', 'BTCUSDT', 'ETHUSDT', 'LINKUSDT.P'];
         }
-        return ['VNINDEX', 'VN30F1M', 'FPT', 'HPG', 'SSI', 'MWG', 'TCB', 'VHM'];
+
+        const normalized = rawList.map(s => {
+            if (typeof s === 'string') return s.trim().toUpperCase();
+            return String(s?.Name || s?.name || s?.ticker || '').trim().toUpperCase();
+        }).filter(Boolean);
+
+        return [...new Set(normalized)];
     }, [selectedWatchlistId, accountWatchlists, symbols]);
 
-    // Khi đổi Watchlist, chọn Symbol đầu tiên
+    // 3. Tự động chọn Watchlist đầu tiên khi load xong
     useEffect(() => {
-        if (watchlistSymbols.length > 0 && !watchlistSymbols.includes(selectedSymbol)) {
-            setSelectedSymbol(watchlistSymbols[0]);
+        if (accountWatchlists.length > 0 && !selectedWatchlistId) {
+            setSelectedWatchlistId(accountWatchlists[0].documentId || accountWatchlists[0].id);
+        }
+    }, [accountWatchlists, selectedWatchlistId]);
+
+    // Khi đổi Watchlist -> tự động chọn Symbol đầu tiên trong Watchlist
+    useEffect(() => {
+        if (watchlistSymbols.length > 0) {
+            const currentSelectedInList = watchlistSymbols.includes(selectedSymbol);
+            if (!currentSelectedInList) {
+                setSelectedSymbol(watchlistSymbols[0]);
+                setCustomSymbolInput('');
+            }
         }
     }, [watchlistSymbols, selectedSymbol]);
 
     // 4. Hàm thực hiện Scan Signal qua Python Backend
-    const handleScan = useCallback(async (tickerToScan) => {
+    const handleScan = useCallback(async (tickerToScan = null, customCountback = null, customTimeframe = null) => {
         const ticker = String(tickerToScan || customSymbolInput || selectedSymbol || 'VNINDEX').trim().toUpperCase();
+        const currentTf = String(customTimeframe || timeframe || 'D1').trim().toUpperCase();
         if (!ticker) return;
 
         if (!allowLong && !allowShort) {
@@ -128,18 +159,33 @@ const PythonStrategy = () => {
             return;
         }
 
-        if (!tpSupertrend && !tpRR) {
+        if (!isVWAP && !tpSupertrend && !tpRR) {
             setErrorMessage('Vui lòng chọn ít nhất 1 phương thức chốt lời (Supertrend đảo chiều hoặc Tỷ lệ R:R).');
             return;
         }
 
         setScanning(true);
         setErrorMessage('');
+        const reqCountback = customCountback || countback || 1000;
         try {
-            const result = await scanPythonStrategy({
+            const payload = isVWAP ? {
                 strategyFile: selectedStrategyFile,
                 ticker,
-                countback: 500,
+                timeframe: currentTf,
+                countback: reqCountback,
+                maPeriod: parseInt(vwapMaPeriod) || 9,
+                vwapAnchor,
+                mult1: parseFloat(mult1) || 1.0,
+                mult2: parseFloat(mult2) || 2.0,
+                mult3: parseFloat(mult3) || 3.0,
+                tpTarget: vwapTpTarget,
+                allowLong,
+                allowShort,
+            } : {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe: currentTf,
+                countback: reqCountback,
                 rr: parseFloat(riskReward) || 1.5,
                 entryType,
                 stPeriod: parseInt(stPeriod) || 10,
@@ -149,27 +195,89 @@ const PythonStrategy = () => {
                 allowShort,
                 tpSupertrend,
                 tpRR,
-            });
+            };
+
+            const result = await scanPythonStrategy(payload);
 
             if (result?.error) {
                 setErrorMessage(result.error);
                 setScanResult(null);
             } else {
                 setScanResult(result);
+                setHasMore(true);
                 if (ticker !== selectedSymbol) {
                     setSelectedSymbol(ticker);
                 }
             }
         } catch (err) {
             console.error('Scan error:', err);
-            setErrorMessage(err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi thực thi chiến lược Python.');
+            const errDetail = err?.response?.data?.error?.message || err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi thực thi chiến lược Python.';
+            setErrorMessage(typeof errDetail === 'object' ? JSON.stringify(errDetail) : String(errDetail));
             setScanResult(null);
         } finally {
             setScanning(false);
         }
-    }, [customSymbolInput, riskReward, selectedStrategyFile, selectedSymbol, entryType, stPeriod, stMultiplier, maPeriod, allowLong, allowShort, tpSupertrend, tpRR]);
+    }, [customSymbolInput, selectedSymbol, allowLong, allowShort, isVWAP, tpSupertrend, tpRR, countback, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, riskReward, entryType, stPeriod, stMultiplier, maPeriod]);
 
-    // 4.1 Hàm tối ưu hóa tham số (Best Params Optimizer)
+    // 4.1 Hàm cuộn sang trái tải thêm nến lịch sử (Infinite Scroll)
+    const handleLoadMore = useCallback(async () => {
+        if (scanning || optimizing || loadingMore || !hasMore) return;
+        const currentLen = scanResult?.candles?.length || 0;
+        if (currentLen === 0) return;
+
+        const nextCount = Math.min(Math.max(countback, currentLen) + 500, 5000);
+        if (nextCount <= currentLen && currentLen >= 5000) {
+            setHasMore(false);
+            return;
+        }
+
+        setLoadingMore(true);
+        try {
+            const ticker = String(selectedSymbol || customSymbolInput || 'VNINDEX').trim().toUpperCase();
+            const payload = isVWAP ? {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe,
+                countback: nextCount,
+                maPeriod: parseInt(vwapMaPeriod) || 9,
+                vwapAnchor,
+                mult1: parseFloat(mult1) || 1.0,
+                mult2: parseFloat(mult2) || 2.0,
+                mult3: parseFloat(mult3) || 3.0,
+                tpTarget: vwapTpTarget,
+                allowLong,
+                allowShort,
+            } : {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe,
+                countback: nextCount,
+                rr: parseFloat(riskReward) || 1.5,
+                entryType,
+                stPeriod: parseInt(stPeriod) || 10,
+                stMultiplier: parseFloat(stMultiplier) || 3.0,
+                maPeriod: parseInt(maPeriod) || 288,
+                allowLong,
+                allowShort,
+                tpSupertrend,
+                tpRR,
+            };
+
+            const result = await scanPythonStrategy(payload);
+            if (result && !result.error && result.candles?.length > currentLen) {
+                setCountback(nextCount);
+                setScanResult(result);
+            } else {
+                setHasMore(false);
+            }
+        } catch (err) {
+            console.error('Failed to load more historical candles:', err);
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [scanning, optimizing, loadingMore, hasMore, countback, scanResult, selectedSymbol, customSymbolInput, isVWAP, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, allowLong, allowShort, riskReward, entryType, stPeriod, stMultiplier, maPeriod, tpSupertrend, tpRR]);
+
+    // 4.2 Hàm tối ưu hóa tham số (Best Params Optimizer)
     const handleOptimize = useCallback(async (tickerToOptimize) => {
         const ticker = String(tickerToOptimize || customSymbolInput || selectedSymbol || 'VNINDEX').trim().toUpperCase();
         if (!ticker) return;
@@ -186,9 +294,11 @@ const PythonStrategy = () => {
             const result = await optimizePythonStrategy({
                 strategyFile: selectedStrategyFile,
                 ticker,
-                countback: 500,
+                timeframe,
+                countback: 50000,
                 allowLong,
                 allowShort,
+                vwapAnchor,
             });
 
             if (result?.error) {
@@ -196,14 +306,25 @@ const PythonStrategy = () => {
             } else {
                 if (result?.bestParams) {
                     const bp = result.bestParams;
-                    if (bp.stPeriod !== undefined) setStPeriod(bp.stPeriod);
-                    if (bp.stMultiplier !== undefined) setStMultiplier(bp.stMultiplier);
-                    if (bp.maPeriod !== undefined) setMaPeriod(bp.maPeriod);
-                    if (bp.riskReward !== undefined) setRiskReward(bp.riskReward);
-                    if (bp.entryType !== undefined) setEntryType(bp.entryType);
-                    if (bp.tpSupertrend !== undefined) setTpSupertrend(bp.tpSupertrend);
-                    if (bp.tpRR !== undefined) setTpRR(bp.tpRR);
+                    if (isVWAP) {
+                        if (bp.maPeriod !== undefined) setVwapMaPeriod(bp.maPeriod);
+                        if (bp.tpTarget !== undefined) setVwapTpTarget(bp.tpTarget);
+                        if (bp.mult2 !== undefined) setMult2(bp.mult2);
+                        if (bp.mult3 !== undefined) setMult3(bp.mult3);
+                        if (bp.vwapAnchor !== undefined) setVwapAnchor(bp.vwapAnchor);
+                    } else {
+                        if (bp.stPeriod !== undefined) setStPeriod(bp.stPeriod);
+                        if (bp.stMultiplier !== undefined) setStMultiplier(bp.stMultiplier);
+                        if (bp.maPeriod !== undefined) setMaPeriod(bp.maPeriod);
+                        if (bp.riskReward !== undefined) setRiskReward(bp.riskReward);
+                        if (bp.entryType !== undefined) setEntryType(bp.entryType);
+                        if (bp.tpSupertrend !== undefined) setTpSupertrend(bp.tpSupertrend);
+                        if (bp.tpRR !== undefined) setTpRR(bp.tpRR);
+                    }
                     setBestInfo(bp);
+                }
+                if (result?.candles?.length) {
+                    setCountback(result.candles.length);
                 }
                 setScanResult(result);
                 if (ticker !== selectedSymbol) {
@@ -212,77 +333,127 @@ const PythonStrategy = () => {
             }
         } catch (err) {
             console.error('Optimize error:', err);
-            setErrorMessage(err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi tối ưu hóa tham số chiến lược Python.');
+            const errDetail = err?.response?.data?.error?.message || err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi tối ưu hóa tham số chiến lược Python.';
+            setErrorMessage(typeof errDetail === 'object' ? JSON.stringify(errDetail) : String(errDetail));
         } finally {
             setOptimizing(false);
         }
-    }, [customSymbolInput, selectedStrategyFile, selectedSymbol, allowLong, allowShort]);
+    }, [customSymbolInput, selectedStrategyFile, selectedSymbol, allowLong, allowShort, isVWAP, timeframe, vwapAnchor]);
 
     // 4.2 Hàm reset các thông số về mặc định (Default)
     const handleResetDefault = useCallback(() => {
-        const defaultParams = {
-            stPeriod: 10,
-            stMultiplier: 3.0,
-            maPeriod: 288,
-            riskReward: 1.5,
-            entryType: 'candle_close',
-            tpSupertrend: true,
-            tpRR: true,
-            allowLong: true,
-            allowShort: true,
-        };
-
-        setStPeriod(defaultParams.stPeriod);
-        setStMultiplier(defaultParams.stMultiplier);
-        setMaPeriod(defaultParams.maPeriod);
-        setRiskReward(defaultParams.riskReward);
-        setEntryType(defaultParams.entryType);
-        setTpSupertrend(defaultParams.tpSupertrend);
-        setTpRR(defaultParams.tpRR);
-        setAllowLong(defaultParams.allowLong);
-        setAllowShort(defaultParams.allowShort);
         setBestInfo(null);
         setErrorMessage('');
 
         const ticker = String(customSymbolInput || selectedSymbol || 'VNINDEX').trim().toUpperCase();
-        if (ticker) {
-            setScanning(true);
-            scanPythonStrategy({
-                strategyFile: selectedStrategyFile,
-                ticker,
-                countback: 500,
-                rr: defaultParams.riskReward,
-                entryType: defaultParams.entryType,
-                stPeriod: defaultParams.stPeriod,
-                stMultiplier: defaultParams.stMultiplier,
-                maPeriod: defaultParams.maPeriod,
-                allowLong: defaultParams.allowLong,
-                allowShort: defaultParams.allowShort,
-                tpSupertrend: defaultParams.tpSupertrend,
-                tpRR: defaultParams.tpRR,
-            })
-                .then((result) => {
-                    if (result?.error) {
-                        setErrorMessage(result.error);
-                    } else {
-                        setScanResult(result);
-                    }
-                })
-                .catch((err) => {
-                    console.error('Scan default error:', err);
-                })
-                .finally(() => {
-                    setScanning(false);
-                });
-        }
-    }, [customSymbolInput, selectedSymbol, selectedStrategyFile]);
 
-    // Tự động scan lần đầu khi chọn symbol
+        if (isVWAP) {
+            const defaultVWAP = {
+                maPeriod: 9,
+                vwapAnchor: 'year',
+                mult1: 1.0,
+                mult2: 2.0,
+                mult3: 3.0,
+                tpTarget: 'tp1_vwap',
+                allowLong: true,
+                allowShort: true,
+            };
+
+            setVwapMaPeriod(defaultVWAP.maPeriod);
+            setVwapAnchor(defaultVWAP.vwapAnchor);
+            setMult1(defaultVWAP.mult1);
+            setMult2(defaultVWAP.mult2);
+            setMult3(defaultVWAP.mult3);
+            setVwapTpTarget(defaultVWAP.tpTarget);
+            setAllowLong(defaultVWAP.allowLong);
+            setAllowShort(defaultVWAP.allowShort);
+
+            if (ticker) {
+                setScanning(true);
+                scanPythonStrategy({
+                    strategyFile: selectedStrategyFile,
+                    ticker,
+                    countback: 500,
+                    maPeriod: defaultVWAP.maPeriod,
+                    vwapAnchor: defaultVWAP.vwapAnchor,
+                    mult1: defaultVWAP.mult1,
+                    mult2: defaultVWAP.mult2,
+                    mult3: defaultVWAP.mult3,
+                    tpTarget: defaultVWAP.tpTarget,
+                    allowLong: defaultVWAP.allowLong,
+                    allowShort: defaultVWAP.allowShort,
+                })
+                    .then((result) => {
+                        if (result?.error) setErrorMessage(result.error);
+                        else setScanResult(result);
+                    })
+                    .catch((err) => console.error(err))
+                    .finally(() => setScanning(false));
+            }
+        } else {
+            const defaultParams = {
+                stPeriod: 10,
+                stMultiplier: 3.0,
+                maPeriod: 288,
+                riskReward: 1.5,
+                entryType: 'candle_close',
+                tpSupertrend: true,
+                tpRR: true,
+                allowLong: true,
+                allowShort: true,
+            };
+
+            setStPeriod(defaultParams.stPeriod);
+            setStMultiplier(defaultParams.stMultiplier);
+            setMaPeriod(defaultParams.maPeriod);
+            setRiskReward(defaultParams.riskReward);
+            setEntryType(defaultParams.entryType);
+            setTpSupertrend(defaultParams.tpSupertrend);
+            setTpRR(defaultParams.tpRR);
+            setAllowLong(defaultParams.allowLong);
+            setAllowShort(defaultParams.allowShort);
+
+            if (ticker) {
+                setScanning(true);
+                scanPythonStrategy({
+                    strategyFile: selectedStrategyFile,
+                    ticker,
+                    countback: 500,
+                    rr: defaultParams.riskReward,
+                    entryType: defaultParams.entryType,
+                    stPeriod: defaultParams.stPeriod,
+                    stMultiplier: defaultParams.stMultiplier,
+                    maPeriod: defaultParams.maPeriod,
+                    allowLong: defaultParams.allowLong,
+                    allowShort: defaultParams.allowShort,
+                    tpSupertrend: defaultParams.tpSupertrend,
+                    tpRR: defaultParams.tpRR,
+                })
+                    .then((result) => {
+                        if (result?.error) setErrorMessage(result.error);
+                        else setScanResult(result);
+                    })
+                    .catch((err) => console.error(err))
+                    .finally(() => setScanning(false));
+            }
+        }
+    }, [customSymbolInput, selectedSymbol, selectedStrategyFile, isVWAP]);
+
+    // Khi đổi file chiến lược, tự động scan lại với chiến lược mới
+    const handleStrategyChange = (newFileName) => {
+        setSelectedStrategyFile(newFileName);
+        setBestInfo(null);
+        setCountback(1000);
+        setHasMore(true);
+        setScanResult(null);
+    };
+
+    // Tự động scan lần đầu khi chọn symbol hoặc đổi chiến lược / timeframe
     useEffect(() => {
         if (selectedSymbol && !scanResult && !scanning && !optimizing) {
             handleScan(selectedSymbol);
         }
-    }, [selectedSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [selectedSymbol, selectedStrategyFile, timeframe]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // 5. Chuẩn bị dữ liệu nến cho TradingViewChart
     const chartCandles = useMemo(() => {
@@ -453,16 +624,38 @@ const PythonStrategy = () => {
                     </h2>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3.5 items-end">
                     {/* Dropdown: WatchLists của Account */}
-                    <div className="lg:col-span-5 space-y-1.5">
+                    <div className="lg:col-span-4 space-y-1.5">
                         <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                             <Layers size={14} className="text-blue-400" />
                             Account Watchlist
                         </label>
                         <select
                             value={selectedWatchlistId}
-                            onChange={(e) => setSelectedWatchlistId(e.target.value)}
+                            onChange={(e) => {
+                                const newWlId = e.target.value;
+                                setSelectedWatchlistId(newWlId);
+                                let firstSym = null;
+                                if (newWlId) {
+                                    const wl = accountWatchlists.find(w => String(w.documentId || w.id) === String(newWlId));
+                                    if (wl?.symbols && wl.symbols.length > 0) {
+                                        const s = wl.symbols[0];
+                                        firstSym = typeof s === 'string' ? s.trim().toUpperCase() : String(s?.Name || s?.name || s?.ticker || '').trim().toUpperCase();
+                                    }
+                                }
+                                if (!firstSym && symbols && symbols.length > 0) {
+                                    firstSym = String(symbols[0].Name || symbols[0].name || '').trim().toUpperCase();
+                                }
+                                if (firstSym) {
+                                    setSelectedSymbol(firstSym);
+                                    setCustomSymbolInput('');
+                                    setBestInfo(null);
+                                    setCountback(1000);
+                                    setHasMore(true);
+                                    handleScan(firstSym, 1000, timeframe);
+                                }
+                            }}
                             className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition cursor-pointer"
                         >
                             <option value="">-- Tất cả Symbol --</option>
@@ -475,7 +668,7 @@ const PythonStrategy = () => {
                     </div>
 
                     {/* Dropdown: Symbol trong Watchlist & Gõ nhanh */}
-                    <div className="lg:col-span-7 space-y-1.5">
+                    <div className="lg:col-span-5 space-y-1.5">
                         <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                             <ListFilter size={14} className="text-emerald-400" />
                             Symbol trong Watchlist
@@ -484,30 +677,62 @@ const PythonStrategy = () => {
                             <select
                                 value={selectedSymbol}
                                 onChange={(e) => {
-                                    setSelectedSymbol(e.target.value);
+                                    const newSym = e.target.value;
+                                    setSelectedSymbol(newSym);
                                     setCustomSymbolInput('');
+                                    setBestInfo(null);
+                                    setCountback(1000);
+                                    setHasMore(true);
+                                    handleScan(newSym, 1000, timeframe);
                                 }}
                                 className="flex-1 bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-semibold uppercase"
                             >
-                                {watchlistSymbols.map(sym => (
-                                    <option key={sym} value={sym}>
+                                {watchlistSymbols.map((sym, idx) => (
+                                    <option key={`${sym}-${idx}`} value={sym}>
                                         {sym}
                                     </option>
                                 ))}
                             </select>
 
                             {/* Tùy chọn nhập Symbol nhanh */}
-                            <div className="relative w-36 sm:w-44">
+                            <div className="relative w-32 sm:w-40">
                                 <input
                                     type="text"
                                     placeholder="Hoặc gõ..."
                                     value={customSymbolInput}
                                     onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleScan(customSymbolInput)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleScan(customSymbolInput, 1000, timeframe)}
                                     className="w-full bg-gray-900 border border-gray-700 rounded-xl px-2.5 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-semibold uppercase"
                                 />
                             </div>
                         </div>
+                    </div>
+
+                    {/* Dropdown: Timeframe */}
+                    <div className="lg:col-span-3 space-y-1.5">
+                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                            <Clock size={14} className="text-amber-400" />
+                            Timeframe
+                        </label>
+                        <select
+                            value={timeframe}
+                            onChange={(e) => {
+                                const newTf = e.target.value;
+                                setTimeframe(newTf);
+                                setCountback(1000);
+                                setHasMore(true);
+                                setBestInfo(null);
+                                handleScan(selectedSymbol, 1000, newTf);
+                            }}
+                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition cursor-pointer font-semibold"
+                        >
+                            <option value="M1">M1 (1 Phút)</option>
+                            <option value="M5">M5 (5 Phút)</option>
+                            <option value="M30">M30 (30 Phút)</option>
+                            <option value="H4">H4 (4 Giờ)</option>
+                            <option value="D1">D1 (1 Ngày)</option>
+                            <option value="W1">W1 (1 Tuần)</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -542,11 +767,14 @@ const PythonStrategy = () => {
                             </label>
                             <select
                                 value={selectedStrategyFile}
-                                onChange={(e) => setSelectedStrategyFile(e.target.value)}
+                                onChange={(e) => handleStrategyChange(e.target.value)}
                                 className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition cursor-pointer font-mono h-[42px]"
                             >
                                 {strategyFiles.length === 0 ? (
-                                    <option value="strategy_supertrend_ma288.py">strategy_supertrend_ma288.py</option>
+                                    <>
+                                        <option value="strategy_supertrend_ma288.py">strategy_supertrend_ma288.py</option>
+                                        <option value="strategy_vwap_ma9.py">strategy_vwap_ma9.py</option>
+                                    </>
                                 ) : (
                                     strategyFiles.map(file => (
                                         <option key={file.fileName} value={file.fileName}>
@@ -557,69 +785,157 @@ const PythonStrategy = () => {
                             </select>
                         </div>
 
-                        {/* 3 Indicator Parameters in 3 Columns */}
-                        <div className="grid grid-cols-3 gap-2.5">
-                            {/* Supertrend Period */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="SUPERTREND_PERIOD">
-                                    <span className="flex items-center gap-1 text-[11px] truncate">
-                                        <TrendingUp size={12} className="text-emerald-400 shrink-0" />
-                                        ST Period
-                                    </span>
-                                    <span className="text-[10px] text-gray-500 font-mono">10</span>
-                                </label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    max="500"
-                                    value={stPeriod}
-                                    onChange={(e) => setStPeriod(e.target.value)}
-                                    placeholder="10"
-                                    className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
-                                />
-                            </div>
+                        {/* Indicator Parameters */}
+                        {isVWAP ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                {/* MA Period */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="Chu kỳ MA (SMA)">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <BarChart3 size={12} className="text-amber-400 shrink-0" />
+                                            MA Period
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">9</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="500"
+                                        value={vwapMaPeriod}
+                                        onChange={(e) => setVwapMaPeriod(e.target.value)}
+                                        placeholder="9"
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition font-mono h-[42px]"
+                                    />
+                                </div>
 
-                            {/* Supertrend Multiplier */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="SUPERTREND_MULTIPLIER">
-                                    <span className="flex items-center gap-1 text-[11px] truncate">
-                                        <Activity size={12} className="text-emerald-400 shrink-0" />
-                                        ST Multiplier
-                                    </span>
-                                    <span className="text-[10px] text-gray-500 font-mono">3.0</span>
-                                </label>
-                                <input
-                                    type="number"
-                                    step="0.1"
-                                    min="0.1"
-                                    max="50"
-                                    value={stMultiplier}
-                                    onChange={(e) => setStMultiplier(e.target.value)}
-                                    placeholder="3.0"
-                                    className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
-                                />
-                            </div>
+                                {/* VWAP Anchor */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="Chu kỳ Anchor của VWAP">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <Clock size={12} className="text-blue-400 shrink-0" />
+                                            Anchor
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">Year</span>
+                                    </label>
+                                    <select
+                                        value={vwapAnchor}
+                                        onChange={(e) => setVwapAnchor(e.target.value)}
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-xs text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition cursor-pointer h-[42px]"
+                                    >
+                                        <option value="day">Ngày (Daily)</option>
+                                        <option value="week">Tuần (Weekly)</option>
+                                        <option value="month">Tháng (Month)</option>
+                                        <option value="quarter">Quý (Quarter)</option>
+                                        <option value="year">Năm (Year)</option>
+                                    </select>
+                                </div>
 
-                            {/* MA Period */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="MA_PERIOD">
-                                    <span className="flex items-center gap-1 text-[11px] truncate">
-                                        <BarChart3 size={12} className="text-purple-400 shrink-0" />
-                                        MA Period
-                                    </span>
-                                    <span className="text-[10px] text-gray-500 font-mono">288</span>
-                                </label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    max="1000"
-                                    value={maPeriod}
-                                    onChange={(e) => setMaPeriod(e.target.value)}
-                                    placeholder="288"
-                                    className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition font-mono h-[42px]"
-                                />
+                                {/* Mult 2 */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="Hệ số dải Upper 2 / Lower 2">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <Activity size={12} className="text-purple-400 shrink-0" />
+                                            Band 2 (σ)
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">2.0</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0.5"
+                                        max="5.0"
+                                        value={mult2}
+                                        onChange={(e) => setMult2(e.target.value)}
+                                        placeholder="2.0"
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition font-mono h-[42px]"
+                                    />
+                                </div>
+
+                                {/* Mult 3 */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="Hệ số dải Upper 3 / Lower 3">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <Activity size={12} className="text-rose-400 shrink-0" />
+                                            Band 3 (σ)
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">3.0</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        min="1.0"
+                                        max="6.0"
+                                        value={mult3}
+                                        onChange={(e) => setMult3(e.target.value)}
+                                        placeholder="3.0"
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 transition font-mono h-[42px]"
+                                    />
+                                </div>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="grid grid-cols-3 gap-2.5">
+                                {/* Supertrend Period */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="SUPERTREND_PERIOD">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <TrendingUp size={12} className="text-emerald-400 shrink-0" />
+                                            ST Period
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">10</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="500"
+                                        value={stPeriod}
+                                        onChange={(e) => setStPeriod(e.target.value)}
+                                        placeholder="10"
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
+                                    />
+                                </div>
+
+                                {/* Supertrend Multiplier */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="SUPERTREND_MULTIPLIER">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <Activity size={12} className="text-emerald-400 shrink-0" />
+                                            ST Multiplier
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">3.0</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0.1"
+                                        max="50"
+                                        value={stMultiplier}
+                                        onChange={(e) => setStMultiplier(e.target.value)}
+                                        placeholder="3.0"
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
+                                    />
+                                </div>
+
+                                {/* MA Period */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center justify-between" title="MA_PERIOD">
+                                        <span className="flex items-center gap-1 text-[11px] truncate">
+                                            <BarChart3 size={12} className="text-purple-400 shrink-0" />
+                                            MA Period
+                                        </span>
+                                        <span className="text-[10px] text-gray-500 font-mono">288</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="1000"
+                                        value={maPeriod}
+                                        onChange={(e) => setMaPeriod(e.target.value)}
+                                        placeholder="288"
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition font-mono h-[42px]"
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* CỘT 2: ENTRY, TAKE PROFIT & STOP LOSS */}
@@ -632,122 +948,208 @@ const PythonStrategy = () => {
                             </span>
                         </div>
 
-                        {/* Hàng 1 của Cột 2: Điều kiện Vào lệnh (Entry) & Lựa chọn Loại lệnh (Long / Short Trade) */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {/* Dropdown: Loại Entry */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                    <Activity size={13} className="text-indigo-400" />
-                                    Điều kiện Vào lệnh (Entry)
-                                </label>
-                                <select
-                                    value={entryType}
-                                    onChange={(e) => setEntryType(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition cursor-pointer h-[42px]"
-                                >
-                                    <option value="candle_close">Nến xanh/đỏ đóng cửa (Mặc định)</option>
-                                    <option value="st_reversal">Supertrend đảo chiều</option>
-                                </select>
-                            </div>
+                        {isVWAP ? (
+                            <>
+                                {/* Hàng 1: Điều kiện Vào lệnh (Entry) & Lựa chọn Loại lệnh */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Activity size={13} className="text-indigo-400" />
+                                            Điều kiện Vào lệnh (Entry)
+                                        </label>
+                                        <div className="w-full bg-gray-900/90 border border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-indigo-300 font-medium flex items-center h-[42px]" title="Giá đóng cửa > MA & Giá > Lower 2 & MA < VWAP">
+                                            <span className="truncate">Giá &gt; MA{vwapMaPeriod} &amp; Giá &gt; Lower2 &amp; MA &lt; VWAP</span>
+                                        </div>
+                                    </div>
 
-                            {/* 2 Checkbox: Long Trade & Short Trade */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                    <Layers size={13} className="text-purple-400" />
-                                    Loại lệnh giao dịch
-                                </label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                        }`}>
-                                        <input
-                                            type="checkbox"
-                                            checked={allowLong}
-                                            onChange={(e) => setAllowLong(e.target.checked)}
-                                            className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
-                                        />
-                                        <TrendingUp size={14} className={allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                        <span className={`text-xs font-semibold truncate ${allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>
-                                            Long
-                                        </span>
-                                    </label>
+                                    {/* 2 Checkbox: Long Trade & Short Trade */}
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Layers size={13} className="text-purple-400" />
+                                            Loại lệnh giao dịch
+                                        </label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
+                                                }`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowLong}
+                                                    onChange={(e) => setAllowLong(e.target.checked)}
+                                                    className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
+                                                />
+                                                <TrendingUp size={14} className={allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
+                                                <span className={`text-xs font-semibold truncate ${allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>
+                                                    Long
+                                                </span>
+                                            </label>
 
-                                    <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                        }`}>
-                                        <input
-                                            type="checkbox"
-                                            checked={allowShort}
-                                            onChange={(e) => setAllowShort(e.target.checked)}
-                                            className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
-                                        />
-                                        <TrendingDown size={14} className={allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                        <span className={`text-xs font-semibold truncate ${allowShort ? 'text-rose-300' : 'text-gray-400'}`}>
-                                            Short
-                                        </span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Hàng 2 của Cột 2: 2 Take Profit Options in 2 Columns */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {/* Checkbox 1: Chốt khi Supertrend đảo chiều */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                    <TrendingUp size={13} className="text-emerald-400" />
-                                    1. Chốt khi ST đảo chiều
-                                </label>
-                                <label className={`flex items-center gap-2.5 bg-gray-900 border rounded-xl px-3 py-2 cursor-pointer transition select-none h-[42px] ${tpSupertrend ? 'border-emerald-500/50 bg-emerald-950/20' : 'border-gray-700 hover:border-gray-600'
-                                    }`}>
-                                    <input
-                                        type="checkbox"
-                                        checked={tpSupertrend}
-                                        onChange={(e) => setTpSupertrend(e.target.checked)}
-                                        className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
-                                    />
-                                    <span className={`text-xs font-semibold truncate ${tpSupertrend ? 'text-emerald-300' : 'text-gray-400'}`}>
-                                        Supertrend Đảo Chiều
-                                    </span>
-                                </label>
-                            </div>
-
-                            {/* Checkbox 2: Chốt theo tỷ lệ R:R & Input R:R */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                    <Target size={13} className="text-amber-400" />
-                                    2. Chốt theo tỷ lệ R:R
-                                </label>
-                                <div className="flex items-center gap-2">
-                                    <label className={`flex items-center gap-2.5 bg-gray-900 border rounded-xl px-3 py-2 cursor-pointer transition select-none h-[42px] flex-1 min-w-0 ${tpRR ? 'border-amber-500/50 bg-amber-950/20' : 'border-gray-700 hover:border-gray-600'
-                                        }`}>
-                                        <input
-                                            type="checkbox"
-                                            checked={tpRR}
-                                            onChange={(e) => setTpRR(e.target.checked)}
-                                            className="w-4 h-4 rounded text-amber-600 bg-gray-800 border-gray-600 focus:ring-amber-500 focus:ring-offset-gray-900 cursor-pointer accent-amber-500"
-                                        />
-                                        <span className={`text-xs font-semibold truncate ${tpRR ? 'text-amber-300' : 'text-gray-400'}`}>
-                                            Tỷ lệ R:R
-                                        </span>
-                                    </label>
-
-                                    <div className="w-16 sm:w-20">
-                                        <input
-                                            type="number"
-                                            step="0.1"
-                                            min="0.5"
-                                            max="5.0"
-                                            disabled={!tpRR}
-                                            value={riskReward}
-                                            onChange={(e) => setRiskReward(e.target.value)}
-                                            placeholder="1.5"
-                                            title="Tỷ lệ Risk:Reward cho Take Profit"
-                                            className={`w-full h-[42px] bg-gray-900 border rounded-xl px-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition ${tpRR ? 'border-amber-500/40 text-amber-300' : 'border-gray-800 text-gray-500 bg-gray-900/50 cursor-not-allowed'
-                                                }`}
-                                        />
+                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
+                                                }`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowShort}
+                                                    onChange={(e) => setAllowShort(e.target.checked)}
+                                                    className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
+                                                />
+                                                <TrendingDown size={14} className={allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
+                                                <span className={`text-xs font-semibold truncate ${allowShort ? 'text-rose-300' : 'text-gray-400'}`}>
+                                                    Short
+                                                </span>
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
+
+                                {/* Hàng 2: Mục tiêu Chốt lời (Take Profit) & Cắt lỗ (Stop Loss) */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Target size={13} className="text-emerald-400" />
+                                            Mục tiêu Chốt lời (Take Profit)
+                                        </label>
+                                        <select
+                                            value={vwapTpTarget}
+                                            onChange={(e) => setVwapTpTarget(e.target.value)}
+                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer h-[42px]"
+                                        >
+                                            <option value="tp1_vwap">TP 1: Tại đường VWAP (Mặc định)</option>
+                                            <option value="tp2_upper2">TP 2: Tại dải Upper 2</option>
+                                            <option value="tp3_upper3">TP 3: Tại dải Upper 3</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <ShieldAlert size={13} className="text-rose-400" />
+                                            Cắt lỗ (Stop Loss)
+                                        </label>
+                                        <div className="w-full bg-gray-900/90 border border-rose-500/30 rounded-xl px-3 py-2 text-xs text-rose-300 font-semibold flex items-center justify-between h-[42px]">
+                                            <span>Tại Lower 2 (VWAP - 2.0σ)</span>
+                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">LOWER 2</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                {/* Hàng 1 của Cột 2: Điều kiện Vào lệnh (Entry) & Lựa chọn Loại lệnh (Long / Short Trade) */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    {/* Dropdown: Loại Entry */}
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Activity size={13} className="text-indigo-400" />
+                                            Điều kiện Vào lệnh (Entry)
+                                        </label>
+                                        <select
+                                            value={entryType}
+                                            onChange={(e) => setEntryType(e.target.value)}
+                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition cursor-pointer h-[42px]"
+                                        >
+                                            <option value="candle_close">Nến xanh/đỏ đóng cửa (Mặc định)</option>
+                                            <option value="st_reversal">Supertrend đảo chiều</option>
+                                        </select>
+                                    </div>
+
+                                    {/* 2 Checkbox: Long Trade & Short Trade */}
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Layers size={13} className="text-purple-400" />
+                                            Loại lệnh giao dịch
+                                        </label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
+                                                }`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowLong}
+                                                    onChange={(e) => setAllowLong(e.target.checked)}
+                                                    className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
+                                                />
+                                                <TrendingUp size={14} className={allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
+                                                <span className={`text-xs font-semibold truncate ${allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>
+                                                    Long
+                                                </span>
+                                            </label>
+
+                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
+                                                }`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowShort}
+                                                    onChange={(e) => setAllowShort(e.target.checked)}
+                                                    className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
+                                                />
+                                                <TrendingDown size={14} className={allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
+                                                <span className={`text-xs font-semibold truncate ${allowShort ? 'text-rose-300' : 'text-gray-400'}`}>
+                                                    Short
+                                                </span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Hàng 2 của Cột 2: 2 Take Profit Options in 2 Columns */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    {/* Checkbox 1: Chốt khi Supertrend đảo chiều */}
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <TrendingUp size={13} className="text-emerald-400" />
+                                            1. Chốt khi ST đảo chiều
+                                        </label>
+                                        <label className={`flex items-center gap-2.5 bg-gray-900 border rounded-xl px-3 py-2 cursor-pointer transition select-none h-[42px] ${tpSupertrend ? 'border-emerald-500/50 bg-emerald-950/20' : 'border-gray-700 hover:border-gray-600'
+                                            }`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={tpSupertrend}
+                                                onChange={(e) => setTpSupertrend(e.target.checked)}
+                                                className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
+                                            />
+                                            <span className={`text-xs font-semibold truncate ${tpSupertrend ? 'text-emerald-300' : 'text-gray-400'}`}>
+                                                Supertrend Đảo Chiều
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    {/* Checkbox 2: Chốt theo tỷ lệ R:R & Input R:R */}
+                                    <div className="space-y-1.5">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Target size={13} className="text-amber-400" />
+                                            2. Chốt theo tỷ lệ R:R
+                                        </label>
+                                        <div className="flex items-center gap-2">
+                                            <label className={`flex items-center gap-2.5 bg-gray-900 border rounded-xl px-3 py-2 cursor-pointer transition select-none h-[42px] flex-1 min-w-0 ${tpRR ? 'border-amber-500/50 bg-amber-950/20' : 'border-gray-700 hover:border-gray-600'
+                                                }`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={tpRR}
+                                                    onChange={(e) => setTpRR(e.target.checked)}
+                                                    className="w-4 h-4 rounded text-amber-600 bg-gray-800 border-gray-600 focus:ring-amber-500 focus:ring-offset-gray-900 cursor-pointer accent-amber-500"
+                                                />
+                                                <span className={`text-xs font-semibold truncate ${tpRR ? 'text-amber-300' : 'text-gray-400'}`}>
+                                                    Tỷ lệ R:R
+                                                </span>
+                                            </label>
+
+                                            <div className="w-16 sm:w-20">
+                                                <input
+                                                    type="number"
+                                                    step="0.1"
+                                                    min="0.5"
+                                                    max="5.0"
+                                                    disabled={!tpRR}
+                                                    value={riskReward}
+                                                    onChange={(e) => setRiskReward(e.target.value)}
+                                                    placeholder="1.5"
+                                                    title="Tỷ lệ Risk:Reward cho Take Profit"
+                                                    className={`w-full h-[42px] bg-gray-900 border rounded-xl px-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition ${tpRR ? 'border-amber-500/40 text-amber-300' : 'border-gray-800 text-gray-500 bg-gray-900/50 cursor-not-allowed'
+                                                        }`}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -755,48 +1157,65 @@ const PythonStrategy = () => {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-gray-700/50">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
                         <span className="font-medium text-gray-300">Cấu hình:</span>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-medium">
-                            <Activity size={12} className="text-indigo-400" />
-                            Entry: {entryType === 'st_reversal' ? 'Supertrend đảo chiều' : 'Đóng cửa nến xanh/đỏ'}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-semibold font-mono">
+                            <Clock size={12} className="text-amber-400" />
+                            {timeframe}
                         </span>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-xs font-medium font-mono">
-                            <Sliders size={12} className="text-cyan-400" />
-                            ST({stPeriod},{stMultiplier}) + MA({maPeriod})
-                        </span>
+                        {isVWAP ? (
+                            <>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-300 border border-blue-500/20 text-xs font-medium">
+                                    <Activity size={12} className="text-blue-400" />
+                                    VWAP ({vwapAnchor.toUpperCase()}) + MA({vwapMaPeriod})
+                                </span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
+                                    <Target size={12} className="text-emerald-400" />
+                                    {vwapTpTarget === 'tp1_vwap' ? 'TP: VWAP' : (vwapTpTarget === 'tp2_upper2' ? 'TP: Upper 2' : 'TP: Upper 3')}
+                                </span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
+                                    <ShieldAlert size={12} className="text-rose-400" />
+                                    SL: Lower 2
+                                </span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-medium">
+                                    <Activity size={12} className="text-indigo-400" />
+                                    Entry: {entryType === 'st_reversal' ? 'Supertrend đảo chiều' : 'Đóng cửa nến xanh/đỏ'}
+                                </span>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-xs font-medium font-mono">
+                                    <Sliders size={12} className="text-cyan-400" />
+                                    ST({stPeriod},{stMultiplier}) + MA({maPeriod})
+                                </span>
+                                {tpSupertrend && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
+                                        <CheckCircle2 size={12} className="text-emerald-400" />
+                                        ST Đảo chiều
+                                    </span>
+                                )}
+                                {tpRR && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium">
+                                        <CheckCircle2 size={12} className="text-amber-400" />
+                                        Cố định R:R ({riskReward}R)
+                                    </span>
+                                )}
+                            </>
+                        )}
                         {allowLong && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
                                 <TrendingUp size={12} className="text-emerald-400" />
-                                Long Trade
+                                Long
                             </span>
                         )}
                         {allowShort && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
                                 <TrendingDown size={12} className="text-rose-400" />
-                                Short Trade
+                                Short
                             </span>
                         )}
                         {!allowLong && !allowShort && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
                                 <AlertTriangle size={12} className="text-rose-400" />
                                 Chưa chọn loại lệnh
-                            </span>
-                        )}
-                        {tpSupertrend && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
-                                <CheckCircle2 size={12} className="text-emerald-400" />
-                                ST Đảo chiều
-                            </span>
-                        )}
-                        {tpRR && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium">
-                                <CheckCircle2 size={12} className="text-amber-400" />
-                                Cố định R:R ({riskReward}R)
-                            </span>
-                        )}
-                        {!tpSupertrend && !tpRR && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
-                                <AlertTriangle size={12} className="text-rose-400" />
-                                Chưa chọn phương thức chốt lời nào
                             </span>
                         )}
                     </div>
@@ -867,9 +1286,18 @@ const PythonStrategy = () => {
                             <span className="ml-1.5 inline-block text-gray-300">
                                 Profit Factor: <strong className="text-emerald-400 text-sm font-bold">{bestInfo.profitFactor}</strong>
                                 {' '}| Win Rate: <strong className="text-sky-300 font-bold">{bestInfo.winRate}%</strong> ({bestInfo.closedTrades} lệnh đóng)
-                                {' '}| <span className="font-mono text-cyan-300">ST({bestInfo.stPeriod}, {bestInfo.stMultiplier}) + MA({bestInfo.maPeriod})</span>
-                                {' '}| Entry: <span className="text-indigo-300 font-semibold">{bestInfo.entryType === 'st_reversal' ? 'ST Đảo chiều' : 'Đóng nến'}</span>
-                                {' '}| R:R: <span className="text-amber-300 font-semibold">{bestInfo.riskReward}R</span>
+                                {isVWAP ? (
+                                    <>
+                                        {' '}| <span className="font-mono text-cyan-300">VWAP + MA({bestInfo.maPeriod}) | Band 2 ({bestInfo.mult2}σ) | Band 3 ({bestInfo.mult3}σ)</span>
+                                        {' '}| TP: <span className="text-emerald-300 font-semibold">{bestInfo.tpTarget === 'tp1_vwap' ? 'VWAP' : (bestInfo.tpTarget === 'tp2_upper2' ? 'Upper 2' : 'Upper 3')}</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        {' '}| <span className="font-mono text-cyan-300">ST({bestInfo.stPeriod}, {bestInfo.stMultiplier}) + MA({bestInfo.maPeriod})</span>
+                                        {' '}| Entry: <span className="text-indigo-300 font-semibold">{bestInfo.entryType === 'st_reversal' ? 'ST Đảo chiều' : 'Đóng nến'}</span>
+                                        {' '}| R:R: <span className="text-amber-300 font-semibold">{bestInfo.riskReward}R</span>
+                                    </>
+                                )}
                             </span>
                         </div>
                     </div>
@@ -1049,11 +1477,16 @@ const PythonStrategy = () => {
                             data={chartCandles}
                             symbol={scanResult?.ticker || selectedSymbol}
                             signals={chartSignals}
-                            template="Supertrend"
+                            template={isVWAP ? "VWAP" : "Supertrend"}
+                            vwapAnchor={vwapAnchor}
+                            timeframe={timeframe}
                             supertrendPeriod={parseInt(stPeriod) || 10}
                             supertrendMultiplier={parseFloat(stMultiplier) || 3.0}
-                            maPeriod={parseInt(maPeriod) || 288}
+                            maPeriod={parseInt(isVWAP ? vwapMaPeriod : maPeriod) || (isVWAP ? 9 : 288)}
                             focusDate={focusDate}
+                            onLoadMore={handleLoadMore}
+                            isLoadingMore={loadingMore}
+                            hasMore={hasMore}
                         />
                     ) : (
                         <div className="h-full w-full flex flex-col items-center justify-center text-gray-500 space-y-2">

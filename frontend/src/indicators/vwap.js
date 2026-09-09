@@ -44,7 +44,7 @@ export const calculateVWAP = (data, anchor = 'Day', priceSource = 'typical') => 
     let lastAnchorKey = null;
 
     const getAnchorKey = (item, anchorType) => {
-        const d = parseToUTCDate(item.time || item.date);
+        const d = parseToUTCDate(item.time !== undefined ? item.time : (item._timeKey !== undefined ? item._timeKey : item.date));
         if (!d) return '';
 
         const year = d.getUTCFullYear();
@@ -54,6 +54,10 @@ export const calculateVWAP = (data, anchor = 'Day', priceSource = 'typical') => 
         switch (anchorType.toLowerCase()) {
             case 'year':
                 return `${year}`;
+            case 'quarter': {
+                const quarter = Math.floor((month - 1) / 3) + 1;
+                return `${year}-Q${quarter}`;
+            }
             case 'month':
                 return `${year}-${month}`;
             case 'week': {
@@ -105,8 +109,10 @@ export const calculateVWAP = (data, anchor = 'Day', priceSource = 'typical') => 
         const variance = cumulativeVolume > 0 ? (cumulativePriceSquaredVolume / cumulativeVolume) - (vwapValue * vwapValue) : 0;
         const stdDev = Math.sqrt(Math.max(0, variance));
 
+        const itemTime = item.time !== undefined ? item.time : (item._timeKey !== undefined ? item._timeKey : item.date);
+
         result.push({
-            time: item.time || (item.date ? String(item.date).split('T')[0] : ''),
+            time: itemTime,
             value: +vwapValue.toFixed(2),
             upper1: +(vwapValue + stdDev).toFixed(2),
             lower1: +(vwapValue - stdDev).toFixed(2),
@@ -142,7 +148,13 @@ export const drawVWAP = (chart, LineSeries, vwapData, options = {}) => {
     
     const formatTime = (time) => {
         if (typeof time === 'number') return time;
-        if (typeof time === 'string' && time.includes('T')) return time.split('T')[0];
+        if (typeof time === 'string' && time.includes('T')) {
+            if (time.endsWith('T00:00:00.000Z') || time.endsWith('T00:00:00Z')) {
+                return time.split('T')[0];
+            }
+            const dt = new Date(time);
+            return isNaN(dt.getTime()) ? time : Math.floor(dt.getTime() / 1000);
+        }
         return time;
     };
 

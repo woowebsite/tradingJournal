@@ -1,5 +1,6 @@
 import sys
 import time
+import re
 import numpy as np
 import pandas as pd
 import requests
@@ -12,11 +13,14 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
+import os
+import concurrent.futures
+
 # ==============================================================================
 # CẤU HÌNH HỆ THỐNG & CHIẾN LƯỢC (MÔ HÌNH 2)
 # ==============================================================================
-STRAPI_BASE_URL = "http://localhost:1337"
-STRAPI_API_TOKEN = ""  # Nhập Strapi Bearer Token nếu backend có bật JWT Auth
+STRAPI_BASE_URL = os.environ.get("STRAPI_BASE_URL", "http://127.0.0.1:1337").rstrip("/")
+STRAPI_API_TOKEN = os.environ.get("STRAPI_API_TOKEN", "")
 
 # Tham số chiến lược
 MA_PERIOD = 288                 # Chu kỳ đường MA dài hạn (MA288)
@@ -28,7 +32,7 @@ RISK_REWARD_RATIO = 1.5         # Tỷ lệ Risk : Reward để tính Take Profi
 DEFAULT_WATCHLIST = ["VNINDEX", "VN30F1M", "FPT", "HPG", "SSI", "MWG", "TCB", "VHM"]
 
 # ==============================================================================
-# 1. FETCH DỮ LIỆU THỊ TRƯỜNG TỰ ĐỘNG (DIRECT DATA PROVIDER)
+# 1. FETCH & ĐỒNG BỘ DỮ LIỆU VÀO STRAPI, SAU ĐÓ ĐỌC TỪ STRAPI
 # ==============================================================================
 
 def get_strapi_headers() -> Dict[str, str]:
@@ -37,80 +41,453 @@ def get_strapi_headers() -> Dict[str, str]:
         headers["Authorization"] = f"Bearer {STRAPI_API_TOKEN}"
     return headers
 
-def fetch_market_candles(ticker: str, resolution: str = "1D", countback: int = 500) -> pd.DataFrame:
-    """
-    Tự động lấy dữ liệu lịch sử nến từ 24hMoney (Realtime API).
-    Hỗ trợ cả Cổ phiếu (FPT, HPG...), Chỉ số (VNINDEX...) và Phái sinh (VN30F1M...).
-    """
-    ticker_clean = ticker.strip().upper()
-    to_ts = int(time.time())
-    # Khoảng thời gian lùi về quá khứ (nhân 2.5 để trừ ngày nghỉ T7, CN, Lễ)
-    from_ts = to_ts - int(countback * 2.5 * 86400)
-    
-    url = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution}&from={from_ts}&to={to_ts}&countback={countback}"
-    
-    try:
-        res = requests.get(url, timeout=15)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
-                candles = []
-                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
-                
-                # Check nếu dữ liệu 24hmoney là dạng x1000 hay giá gốc
-                first_close = float(data["c"][0])
-                if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"]:
-                    # 24hmoney thường chia 1000 cho giá cổ phiếu (ví dụ 50.5 thay vì 50500)
-                    multiplier = 1000
-                else:
-                    multiplier = 1
+def is_crypto_symbol(ticker: str) -> bool:
+    """Nhận diện mã giao dịch tiền mã hóa Crypto (Binance)"""
+    clean = ticker.strip().upper()
+    if clean.endswith(".P") or "PERP" in clean or clean.startswith("BINANCE:"):
+        return True
+    if any(clean.endswith(quote) for quote in ["USDT", "BUSD", "USDC", "FDUSD", "TUSD"]):
+        return True
+    return False
 
-                for i in range(len(data["t"])):
+def map_timeframe_to_binance(timeframe: str) -> str:
+    """Chuyển đổi Timeframe sang định dạng Binance (1m, 5m, 30m, 4h, 1d, 1w)"""
+    tf = str(timeframe or "D1").strip().upper()
+    mapping = {
+        "M1": "1m", "1M": "1m",
+        "M5": "5m", "5M": "5m",
+        "M15": "15m", "15M": "15m",
+        "M30": "30m", "30M": "30m",
+        "H1": "1h", "1H": "1h",
+        "H4": "4h", "4H": "4h",
+        "D1": "1d", "1D": "1d", "D": "1d",
+        "W1": "1w", "1W": "1w", "W": "1w"
+    }
+    return mapping.get(tf, "1d")
+
+def map_timeframe_to_24h(timeframe: str) -> str:
+    """Chuyển đổi Timeframe sang định dạng 24hMoney resolution (1, 5, 30, 240, 1D, 1W)"""
+    tf = str(timeframe or "D1").strip().upper()
+    mapping = {
+        "M1": "1", "1M": "1",
+        "M5": "5", "5M": "5",
+        "M15": "15", "15M": "15",
+        "M30": "30", "30M": "30",
+        "H1": "60", "1H": "60",
+        "H4": "240", "4H": "240",
+        "D1": "1D", "1D": "1D", "D": "1D",
+        "W1": "1W", "1W": "1W", "W": "1W"
+    }
+    return mapping.get(tf, "1D")
+
+def get_or_create_symbol_in_strapi(ticker: str) -> Optional[str]:
+    """Tìm hoặc tự động tạo mới Symbol trong bảng symbols của Strapi, trả về symbolId (hoặc documentId)"""
+    headers = get_strapi_headers()
+    clean = ticker.strip().upper()
+    variants = [clean]
+    if clean.endswith(".P"):
+        variants.append(clean.replace(".P", ""))
+        variants.append(f"BINANCE:{clean}")
+        variants.append(f"BINANCE:{clean.replace('.P', '')}")
+    elif clean.startswith("BINANCE:"):
+        unprefixed = clean.replace("BINANCE:", "")
+        variants.append(unprefixed)
+        if unprefixed.endswith(".P"):
+            variants.append(unprefixed.replace(".P", ""))
+        else:
+            variants.append(f"{unprefixed}.P")
+    elif clean.endswith("USDT") or clean.endswith("BUSD"):
+        variants.append(f"{clean}.P")
+        variants.append(f"BINANCE:{clean}")
+        variants.append(f"BINANCE:{clean}.P")
+
+    try:
+        # 1. Tìm symbol theo Name trong các variants
+        for sym_var in variants:
+            res = requests.get(f"{STRAPI_BASE_URL}/api/symbols?filters[Name][$eq]={sym_var}", headers=headers, timeout=10)
+            if res.status_code == 200:
+                data = res.json().get("data", [])
+                if data:
+                    return data[0].get("documentId") or str(data[0].get("id"))
+
+        # 2. Nếu chưa có -> Tạo mới Symbol
+        create_payload = {
+            "data": {
+                "Name": clean,
+                "ticker": clean,
+                "Description": f"Auto-created symbol {clean}"
+            }
+        }
+        create_res = requests.post(f"{STRAPI_BASE_URL}/api/symbols", json=create_payload, headers=headers, timeout=10)
+        if create_res.status_code in [200, 201]:
+            created_data = create_res.json().get("data", {})
+            return created_data.get("documentId") or str(created_data.get("id"))
+    except Exception as e:
+        print(f"Warning: get_or_create_symbol_in_strapi failed for {ticker}: {e}", file=sys.stderr, flush=True)
+    return None
+
+def sync_candles_to_strapi(ticker: str, df: pd.DataFrame, symbol_id: str, timeframe: str = "D1", max_sync: int = 1500):
+    """Đồng bộ các nến từ external vào bảng symbol-histories của Strapi theo đúng Timeframe sử dụng đa luồng (super-fast)"""
+    if df.empty or not symbol_id:
+        return
+
+    tf = str(timeframe or "D1").strip().upper()
+    headers = get_strapi_headers()
+    clean = ticker.strip().upper()
+
+    try:
+        # Lấy danh sách ngày đã có sẵn trong Strapi cho symbol và timeframe này (tối đa max_sync) để tránh trùng lặp
+        existing_dates = set()
+        page = 1
+        tf_filter = f"&filters[$or][0][timeframe][$eq]={tf}&filters[$or][1][timeframe][$null]=true" if tf == "D1" else f"&filters[timeframe][$eq]={tf}"
+
+        while len(existing_dates) < max_sync:
+            check_res = requests.get(
+                f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={clean}{tf_filter}&sort=date:desc&pagination[page]={page}&pagination[pageSize]=100",
+                headers=headers,
+                timeout=10
+            )
+            if check_res.status_code != 200:
+                break
+            check_json = check_res.json()
+            items = check_json.get("data", [])
+            if not items:
+                break
+            for item in items:
+                attrs = item.get("attributes", item)
+                d_val = attrs.get("date")
+                if d_val:
+                    existing_dates.add(str(d_val)[:19])
+
+            meta_pg = check_json.get("meta", {}).get("pagination", {})
+            page_count = meta_pg.get("pageCount")
+            if page_count and page >= page_count:
+                break
+            if len(items) < 100:
+                break
+            page += 1
+
+        # Lọc các nến trong df chưa có trong existing_dates
+        to_insert_candles = []
+        for _, row in df.tail(max_sync).iterrows():
+            candle_date = str(row["date"])[:19]
+            if candle_date not in existing_dates:
+                to_insert_candles.append(row)
+
+        if not to_insert_candles:
+            return
+
+        session = requests.Session()
+        session.headers.update(headers)
+
+        def insert_single_candle(candle):
+            payload = {
+                "data": {
+                    "symbol": symbol_id,
+                    "date": candle["date"],
+                    "open": float(candle["open"]),
+                    "high": float(candle["high"]),
+                    "low": float(candle["low"]),
+                    "close": float(candle["close"]),
+                    "volume": float(candle.get("volume", 0)),
+                    "timeframe": tf
+                }
+            }
+            try:
+                session.post(f"{STRAPI_BASE_URL}/api/symbol-histories", json=payload, timeout=8)
+            except Exception:
+                pass
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            list(executor.map(insert_single_candle, to_insert_candles))
+
+    except Exception as e:
+        print(f"Warning: sync_candles_to_strapi failed for {ticker} ({tf}): {e}", file=sys.stderr, flush=True)
+
+def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
+    """
+    Lấy dữ liệu lịch sử nến từ Binance API (Spot & Futures).
+    Hỗ trợ các ticker dạng LINKUSDT.P, BTCUSDT, ETHUSDT, BINANCE:LINKUSDT.P...
+    Tự động phân trang (pagination) nếu countback > 1000/1500 để nạp dữ liệu quá khứ không giới hạn khi cuộn.
+    """
+    clean = ticker.strip().upper()
+    is_perpetual = clean.endswith(".P") or "PERP" in clean
+    symbol = re.sub(r"^.*:", "", clean).replace(".P", "").replace("PERP", "").strip()
+    interval = map_timeframe_to_binance(timeframe)
+    is_daily_or_weekly = interval in ["1d", "1w", "1M"]
+
+    endpoint_configs = [
+        ("https://fapi.binance.com/fapi/v1/klines", 1500) if is_perpetual else ("https://api.binance.com/api/v3/klines", 1000),
+        ("https://api.binance.com/api/v3/klines", 1000) if is_perpetual else ("https://fapi.binance.com/fapi/v1/klines", 1500),
+    ]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    for base_url, max_limit in endpoint_configs:
+        all_raw = []
+        target_count = max(int(countback), 500)
+        current_end_time = None
+
+        try:
+            while len(all_raw) < target_count:
+                limit = min(target_count - len(all_raw), max_limit)
+                params = f"symbol={symbol}&interval={interval}&limit={limit}"
+                if current_end_time is not None:
+                    params += f"&endTime={current_end_time}"
+
+                url = f"{base_url}?{params}"
+                res = requests.get(url, headers=headers, timeout=10)
+                if res.status_code != 200:
+                    break
+
+                data = res.json()
+                if not isinstance(data, list) or len(data) == 0:
+                    break
+
+                all_raw = data + all_raw
+                oldest_open_time = data[0][0]
+                current_end_time = oldest_open_time - 1
+
+                if len(data) < limit:
+                    break
+
+            if len(all_raw) > 0:
+                seen_times = set()
+                deduped = []
+                for item in all_raw:
+                    if item[0] not in seen_times:
+                        seen_times.add(item[0])
+                        deduped.append(item)
+
+                candles = []
+                for item in deduped:
+                    open_time_ms = item[0]
+                    dt = datetime.utcfromtimestamp(open_time_ms / 1000.0)
+                    if is_daily_or_weekly:
+                        date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
+                        time_str = dt.strftime("%Y-%m-%d")
+                    else:
+                        date_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                        time_str = dt.strftime("%H:%M:%S")
+
+                    o = float(item[1])
+                    h = float(item[2])
+                    l = float(item[3])
+                    c = float(item[4])
+                    v = float(item[5])
+
+                    decimals = 6 if c < 0.01 else (4 if c < 10 else (2 if c >= 100 else 3))
                     candles.append({
-                        "date": datetime.utcfromtimestamp(data["t"][i]).strftime("%Y-%m-%dT00:00:00.000Z"),
-                        "open": round(float(data["o"][i]) * multiplier, 2),
-                        "high": round(float(data["h"][i]) * multiplier, 2),
-                        "low": round(float(data["l"][i]) * multiplier, 2),
-                        "close": round(float(data["c"][i]) * multiplier, 2),
-                        "volume": float(data["v"][i]),
+                        "date": date_str,
+                        "time": time_str,
+                        "open": round(o, decimals),
+                        "high": round(h, decimals),
+                        "low": round(l, decimals),
+                        "close": round(c, decimals),
+                        "volume": float(v)
                     })
-                
+
                 df = pd.DataFrame(candles)
                 df["dt"] = pd.to_datetime(df["date"])
                 df = df.sort_values("dt").reset_index(drop=True)
-                return df
-    except Exception as e:
-        print(f"Lỗi khi tải dữ liệu từ 24hMoney cho {ticker_clean}: {e}")
+                if len(df) > 0:
+                    return df
+        except Exception:
+            pass
 
-    # Fallback: Nếu không lấy được từ 24hMoney, thử lấy từ Strapi
-    return fetch_history_from_strapi(ticker_clean)
+    return pd.DataFrame()
 
-def fetch_history_from_strapi(ticker: str) -> pd.DataFrame:
-    """Lấy dữ liệu từ Strapi backend nếu đã có sẵn trong cơ sở dữ liệu"""
-    url = f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={ticker}&pagination[limit]=1000&sort=date:asc"
-    try:
-        res = requests.get(url, headers=get_strapi_headers(), timeout=10)
-        if res.status_code == 200:
-            records = res.json().get("data", [])
+def fetch_history_from_strapi(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
+    """Lấy dữ liệu nến trực tiếp từ Strapi symbol-histories theo countback và đúng Timeframe"""
+    clean = ticker.strip().upper()
+    tf = str(timeframe or "D1").strip().upper()
+    headers = get_strapi_headers()
+
+    variants = [clean]
+    if clean.endswith(".P"):
+        variants.append(clean.replace(".P", ""))
+        variants.append(f"BINANCE:{clean}")
+        variants.append(f"BINANCE:{clean.replace('.P', '')}")
+    elif clean.startswith("BINANCE:"):
+        unprefixed = clean.replace("BINANCE:", "")
+        variants.append(unprefixed)
+        if unprefixed.endswith(".P"):
+            variants.append(unprefixed.replace(".P", ""))
+        else:
+            variants.append(f"{unprefixed}.P")
+    elif clean.endswith("USDT") or clean.endswith("BUSD"):
+        variants.append(f"{clean}.P")
+        variants.append(f"BINANCE:{clean}")
+        variants.append(f"BINANCE:{clean}.P")
+
+    target_count = max(int(countback), 10)
+    tf_filter = f"&filters[$or][0][timeframe][$eq]={tf}&filters[$or][1][timeframe][$null]=true" if tf == "D1" else f"&filters[timeframe][$eq]={tf}"
+
+    for sym_var in variants:
+        try:
+            records = []
+            page = 1
+            PAGE_SIZE = 100
+
+            while len(records) < target_count:
+                url = f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={sym_var}{tf_filter}&sort=date:desc&pagination[page]={page}&pagination[pageSize]={PAGE_SIZE}"
+                res = requests.get(url, headers=headers, timeout=12)
+                if res.status_code != 200:
+                    break
+
+                res_json = res.json()
+                batch = res_json.get("data", [])
+                if not batch or len(batch) == 0:
+                    break
+
+                records.extend(batch)
+
+                meta_pg = res_json.get("meta", {}).get("pagination", {})
+                page_count = meta_pg.get("pageCount")
+                total = meta_pg.get("total")
+
+                if page_count and page >= page_count:
+                    break
+                if total and len(records) >= total:
+                    break
+                if len(batch) < PAGE_SIZE:
+                    break
+
+                page += 1
+
             if records:
                 data = []
                 for item in records:
                     attrs = item.get("attributes", item)
+                    d_val = attrs.get("date")
+                    if not d_val:
+                        continue
+
+                    time_str = ""
+                    if "T" in str(d_val):
+                        parts = str(d_val).split("T")
+                        if len(parts) > 1:
+                            time_str = parts[1].replace(".000Z", "").replace("Z", "")
+                    else:
+                        d_val = f"{d_val}T00:00:00.000Z"
+                        time_str = "00:00:00"
+
                     data.append({
-                        "date": attrs.get("date"),
+                        "date": str(d_val),
+                        "time": time_str,
                         "open": float(attrs.get("open", 0)),
                         "high": float(attrs.get("high", 0)),
                         "low": float(attrs.get("low", 0)),
                         "close": float(attrs.get("close", 0)),
                         "volume": float(attrs.get("volume", 0)),
                     })
-                df = pd.DataFrame(data)
-                df["dt"] = pd.to_datetime(df["date"])
-                df = df.sort_values("dt").reset_index(drop=True)
-                return df
-    except Exception as e:
-        print(f"Lỗi khi đọc lịch sử từ Strapi cho {ticker}: {e}")
+
+                if data:
+                    df = pd.DataFrame(data)
+                    df["dt"] = pd.to_datetime(df["date"])
+                    df = df.sort_values("dt").reset_index(drop=True)
+                    if len(df) > target_count:
+                        df = df.tail(target_count).reset_index(drop=True)
+                    return df
+        except Exception:
+            pass
+
     return pd.DataFrame()
+
+def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 500, timeframe: str = None) -> pd.DataFrame:
+    """
+    Quy trình chuẩn hóa 2 bước:
+    1. Đọc dữ liệu từ Strapi symbol-histories theo đúng Timeframe đã chọn.
+    2. Nếu Strapi chưa có hoặc thiếu nến, fetch từ External (Binance / 24hMoney) đúng Timeframe, 
+       đồng bộ vào Strapi symbol-histories, sau đó đọc lại từ Strapi để chạy scan/optimize.
+    """
+    tf = str(timeframe or resolution or "D1").strip().upper()
+    ticker_clean = ticker.strip().upper()
+    req_count = max(int(countback), 500)
+
+    # 1. Ưu tiên đọc trực tiếp từ Strapi symbol-histories theo đúng Timeframe
+    df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
+    if not df_strapi.empty and len(df_strapi) >= min(req_count, 288):
+        return df_strapi
+
+    # 2. Nếu Strapi chưa đủ nến -> Fetch từ External Provider theo đúng Timeframe
+    df_external = pd.DataFrame()
+    if is_crypto_symbol(ticker_clean):
+        df_external = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
+    else:
+        # 24hMoney cho Stock / Index / Derivatives
+        resolution_24h = map_timeframe_to_24h(tf)
+        if resolution_24h in ["1D", "D"]:
+            step_sec = 86400
+        elif resolution_24h in ["1W", "W"]:
+            step_sec = 604800
+        else:
+            try:
+                step_sec = int(resolution_24h) * 60
+            except Exception:
+                step_sec = 86400
+
+        to_ts = int(time.time())
+        from_ts = to_ts - int(req_count * 3.5 * step_sec)
+        url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
+
+        is_daily_or_weekly = tf.upper() in ["D1", "1D", "D", "W1", "1W", "W"]
+        try:
+            res = requests.get(url_24h, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
+                    candles = []
+                    multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
+                    first_close = float(data["c"][0])
+                    if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"] and not is_crypto_symbol(ticker_clean):
+                        multiplier = 1000
+                    else:
+                        multiplier = 1
+
+                    for i in range(len(data["t"])):
+                        dt = datetime.utcfromtimestamp(data["t"][i])
+                        if is_daily_or_weekly:
+                            date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
+                            time_str = dt.strftime("%Y-%m-%d")
+                        else:
+                            date_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                            time_str = dt.strftime("%H:%M:%S")
+
+                        candles.append({
+                            "date": date_str,
+                            "time": time_str,
+                            "open": round(float(data["o"][i]) * multiplier, 2),
+                            "high": round(float(data["h"][i]) * multiplier, 2),
+                            "low": round(float(data["l"][i]) * multiplier, 2),
+                            "close": round(float(data["c"][i]) * multiplier, 2),
+                            "volume": float(data["v"][i]),
+                        })
+
+                    df_external = pd.DataFrame(candles)
+                    df_external["dt"] = pd.to_datetime(df_external["date"])
+                    df_external = df_external.sort_values("dt").reset_index(drop=True)
+        except Exception:
+            pass
+
+    # Nếu chưa lấy được từ 24hMoney, thử lại Binance (cho trường hợp mã crypto dạng không có hậu tố .P)
+    if df_external.empty:
+        df_external = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
+
+    # 3. Đồng bộ nến mới nhất vào Strapi theo đúng Timeframe
+    if not df_external.empty and len(df_external) > 0:
+        symbol_id = get_or_create_symbol_in_strapi(ticker_clean)
+        if symbol_id:
+            sync_candles_to_strapi(ticker_clean, df_external, symbol_id, timeframe=tf, max_sync=req_count)
+
+    # 4. Đọc dữ liệu trực tiếp từ Strapi symbol-histories theo đúng Timeframe
+    df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
+    if not df_strapi.empty and len(df_strapi) > 0:
+        return df_strapi
+
+    return df_external
 
 # ==============================================================================
 # 2. TÍNH TOÁN CHỈ BÁO: SMA(288) & SUPERTREND(10, 3)
@@ -486,73 +863,7 @@ def scan_strategy_signals(
 # 4. ĐỒNG BỘ DATA & PUSH SIGNAL LÊN STRAPI (/trade-station)
 # ==============================================================================
 
-def get_or_create_symbol(ticker: str) -> Optional[str]:
-    """Tìm hoặc tự tạo Symbol trong Strapi nếu chưa có"""
-    ticker_clean = ticker.strip().upper()
-    headers = get_strapi_headers()
-    
-    url = f"{STRAPI_BASE_URL}/api/symbols?filters[Name][$eq]={ticker_clean}"
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        data = res.json().get("data", [])
-        if data:
-            return data[0].get("documentId") or str(data[0].get("id"))
-        
-        # Nếu chưa có thì tự tạo mới
-        create_url = f"{STRAPI_BASE_URL}/api/symbols"
-        create_res = requests.post(create_url, json={"data": {"Name": ticker_clean, "Description": f"{ticker_clean} stock"}}, headers=headers, timeout=10)
-        if create_res.status_code in [200, 201]:
-            created = create_res.json().get("data", {})
-            return created.get("documentId") or str(created.get("id"))
-    except Exception as e:
-        print(f"Lỗi get_or_create_symbol cho {ticker_clean}: {e}")
-    return None
-
-def sync_candles_to_strapi(ticker: str, df: pd.DataFrame, symbol_id: str, max_sync: int = 30):
-    """Tự động đồng bộ các nến mới nhất vào Strapi (mặc định 30 nến gần nhất để chạy siêu nhanh)"""
-    if df.empty or not symbol_id:
-        return
-
-    headers = get_strapi_headers()
-    try:
-        # Lấy ngày nến mới nhất đã lưu trong Strapi
-        latest_res = requests.get(
-            f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={ticker}&sort=date:desc&pagination[pageSize]=1",
-            headers=headers,
-            timeout=10
-        )
-        latest_items = latest_res.json().get("data", [])
-        latest_date_str = None
-        if latest_items:
-            attrs = latest_items[0].get("attributes", latest_items[0])
-            latest_date_str = attrs.get("date")
-
-        # Lọc các nến mới hơn
-        new_candles = df
-        if latest_date_str:
-            new_candles = df[df["date"] > latest_date_str]
-        else:
-            new_candles = df.tail(max_sync)
-
-        if not new_candles.empty:
-            to_insert = new_candles.tail(max_sync)
-            print(f"-> Đang đồng bộ {len(to_insert)} nến mới cho {ticker} vào Strapi...", flush=True)
-            for _, candle in to_insert.iterrows():
-                payload = {
-                    "data": {
-                        "symbol": symbol_id,
-                        "date": candle["date"],
-                        "open": candle["open"],
-                        "high": candle["high"],
-                        "low": candle["low"],
-                        "close": candle["close"],
-                        "volume": candle["volume"]
-                    }
-                }
-                requests.post(f"{STRAPI_BASE_URL}/api/symbol-histories", json=payload, headers=headers, timeout=5)
-            print(f"-> Đã đồng bộ xong nến cho {ticker}.", flush=True)
-    except Exception as e:
-        print(f"Cảnh báo khi sync nến cho {ticker}: {e}", flush=True)
+get_or_create_symbol = get_or_create_symbol_in_strapi
 
 def get_or_create_rule(rule_name: str, rule_type: str = "entry") -> Optional[str]:
     """Tìm hoặc tạo Rule tương ứng trong Strapi để Trade Station hiển thị màu marker đúng"""
@@ -732,10 +1043,11 @@ def scan_symbol_json(
     st_multiplier: float = SUPERTREND_MULTIPLIER,
     ma_period: int = MA_PERIOD,
     allow_long: bool = True,
-    allow_short: bool = True
+    allow_short: bool = True,
+    timeframe: str = "D1"
 ) -> Dict:
     """Quét dữ liệu và trả về JSON chuẩn để hiển thị trực tiếp trên UI Chart & Table mà không cần lưu vào DB"""
-    df = fetch_market_candles(ticker, countback=countback)
+    df = fetch_market_candles(ticker, countback=countback, timeframe=timeframe)
     if df.empty or len(df) < ma_period:
         return {
             "ticker": ticker,
@@ -963,15 +1275,18 @@ def fast_backtest_eval(
 
 def optimize_strategy_parameters(
     ticker: str,
-    countback: int = 500,
+    countback: int = 50000,
     allow_long: bool = True,
-    allow_short: bool = True
+    allow_short: bool = True,
+    timeframe: str = "D1"
 ) -> Dict:
     """
-    Tự động chạy Grid Search tối ưu hóa tất cả các tham số để tìm ra bộ cấu hình
-    mang lại Profit Factor (và PnL) cao nhất cho mã cổ phiếu/chỉ số cụ thể.
+    Tự động chạy Grid Search tối ưu hóa tất cả các tham số dựa trên TOÀN BỘ dữ liệu lịch sử
+    có trong Strapi theo Timeframe đã chọn để đưa ra con số Profit Factor tối ưu thực tế và chuẩn xác nhất.
     """
-    df = fetch_market_candles(ticker, countback=countback)
+    # Lấy toàn bộ nến lịch sử có trong Strapi (tối đa 50,000 nến) cho Timeframe này
+    req_count = 50000 if not countback or int(countback) < 5000 else int(countback)
+    df = fetch_market_candles(ticker, countback=req_count, timeframe=timeframe)
     if df.empty or len(df) < 50:
         return {
             "ticker": ticker,
@@ -1017,8 +1332,11 @@ def optimize_strategy_parameters(
             st_val, st_dir = calculate_supertrend(df, period=p, multiplier=mult)
             st_cache[(p, mult)] = (st_val.values, st_dir.values)
 
-    max_ma = max(ma_period_grid)
-    start_idx = max(max_ma, 20)
+    # Phân loại độ tin cậy mẫu (Sample Size Reliability Tiers) dựa trên tổng số nến n
+    # Đảm bảo số lượng lệnh tối thiểu phải đủ lớn để tránh Overfitting / Fluke
+    target_trades = max(15, min(30, int(n / 35))) if n >= 300 else max(8, int(n / 25))
+    min_solid_trades = max(8, min(15, int(n / 60)))
+    start_idx = max(max(ma_period_grid), 20)
 
     best_score = None
     best_combo = None
@@ -1056,9 +1374,30 @@ def optimize_strategy_parameters(
                             pnl = res['total_pnl']
                             wr = res['win_rate']
 
-                            # Ưu tiên các combo có đủ mẫu giao dịch (>= 3 lệnh)
-                            tier = 3 if closed >= 5 else (2 if closed >= 3 else (1 if closed >= 1 else 0))
-                            score = (tier, pf, pnl, wr, closed)
+                            # 1. Giới hạn PF trần (Capped PF) ở mức 10.0 để tránh trường hợp ít lệnh không loss đẩy PF ảo lên 100-200
+                            capped_pf = min(pf, 10.0)
+
+                            # 2. Xếp hạng Tier theo độ tin cậy thống kê (Số lượng lệnh mẫu)
+                            if closed >= target_trades and pnl > 0 and pf >= 1.2:
+                                tier = 4  # Rất đáng tin cậy: Mẫu lớn, PnL dương, PF tốt
+                            elif closed >= min_solid_trades and pnl > 0 and pf >= 1.1:
+                                tier = 3  # Đáng tin cậy: Mẫu khá, PnL dương
+                            elif closed >= 6 and pnl > 0:
+                                tier = 2  # Chấp nhận được
+                            elif closed >= 3:
+                                tier = 1  # Mẫu nhỏ
+                            else:
+                                tier = 0  # Mẫu quá ít (< 3 lệnh)
+
+                            # 3. Điểm đánh giá tổng hợp (Composite Fitness Score):
+                            # Thưởng điểm cho số lượng lệnh mẫu sqrt(closed), PF thực tế và PnL
+                            trade_weight = np.sqrt(closed)
+                            wr_factor = 1.0 if wr >= 40.0 else max(0.2, wr / 40.0)
+                            pnl_weight = max(0.1, pnl) if pnl > 0 else (pnl / 10.0)
+
+                            fitness = capped_pf * trade_weight * pnl_weight * wr_factor
+
+                            score = (tier, round(fitness, 4), pnl, capped_pf, closed)
 
                             if best_score is None or score > best_score:
                                 best_score = score
@@ -1083,10 +1422,10 @@ def optimize_strategy_parameters(
             "tp_rr": True
         }
 
-    # Chạy lại bản chi tiết với combo tối ưu nhất để lấy đầy đủ trades & chart markers
+    # Chạy lại bản chi tiết với combo tối ưu nhất trên TOÀN BỘ tập nến
     full_result = scan_symbol_json(
         ticker=ticker,
-        countback=countback,
+        countback=len(df),
         rr_ratio=best_combo["rr_ratio"],
         tp_supertrend=best_combo["tp_supertrend"],
         tp_rr=best_combo["tp_rr"],
@@ -1095,7 +1434,8 @@ def optimize_strategy_parameters(
         st_multiplier=best_combo["st_multiplier"],
         ma_period=best_combo["ma_period"],
         allow_long=allow_long,
-        allow_short=allow_short
+        allow_short=allow_short,
+        timeframe=timeframe
     )
 
     full_result["bestParams"] = {
@@ -1123,6 +1463,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Supertrend + MA Strategy Scanner & Optimizer")
     parser.add_argument("--ticker", type=str, default=None, help="Mã cổ phiếu cần quét (e.g. FPT, VNINDEX, VN30F1M)")
+    parser.add_argument("--timeframe", type=str, default="D1", help="Timeframe (M1, M5, M30, H4, D1, W1)")
     parser.add_argument("--json", action="store_true", help="Trả về kết quả định dạng JSON")
     parser.add_argument("--optimize", action="store_true", help="Tự động tìm bộ tham số mang lại Profit Factor cao nhất")
     parser.add_argument("--countback", type=int, default=500, help="Số lượng nến lịch sử cần lấy")
@@ -1152,13 +1493,14 @@ if __name__ == "__main__":
             ticker=ticker,
             countback=args.countback,
             allow_long=args.allow_long,
-            allow_short=args.allow_short
+            allow_short=args.allow_short,
+            timeframe=args.timeframe
         )
         if args.json:
             print(json.dumps(res, ensure_ascii=False))
         else:
             bp = res.get("bestParams", {})
-            print(f"[*] THAM SỐ TỐI ƯU NHẤT CHO {ticker}:")
+            print(f"[*] THAM SỐ TỐI ƯU NHẤT CHO {ticker} ({args.timeframe}):")
             print(f"    - Supertrend: Period = {bp.get('stPeriod')}, Multiplier = {bp.get('stMultiplier')}")
             print(f"    - MA Period: {bp.get('maPeriod')}")
             print(f"    - Entry Type: {bp.get('entryType')}")
@@ -1178,7 +1520,8 @@ if __name__ == "__main__":
             st_multiplier=args.st_multiplier,
             ma_period=args.ma_period,
             allow_long=args.allow_long,
-            allow_short=args.allow_short
+            allow_short=args.allow_short,
+            timeframe=args.timeframe
         )
         print(json.dumps(res, ensure_ascii=False))
     elif args.ticker:

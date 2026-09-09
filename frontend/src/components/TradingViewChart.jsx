@@ -4,6 +4,7 @@ import { calculateSMA, drawMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimoku';
 import { calculateVWAP, drawVWAP } from '../indicators/vwap';
+import { RefreshCw } from 'lucide-react';
 
 const getRuleId = (rule) => rule?.documentId || rule?.id || '';
 
@@ -19,12 +20,29 @@ const TradingViewChart = ({
     vwapAnchor = 'Year',
     supertrendPeriod = 10,
     supertrendMultiplier = 3,
-    maPeriod = 288
+    maPeriod = 288,
+    timeframe = 'D1',
+    onLoadMore = null,
+    isLoadingMore = false,
+    hasMore = true
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
     const previousVisibleLogicalRangeRef = useRef(null);
     const [hoverTooltip, setHoverTooltip] = useState(null);
+
+    const onLoadMoreRef = useRef(onLoadMore);
+    onLoadMoreRef.current = onLoadMore;
+    const isLoadingMoreRef = useRef(isLoadingMore);
+    isLoadingMoreRef.current = isLoadingMore;
+    const hasMoreRef = useRef(hasMore);
+    hasMoreRef.current = hasMore;
+
+    const prevDataLengthRef = useRef(0);
+    const prevFirstTimeRef = useRef(null);
+    const prevSymbolRef = useRef(symbol);
+    const prevTimeframeRef = useRef(timeframe);
+    const lastLoadMoreTimeRef = useRef(0);
 
     const strategyRuleLookup = useMemo(() => {
         const lookup = new Map();
@@ -45,16 +63,46 @@ const TradingViewChart = ({
         return lookup;
     }, [strategy]);
 
+    const isIntraday = useMemo(() => {
+        const tf = String(timeframe || '').toUpperCase();
+        if (['M1', '1M', 'M5', '5M', 'M15', '15M', 'M30', '30M', 'H1', '1H', 'H4', '4H'].includes(tf)) return true;
+        if (!data || data.length === 0) return false;
+        return data.some(item => {
+            const d = String(item.date || item.tradingDate || '');
+            const t = String(item.time || '');
+            return (d.includes('T') && !d.endsWith('T00:00:00.000Z') && !d.endsWith('T00:00:00Z')) || (t && t.includes(':') && t !== '00:00:00');
+        });
+    }, [data, timeframe]);
+
+    const getTimeKey = (item) => {
+        if (!item) return '';
+        if (typeof item.time === 'number') return item.time;
+        if (typeof item._timeKey === 'number') return item._timeKey;
+        const rawDate = item.date || item.tradingDate || '';
+        const rawTime = item.time || '';
+        if (isIntraday) {
+            let combined = rawDate;
+            if (rawDate && rawTime && typeof rawTime === 'string' && rawTime.includes(':') && !String(rawDate).includes('T')) {
+                combined = `${String(rawDate).split(' ')[0]}T${rawTime}Z`;
+            } else if (!rawDate && rawTime) {
+                combined = rawTime;
+            }
+            const dt = new Date(combined);
+            return isNaN(dt.getTime()) ? String(rawDate || rawTime) : Math.floor(dt.getTime() / 1000);
+        }
+        return String(rawDate || rawTime).split('T')[0];
+    };
+
     const signalsByDate = useMemo(() => {
         const map = new Map();
         if (!signals || signals.length === 0) return map;
         signals.forEach(sig => {
-            const sigDate = sig.date ? sig.date.split('T')[0] : null;
-            if (!sigDate) return;
+            const sigKey = getTimeKey(sig);
+            if (!sigKey) return;
 
-            const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
+            const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
             const ruleId = String(getRuleId(rule));
-            const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || 'unknown';
+            const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'unknown';
 
             const colors = {
                 entry: '#60a5fa', // blue
@@ -64,47 +112,54 @@ const TradingViewChart = ({
                 unknown: '#9ca3af'
             };
 
-            const list = map.get(sigDate) || [];
+            const list = map.get(sigKey) || [];
             list.push({
                 name: (rule.signalText || rule.signal_text)?.trim() || rule.Name || 'Signal',
                 type,
-                date: sigDate,
+                date: sigKey,
                 color: colors[type] || colors.unknown,
                 rule
             });
-            map.set(sigDate, list);
+            map.set(sigKey, list);
         });
         return map;
-    }, [signals, strategyRuleLookup]);
+    }, [signals, strategyRuleLookup, isIntraday]);
 
     useEffect(() => {
         if (!data || data.length === 0) return;
 
         // lightweight-charts requires strictly ascending, unique times.
-        // Strapi pagination or multiple intraday records can produce duplicate days.
         const sortedData = [...data]
-            .sort((a, b) => new Date(a.date) - new Date(b.date))
+            .map(item => ({ ...item, _timeKey: getTimeKey(item) }))
+            .filter(item => item._timeKey !== undefined && item._timeKey !== null && item._timeKey !== '')
+            .sort((a, b) => {
+                if (typeof a._timeKey === 'number' && typeof b._timeKey === 'number') {
+                    return a._timeKey - b._timeKey;
+                }
+                return String(a._timeKey).localeCompare(String(b._timeKey));
+            })
             .reduce((unique, item) => {
-                const time = String(item.date || '').split('T')[0];
                 const previous = unique[unique.length - 1];
-                const previousTime = previous ? String(previous.date || '').split('T')[0] : '';
-                if (time && time !== previousTime) unique.push(item);
+                if (!previous || previous._timeKey !== item._timeKey) {
+                    unique.push(item);
+                }
                 return unique;
             }, []);
 
         // Format data for lightweight-charts
         const candleData = sortedData.map(item => ({
-            time: item.date.split('T')[0], // YYYY-MM-DD
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            close: item.close,
+            time: item._timeKey,
+            open: Number(item.open),
+            high: Number(item.high),
+            low: Number(item.low),
+            close: Number(item.close),
+            volume: Number(item.volume || 0),
         }));
 
         const volumeData = sortedData.map(item => ({
-            time: item.date.split('T')[0],
-            value: item.volume,
-            color: item.close >= item.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+            time: item._timeKey,
+            value: Number(item.volume || 0),
+            color: Number(item.close) >= Number(item.open) ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
         }));
 
         const commonChartOptions = {
@@ -119,6 +174,8 @@ const TradingViewChart = ({
             timeScale: {
                 borderColor: '#4b5563',
                 rightOffset: 20,
+                timeVisible: isIntraday,
+                secondsVisible: false,
             },
             rightPriceScale: {
                 borderColor: '#4b5563',
@@ -181,11 +238,11 @@ const TradingViewChart = ({
             drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
             drawMA(chart, LineSeries, candleData);
         } else if (template === 'VWAP') {
-            const vwapData = calculateVWAP(sortedData, vwapAnchor);
+            const vwapData = calculateVWAP(candleData, vwapAnchor || 'Year');
             drawVWAP(chart, LineSeries, vwapData);
-            drawMA(chart, LineSeries, candleData, 20, { lineWidth: 1 });
+            drawMA(chart, LineSeries, candleData, maPeriod || 9, { lineWidth: 1.5, color: '#f59e0b' });
         } else {
-            const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, sortedData);
+            const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, candleData);
             drawSupertrend(chart, LineSeries, supertrendData);
             drawMA(chart, LineSeries, candleData, maPeriod || 288);
         }
@@ -212,11 +269,11 @@ const TradingViewChart = ({
         // Markers (Signals and an optional externally-selected candle)
         if ((signals && signals.length > 0) || focusDate) {
             const markers = signals.map(sig => {
-                const sigDate = String(sig.date || sig.time || '').split('T')[0];
-                const exists = sortedData.find(d => String(d.date || d.time || '').split('T')[0] === sigDate);
+                const sigKey = getTimeKey(sig);
+                const exists = sortedData.some(d => d._timeKey === sigKey);
                 if (!exists) return null;
 
-                const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
+                const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
                 const ruleId = String(getRuleId(rule));
                 const rawType = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'entry';
                 const lowerType = String(rawType).toLowerCase();
@@ -229,9 +286,6 @@ const TradingViewChart = ({
                 let text = '';
 
                 if (lowerType === 'takeprofit') {
-                    // Takeprofit: Luôn là mũi tên blue
-                    // - Long TP: Mũi tên nằm TRÊN nến hướng xuống (aboveBar)
-                    // - Short TP: Mũi tên nằm DƯỚI nến hướng lên (belowBar)
                     color = '#3b82f6';
                     if (isShort) {
                         position = 'belowBar';
@@ -241,20 +295,15 @@ const TradingViewChart = ({
                         shape = 'arrowDown';
                     }
                 } else if (lowerType === 'stoploss') {
-                    // Stoploss: Hình tròn màu đỏ (circle), không cần text
-                    // - Long SL: nằm DƯỚI nến (belowBar)
-                    // - Short SL: nằm TRÊN nến (aboveBar)
                     color = '#ef4444';
                     shape = 'circle';
                     position = isShort ? 'aboveBar' : 'belowBar';
                     text = '';
                 } else if (isShort) {
-                    // Short entry: Mũi tên đỏ Red hướng xuống, nằm TRÊN nến
                     color = '#ef4444';
                     shape = 'arrowDown';
                     position = 'aboveBar';
                 } else {
-                    // Long entry: Mũi tên xanh Green hướng lên, nằm DƯỚI nến
                     color = '#10b981';
                     shape = 'arrowUp';
                     position = 'belowBar';
@@ -267,7 +316,7 @@ const TradingViewChart = ({
                 if (sig.text !== undefined && sig.text !== '') text = sig.text;
 
                 return {
-                    time: sigDate,
+                    time: sigKey,
                     position,
                     color,
                     shape,
@@ -276,10 +325,10 @@ const TradingViewChart = ({
                 };
             }).filter(Boolean);
 
-            const normalizedFocusDate = String(focusDate || '').split('T')[0];
-            if (normalizedFocusDate && candleData.some(candle => candle.time === normalizedFocusDate)) {
+            const focusKey = focusDate ? getTimeKey({ date: focusDate, time: focusDate }) : null;
+            if (focusKey && sortedData.some(candle => candle._timeKey === focusKey)) {
                 markers.push({
-                    time: normalizedFocusDate,
+                    time: focusKey,
                     position: 'belowBar',
                     color: '#fbbf24',
                     shape: 'arrowUp',
@@ -288,7 +337,12 @@ const TradingViewChart = ({
                 });
             }
 
-            markers.sort((a, b) => (a.time > b.time ? 1 : -1));
+            markers.sort((a, b) => {
+                if (typeof a.time === 'number' && typeof b.time === 'number') {
+                    return a.time - b.time;
+                }
+                return String(a.time).localeCompare(String(b.time));
+            });
             createSeriesMarkers(candlestickSeries, markers);
         }
 
@@ -300,6 +354,15 @@ const TradingViewChart = ({
             if (timeRange) {
                 timeScale2.setVisibleLogicalRange(timeRange);
                 previousVisibleLogicalRangeRef.current = timeRange;
+
+                // Infinite historical scroll: when user scrolls near the leftmost boundary
+                if (timeRange.from <= 12 && typeof onLoadMoreRef.current === 'function' && !isLoadingMoreRef.current && hasMoreRef.current !== false) {
+                    const now = Date.now();
+                    if (now - lastLoadMoreTimeRef.current > 1000) {
+                        lastLoadMoreTimeRef.current = now;
+                        onLoadMoreRef.current();
+                    }
+                }
             }
         });
 
@@ -310,8 +373,34 @@ const TradingViewChart = ({
             }
         });
 
-        const normalizedFocusDate = String(focusDate || '').split('T')[0];
-        const focusIndex = candleData.findIndex(candle => candle.time === normalizedFocusDate);
+        const prevLength = prevDataLengthRef.current;
+        const prevFirstTime = prevFirstTimeRef.current;
+        const currentFirstTime = sortedData[0]?._timeKey;
+        const prevSymbol = prevSymbolRef.current;
+        const prevTf = prevTimeframeRef.current;
+
+        const isSameDataset = prevSymbol === symbol && prevTf === timeframe;
+        const isPrepend = isSameDataset && prevLength > 0 && sortedData.length > prevLength && currentFirstTime !== prevFirstTime;
+
+        if (isPrepend && previousVisibleLogicalRangeRef.current) {
+            const addedCount = sortedData.length - prevLength;
+            const prevRange = previousVisibleLogicalRangeRef.current;
+            const shiftedRange = {
+                from: prevRange.from + addedCount,
+                to: prevRange.to + addedCount,
+            };
+            timeScale1.setVisibleLogicalRange(shiftedRange);
+            timeScale2.setVisibleLogicalRange(shiftedRange);
+            previousVisibleLogicalRangeRef.current = shiftedRange;
+        }
+
+        prevDataLengthRef.current = sortedData.length;
+        prevFirstTimeRef.current = currentFirstTime;
+        prevSymbolRef.current = symbol;
+        prevTimeframeRef.current = timeframe;
+
+        const focusKey = focusDate ? getTimeKey({ date: focusDate, time: focusDate }) : null;
+        const focusIndex = focusKey ? candleData.findIndex(candle => candle.time === focusKey) : -1;
         if (focusIndex >= 0) {
             const prevRange = previousVisibleLogicalRangeRef.current;
             // Preserve the user's current zoom level (number of visible bars), default to 80 bars
@@ -338,16 +427,20 @@ const TradingViewChart = ({
                     volumeChart.setCrosshairPosition(volData.value, param.time, volumeSeries);
                 }
 
-                const dateStr = typeof param.time === 'string'
-                    ? param.time
-                    : (param.time?.year ? `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}` : null);
+                let dateDisplay = String(param.time);
+                if (typeof param.time === 'number') {
+                    const dt = new Date(param.time * 1000);
+                    dateDisplay = dt.toISOString().replace('T', ' ').substring(0, 19);
+                } else if (param.time?.year) {
+                    dateDisplay = `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}`;
+                }
 
-                const activeSignals = dateStr ? signalsByDate.get(dateStr) : null;
+                const activeSignals = signalsByDate.get(param.time);
                 if (activeSignals && activeSignals.length > 0) {
                     setHoverTooltip({
                         x: param.point.x,
                         y: param.point.y,
-                        date: dateStr,
+                        date: dateDisplay,
                         signals: activeSignals,
                         chartWidth: chartContainerRef.current?.clientWidth || 300,
                         chartHeight: chartContainerRef.current?.clientHeight || 300,
@@ -403,10 +496,17 @@ const TradingViewChart = ({
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, vwapAnchor, disableScrollZoom, disableChartMove, focusDate]);
+    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, vwapAnchor, disableScrollZoom, disableChartMove, focusDate, timeframe, supertrendPeriod, supertrendMultiplier, maPeriod]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">
+            {isLoadingMore && (
+                <div className="absolute top-3 left-3 z-30 flex items-center gap-2 bg-gray-900/90 border border-purple-500/40 text-purple-300 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xl animate-pulse pointer-events-none">
+                    <RefreshCw size={14} className="animate-spin text-purple-400" />
+                    <span>Đang tải thêm nến quá khứ...</span>
+                </div>
+            )}
+
             {(!data || data.length === 0) && (
                 <div className="absolute inset-0 flex items-center justify-center text-gray-500 z-10">
                     No data available

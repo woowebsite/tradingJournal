@@ -29,6 +29,10 @@
     "volume": {
       "type": "float"
     },
+    "timeframe": {
+      "type": "string",
+      "default": "D1"
+    },
     "symbol": {
       "type": "relation",
       "relation": "manyToOne",

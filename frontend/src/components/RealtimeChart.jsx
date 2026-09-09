@@ -82,7 +82,13 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
     // Format time helper
     const formatTime = useCallback((time) => {
         if (typeof time === 'number') return time;
-        if (typeof time === 'string' && time.includes('T')) return time.split('T')[0];
+        if (typeof time === 'string' && time.includes('T')) {
+            if (time.endsWith('T00:00:00.000Z') || time.endsWith('T00:00:00Z')) {
+                return time.split('T')[0];
+            }
+            const dt = new Date(time);
+            return isNaN(dt.getTime()) ? time : Math.floor(dt.getTime() / 1000);
+        }
         return time;
     }, []);
 

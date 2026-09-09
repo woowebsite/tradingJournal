@@ -8,8 +8,9 @@ import { getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, update
 const HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_CANDLES = 50000;
 
-export const fetchPagedSymbolHistories = async (filterSymbolId, fromDate, toDate) => {
+export const fetchPagedSymbolHistories = async (filterSymbolId, fromDate, toDate, timeframe = 'D1') => {
     const histories = [];
+    const tf = String(timeframe || 'D1').trim().toUpperCase();
 
     let urlTemplate = `/symbol-histories?populate=symbol&sort=date:desc&pagination[pageSize]=${HISTORY_PAGE_SIZE}`;
     if (filterSymbolId) {
@@ -18,6 +19,11 @@ export const fetchPagedSymbolHistories = async (filterSymbolId, fromDate, toDate
         } else {
             urlTemplate += `&filters[symbol][id][$eq]=${encodeURIComponent(filterSymbolId)}`;
         }
+    }
+    if (tf === 'D1') {
+        urlTemplate += `&filters[$or][0][timeframe][$eq]=D1&filters[$or][1][timeframe][$null]=true`;
+    } else {
+        urlTemplate += `&filters[timeframe][$eq]=${encodeURIComponent(tf)}`;
     }
     if (fromDate) {
         urlTemplate += `&filters[date][$gte]=${encodeURIComponent(fromDate)}`;
@@ -216,11 +222,41 @@ export const loadExternalHistory = createAsyncThunk(
         try {
             let externalData = [];
 
+            const isCrypto = marketType === 'Crypto' || 
+                String(symbol || '').toUpperCase().includes('USDT') || 
+                String(symbol || '').toUpperCase().endsWith('.P') || 
+                String(symbol || '').toUpperCase().startsWith('BINANCE:');
+
+            const resStr = String(resolution || 'D1').trim();
+            const intervalMap = {
+                '1': '1m', 'M1': '1m', '1m': '1m',
+                '5': '5m', 'M5': '5m', '5m': '5m',
+                '15': '15m', 'M15': '15m', '15m': '15m',
+                '30': '30m', 'M30': '30m', '30m': '30m',
+                '60': '1h', 'H1': '1h', '1h': '1h',
+                '240': '4h', 'H4': '4h', '4h': '4h',
+                '1D': '1d', 'D1': '1d', 'D': '1d', '1d': '1d',
+                '1W': '1w', 'W1': '1w', 'W': '1w', '1w': '1w'
+            };
+
+            const tfMap = {
+                '1': 'M1', '1m': 'M1', 'M1': 'M1',
+                '5': 'M5', '5m': 'M5', 'M5': 'M5',
+                '15': 'M15', '15m': 'M15', 'M15': 'M15',
+                '30': 'M30', '30m': 'M30', 'M30': 'M30',
+                '60': 'H1', '1h': 'H1', 'H1': 'H1',
+                '240': 'H4', '4h': 'H4', 'H4': 'H4',
+                '1D': 'D1', 'D': 'D1', '1d': 'D1', 'D1': 'D1',
+                '1W': 'W1', 'W': 'W1', '1w': 'W1', 'W1': 'W1'
+            };
+            const currentTf = tfMap[resStr] || 'D1';
+
             // Determine Source based on Market Type
-            if (marketType === 'Crypto') {
-                externalData = await getCryptoHistory(symbol);
+            if (isCrypto) {
+                const interval = intervalMap[resStr] || '1d';
+                externalData = await getCryptoHistory(symbol, interval, 500);
             } else if (String(marketType || '').toLowerCase() === 'derivative') {
-                externalData = await getDerivativeHistory(symbol.split(':')[0], resolution || '1', 350);
+                externalData = await getDerivativeHistory(symbol.split(':')[0], resStr || '1', 350);
             } else {
                 // Default to TCBS (Stocks)
                 const ticket = symbol.split(':')[0];
@@ -229,12 +265,13 @@ export const loadExternalHistory = createAsyncThunk(
 
             if (!externalData || externalData.length === 0) return [];
 
-            // 1.5 Fetch latest date from Strapi to avoid duplicates
-            // We sort by date descending and take the first one.
+            // 1.5 Fetch latest date from Strapi to avoid duplicates for this timeframe
             let latestDate = null;
             try {
-                // Fetch documentId as well for Strapi v5 compatibility
-                const latestRes = await api.get(`/symbol-histories?filters[symbol][documentId][$eq]=${symbolId}&sort=date:desc&pagination[pageSize]=1`);
+                const tfFilter = currentTf === 'D1' 
+                    ? `&filters[$or][0][timeframe][$eq]=D1&filters[$or][1][timeframe][$null]=true`
+                    : `&filters[timeframe][$eq]=${encodeURIComponent(currentTf)}`;
+                const latestRes = await api.get(`/symbol-histories?filters[symbol][documentId][$eq]=${symbolId}${tfFilter}&sort=date:desc&pagination[pageSize]=1`);
                 const latestItems = latestRes.data.data;
                 if (latestItems && latestItems.length > 0) {
                     latestDate = new Date(latestItems[0].date);
@@ -245,52 +282,43 @@ export const loadExternalHistory = createAsyncThunk(
 
             // Filter external data to keep only NEW records
             const newRecords = externalData.filter(item => {
-                if (!latestDate) return true; // No history, import all
+                if (!latestDate) return true;
                 const itemDate = new Date(item.tradingDate);
-                // Return true if itemDate is NEWER than latestDate
                 return itemDate > latestDate;
             });
 
             if (newRecords.length === 0) {
-                return 0; // Nothing to add
+                return 0;
             }
 
             let count = 0;
-            // 2. Save NEW records to Strapi
+            // 2. Save NEW records to Strapi with timeframe
             const promises = newRecords.map(async (item) => {
-                // Formatting payload for Strapi
-                // TCBS: { ticker, open, high, low, close, volume, tradingDate }
-                // Strapi: { symbol: ID, date, open, high, low, close, volume }
-
                 const payload = {
                     data: {
                         symbol: symbolId,
-                        date: item.tradingDate, // ISO string likely needed? TCBS might return '2025-01-01T...'
+                        date: item.tradingDate,
                         open: item.open,
                         high: item.high,
                         low: item.low,
                         close: item.close,
-                        volume: item.volume
+                        volume: item.volume,
+                        timeframe: currentTf
                     }
                 };
 
-                // Simple duplication check could be: try create, ignore error?
-                // Or assume this is a manual "sync" action.
                 try {
-                    // We verify duplicates by querying? Too slow.
-                    // Just fire and forget for now or handle errors.
                     await api.post('/symbol-histories', payload);
                     count++;
                 } catch (e) {
-                    // Ignore duplicate errors if they arise (assuming constraints)
-                    // Or logging
+                    // Ignore duplicate errors if they arise
                 }
             });
 
             await Promise.all(promises);
 
             // 3. Refresh list
-            dispatch(fetchHistories({ symbolId, forceRefresh: true }));
+            dispatch(fetchHistories({ symbolId, timeframe: currentTf, forceRefresh: true }));
             return count;
 
         } catch (error) {
