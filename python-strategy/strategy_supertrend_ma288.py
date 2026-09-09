@@ -1,0 +1,1214 @@
+import sys
+import time
+import numpy as np
+import pandas as pd
+import requests
+from datetime import datetime
+from typing import List, Dict, Optional
+
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+# ==============================================================================
+# CẤU HÌNH HỆ THỐNG & CHIẾN LƯỢC (MÔ HÌNH 2)
+# ==============================================================================
+STRAPI_BASE_URL = "http://localhost:1337"
+STRAPI_API_TOKEN = ""  # Nhập Strapi Bearer Token nếu backend có bật JWT Auth
+
+# Tham số chiến lược
+MA_PERIOD = 288                 # Chu kỳ đường MA dài hạn (MA288)
+SUPERTREND_PERIOD = 10          # Chu kỳ ATR cho Supertrend
+SUPERTREND_MULTIPLIER = 3.0     # Hệ số nhân ATR cho Supertrend
+RISK_REWARD_RATIO = 1.5         # Tỷ lệ Risk : Reward để tính Take Profit
+
+# Danh sách mã chứng khoán / phái sinh cần quét
+DEFAULT_WATCHLIST = ["VNINDEX", "VN30F1M", "FPT", "HPG", "SSI", "MWG", "TCB", "VHM"]
+
+# ==============================================================================
+# 1. FETCH DỮ LIỆU THỊ TRƯỜNG TỰ ĐỘNG (DIRECT DATA PROVIDER)
+# ==============================================================================
+
+def get_strapi_headers() -> Dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if STRAPI_API_TOKEN:
+        headers["Authorization"] = f"Bearer {STRAPI_API_TOKEN}"
+    return headers
+
+def fetch_market_candles(ticker: str, resolution: str = "1D", countback: int = 500) -> pd.DataFrame:
+    """
+    Tự động lấy dữ liệu lịch sử nến từ 24hMoney (Realtime API).
+    Hỗ trợ cả Cổ phiếu (FPT, HPG...), Chỉ số (VNINDEX...) và Phái sinh (VN30F1M...).
+    """
+    ticker_clean = ticker.strip().upper()
+    to_ts = int(time.time())
+    # Khoảng thời gian lùi về quá khứ (nhân 2.5 để trừ ngày nghỉ T7, CN, Lễ)
+    from_ts = to_ts - int(countback * 2.5 * 86400)
+    
+    url = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution}&from={from_ts}&to={to_ts}&countback={countback}"
+    
+    try:
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
+                candles = []
+                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
+                
+                # Check nếu dữ liệu 24hmoney là dạng x1000 hay giá gốc
+                first_close = float(data["c"][0])
+                if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"]:
+                    # 24hmoney thường chia 1000 cho giá cổ phiếu (ví dụ 50.5 thay vì 50500)
+                    multiplier = 1000
+                else:
+                    multiplier = 1
+
+                for i in range(len(data["t"])):
+                    candles.append({
+                        "date": datetime.utcfromtimestamp(data["t"][i]).strftime("%Y-%m-%dT00:00:00.000Z"),
+                        "open": round(float(data["o"][i]) * multiplier, 2),
+                        "high": round(float(data["h"][i]) * multiplier, 2),
+                        "low": round(float(data["l"][i]) * multiplier, 2),
+                        "close": round(float(data["c"][i]) * multiplier, 2),
+                        "volume": float(data["v"][i]),
+                    })
+                
+                df = pd.DataFrame(candles)
+                df["dt"] = pd.to_datetime(df["date"])
+                df = df.sort_values("dt").reset_index(drop=True)
+                return df
+    except Exception as e:
+        print(f"Lỗi khi tải dữ liệu từ 24hMoney cho {ticker_clean}: {e}")
+
+    # Fallback: Nếu không lấy được từ 24hMoney, thử lấy từ Strapi
+    return fetch_history_from_strapi(ticker_clean)
+
+def fetch_history_from_strapi(ticker: str) -> pd.DataFrame:
+    """Lấy dữ liệu từ Strapi backend nếu đã có sẵn trong cơ sở dữ liệu"""
+    url = f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={ticker}&pagination[limit]=1000&sort=date:asc"
+    try:
+        res = requests.get(url, headers=get_strapi_headers(), timeout=10)
+        if res.status_code == 200:
+            records = res.json().get("data", [])
+            if records:
+                data = []
+                for item in records:
+                    attrs = item.get("attributes", item)
+                    data.append({
+                        "date": attrs.get("date"),
+                        "open": float(attrs.get("open", 0)),
+                        "high": float(attrs.get("high", 0)),
+                        "low": float(attrs.get("low", 0)),
+                        "close": float(attrs.get("close", 0)),
+                        "volume": float(attrs.get("volume", 0)),
+                    })
+                df = pd.DataFrame(data)
+                df["dt"] = pd.to_datetime(df["date"])
+                df = df.sort_values("dt").reset_index(drop=True)
+                return df
+    except Exception as e:
+        print(f"Lỗi khi đọc lịch sử từ Strapi cho {ticker}: {e}")
+    return pd.DataFrame()
+
+# ==============================================================================
+# 2. TÍNH TOÁN CHỈ BÁO: SMA(288) & SUPERTREND(10, 3)
+# ==============================================================================
+
+def calculate_sma(df: pd.DataFrame, period: int = 288, price_col: str = "close") -> pd.Series:
+    """Tính Simple Moving Average (SMA)"""
+    return df[price_col].rolling(window=period).mean()
+
+def calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0):
+    """
+    Tính Supertrend chuẩn xác (khớp 100% với Pine Script và Lightweight Charts frontend)
+    Output:
+      - supertrend: Chuỗi giá trị dải Supertrend
+      - direction: Chuỗi xu hướng (1 = Bullish / Xanh, -1 = Bearish / Đỏ)
+    """
+    high = df['high'].values
+    low = df['low'].values
+    close = df['close'].values
+    n = len(df)
+
+    # 1. Tính True Range (TR)
+    tr = np.zeros(n)
+    tr[0] = high[0] - low[0]
+    for i in range(1, n):
+        hl = high[i] - low[i]
+        hc = abs(high[i] - close[i - 1])
+        lc = abs(low[i] - close[i - 1])
+        tr[i] = max(hl, hc, lc)
+
+    # 2. Tính ATR (Wilder's Smoothing)
+    atr = np.zeros(n)
+    if n >= period:
+        atr[period - 1] = np.mean(tr[:period])
+        for i in range(period, n):
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+    else:
+        atr[:] = np.mean(tr)
+
+    # 3. Tính Basic & Final Bands
+    hl2 = (high + low) / 2.0
+    basic_upper = hl2 + (multiplier * atr)
+    basic_lower = hl2 - (multiplier * atr)
+
+    final_upper = np.zeros(n)
+    final_lower = np.zeros(n)
+    supertrend = np.zeros(n)
+    direction = np.zeros(n)
+
+    final_upper[0] = basic_upper[0]
+    final_lower[0] = basic_lower[0]
+    supertrend[0] = final_upper[0]
+    direction[0] = -1
+
+    for i in range(1, n):
+        prev_close = close[i - 1]
+
+        # Final Upper Band
+        if basic_upper[i] < final_upper[i - 1] or prev_close > final_upper[i - 1]:
+            final_upper[i] = basic_upper[i]
+        else:
+            final_upper[i] = final_upper[i - 1]
+
+        # Final Lower Band
+        if basic_lower[i] > final_lower[i - 1] or prev_close < final_lower[i - 1]:
+            final_lower[i] = basic_lower[i]
+        else:
+            final_lower[i] = final_lower[i - 1]
+
+        # Xác định chiều Supertrend
+        if supertrend[i - 1] == final_upper[i - 1]:
+            if close[i] > final_upper[i]:
+                supertrend[i] = final_lower[i]
+                direction[i] = 1
+            else:
+                supertrend[i] = final_upper[i]
+                direction[i] = -1
+        else:
+            if close[i] < final_lower[i]:
+                supertrend[i] = final_upper[i]
+                direction[i] = -1
+            else:
+                supertrend[i] = final_lower[i]
+                direction[i] = 1
+
+    return pd.Series(supertrend, index=df.index), pd.Series(direction, index=df.index)
+
+# ==============================================================================
+# 3. QUY TẮC VÀO LỆNH & QUẢN LÝ VỊ THẾ (SINGLE POSITION LIFECYCLE)
+# ==============================================================================
+
+def scan_strategy_signals(
+    df: pd.DataFrame,
+    rr_ratio: float = RISK_REWARD_RATIO,
+    tp_supertrend: bool = True,
+    tp_rr: bool = True,
+    entry_type: str = "candle_close",
+    st_period: int = SUPERTREND_PERIOD,
+    st_multiplier: float = SUPERTREND_MULTIPLIER,
+    ma_period: int = MA_PERIOD,
+    allow_long: bool = True,
+    allow_short: bool = True
+) -> Dict:
+    """
+    Quy tắc quản lý lệnh (Single Position at a time):
+    - Chỉ mở TỐI ĐA 1 VỊ THẾ tại một thời điểm.
+    - Sau khi vị thế chạm Take Profit hoặc Stop Loss, lệnh mới đóng và hệ thống mới tìm cơ hội vào lệnh tiếp theo.
+    - Entry Type:
+        1. "candle_close": Giá đóng cửa nến xanh (Long) hoặc nến đỏ (Short)
+        2. "st_reversal": Supertrend đảo chiều từ Downtrend -> Uptrend (Long) hoặc Uptrend -> Downtrend (Short)
+    - Stop Loss : Đặt tại giá trị Supertrend của nến tín hiệu
+    - Take Profit:
+        1. tp_supertrend: Chốt khi Supertrend đảo chiều (Long -> Downtrend, Short -> Uptrend)
+        2. tp_rr: Chốt theo tỷ lệ Risk:Reward (Entry +/- (Risk * R:R))
+    """
+    if len(df) < ma_period:
+        print(f"Cảnh báo: Dữ liệu hiện có {len(df)} nến, cần tối thiểu {ma_period} nến để tính MA{ma_period}.", flush=True)
+        return {"trades": [], "signals": []}
+
+    # Tính toán các chỉ báo
+    df['ma288'] = calculate_sma(df, period=ma_period, price_col='close')
+    df['supertrend'], df['st_dir'] = calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
+
+    trades = []
+    signals = []
+    current_trade = None
+
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        prev_row = df.iloc[i - 1]
+        candle_date = str(row['date'])
+        time_str = candle_date[:10]
+        close_p = float(row['close'])
+        open_p = float(row['open'])
+        high_p = float(row['high'])
+        low_p = float(row['low'])
+        st_val = float(row['supertrend']) if not pd.isna(row['supertrend']) else None
+        st_dir = int(row['st_dir']) if not pd.isna(row['st_dir']) else 0
+        prev_st_dir = int(prev_row['st_dir']) if not pd.isna(prev_row['st_dir']) else 0
+        ma_val = float(row['ma288']) if not pd.isna(row['ma288']) else None
+
+        if ma_val is None or st_val is None:
+            continue
+
+        # -------------------------------------------------------------
+        # 1. KIỂM TRA ĐÓNG LỆNH (NẾU ĐANG CÓ LỆNH MỞ)
+        # -------------------------------------------------------------
+        if current_trade is not None:
+            pos_type = current_trade['type']
+            entry_p = current_trade['entry_price']
+            sl_p = current_trade['stop_loss']
+            tp_p = current_trade['take_profit']
+
+            is_closed = False
+            exit_reason = None
+            exit_price = None
+
+            if pos_type == 'Long':
+                # 1. Chạm Stop Loss (Giá thấp nhất thủng hoặc bằng SL)
+                if low_p <= sl_p:
+                    is_closed = True
+                    exit_reason = 'StopLoss'
+                    exit_price = sl_p
+                # 2. Chốt theo tỷ lệ RRR (nếu bật tp_rr)
+                elif tp_rr and (tp_p is not None) and (high_p >= tp_p):
+                    is_closed = True
+                    exit_reason = 'TakeProfit (RR)'
+                    exit_price = tp_p
+                # 3. Chốt khi Supertrend đảo sang Downtrend (nếu bật tp_supertrend)
+                elif tp_supertrend and (st_dir == -1 or close_p < st_val):
+                    is_closed = True
+                    exit_reason = 'TakeProfit (ST)' if close_p >= entry_p else 'Exit (ST Reversal)'
+                    exit_price = close_p
+
+            elif pos_type == 'Short':
+                # 1. Chạm Stop Loss (Giá cao nhất vượt hoặc bằng SL)
+                if high_p >= sl_p:
+                    is_closed = True
+                    exit_reason = 'StopLoss'
+                    exit_price = sl_p
+                # 2. Chốt theo tỷ lệ RRR (nếu bật tp_rr)
+                elif tp_rr and (tp_p is not None) and (low_p <= tp_p):
+                    is_closed = True
+                    exit_reason = 'TakeProfit (RR)'
+                    exit_price = tp_p
+                # 3. Chốt khi Supertrend đảo sang Uptrend (nếu bật tp_supertrend)
+                elif tp_supertrend and (st_dir == 1 or close_p > st_val):
+                    is_closed = True
+                    exit_reason = 'TakeProfit (ST)' if close_p <= entry_p else 'Exit (ST Reversal)'
+                    exit_price = close_p
+
+            if is_closed:
+                if pos_type == 'Long':
+                    pnl_amount = exit_price - entry_p
+                    pnl_percent = (pnl_amount / entry_p) * 100
+                else:
+                    pnl_amount = entry_p - exit_price
+                    pnl_percent = (pnl_amount / entry_p) * 100
+
+                current_trade['exit_date'] = candle_date
+                current_trade['exit_time'] = time_str
+                current_trade['exit_price'] = round(exit_price, 2)
+                current_trade['exit_reason'] = exit_reason
+                current_trade['status'] = 'Closed'
+                current_trade['pnl_amount'] = round(pnl_amount, 2)
+                current_trade['pnl_percent'] = round(pnl_percent, 2)
+                current_trade['holding_bars'] = i - current_trade['entry_index']
+                trades.append(current_trade)
+
+                # Marker hiển thị đóng lệnh trên biểu đồ
+                is_win = str(exit_reason).startswith("TakeProfit") or pnl_percent > 0
+                signals.append({
+                    "date": candle_date,
+                    "time": time_str,
+                    "type": "takeprofit" if is_win else "stoploss",
+                    "action": "Close",
+                    "price": round(exit_price, 2),
+                    "pos_type": pos_type,
+                    "entry": entry_p,
+                    "stop_loss": sl_p,
+                    "take_profit": tp_p,
+                    "pnl_percent": round(pnl_percent, 2),
+                    "pnl_amount": round(pnl_amount, 2),
+                    "rule": {
+                        "Name": f"{exit_reason} ({pos_type}) @ {round(exit_price, 2)} | PnL: {pnl_percent:+.2f}%",
+                        "Type": "takeprofit" if is_win else "stoploss"
+                    }
+                })
+
+                # Đã đóng vị thế -> sẵn sàng tìm Entry mới từ nến sau
+                current_trade = None
+                continue
+
+        # -------------------------------------------------------------
+        # 2. TÌM KIẾM ENTRY MỚI (CHỈ KHI KHÔNG CÓ LỆNH ĐANG MỞ)
+        # -------------------------------------------------------------
+        if current_trade is None:
+            # 1. KIỂM TRA ĐIỀU KIỆN LONG ENTRY (khi bật allow_long)
+            is_long_entry = False
+            if allow_long:
+                if entry_type == "st_reversal":
+                    # Supertrend đảo chiều từ Downtrend sang Uptrend (nến trước -1, nến này 1) + ST > MA288
+                    is_long_entry = (prev_st_dir == -1 and st_dir == 1) and (st_val > ma_val)
+                else:
+                    # Mặc định: Nến xanh (Close > Open) + Close > Supertrend xanh + Supertrend > MA288
+                    is_green_candle = close_p > open_p
+                    is_above_green_st = (close_p > st_val) and (st_dir == 1)
+                    is_st_above_ma288 = st_val > ma_val
+                    is_long_entry = is_green_candle and is_above_green_st and is_st_above_ma288
+
+            if is_long_entry:
+                entry = close_p
+                sl = round(st_val, 2)
+                risk = entry - sl
+                if risk > 0:
+                    tp = round(entry + (risk * rr_ratio), 2) if tp_rr else None
+                    current_trade = {
+                        "trade_no": len(trades) + 1,
+                        "type": "Long",
+                        "status": "Open",
+                        "entry_date": candle_date,
+                        "entry_time": time_str,
+                        "entry_price": entry,
+                        "entry_index": i,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "risk_reward": rr_ratio if tp_rr else None,
+                        "supertrend": round(st_val, 2),
+                        "ma288": round(ma_val, 2),
+                        "exit_date": None,
+                        "exit_time": None,
+                        "exit_price": None,
+                        "exit_reason": None,
+                        "pnl_percent": 0.0,
+                        "pnl_amount": 0.0,
+                    }
+
+                    # Marker hiển thị vào lệnh trên biểu đồ
+                    signals.append({
+                        "date": candle_date,
+                        "time": time_str,
+                        "type": "Long",
+                        "action": "Entry",
+                        "entry": entry,
+                        "price": entry,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "risk_reward": rr_ratio if tp_rr else None,
+                        "supertrend": round(st_val, 2),
+                        "ma288": round(ma_val, 2),
+                        "rule": {
+                            "Name": f"Long ({'ST Reversal' if entry_type == 'st_reversal' else 'ST+MA288'}) Entry: {entry} | SL: {sl} | TP: {tp if tp else 'Theo ST'}",
+                            "Type": "entry"
+                        }
+                    })
+                    continue
+
+            # 2. KIỂM TRA ĐIỀU KIỆN SHORT ENTRY (khi bật allow_short)
+            is_short_entry = False
+            if allow_short:
+                if entry_type == "st_reversal":
+                    # Supertrend đảo chiều từ Uptrend sang Downtrend (nến trước 1, nến này -1) + ST < MA288
+                    is_short_entry = (prev_st_dir == 1 and st_dir == -1) and (st_val < ma_val)
+                else:
+                    # Mặc định: Nến đỏ (Close < Open) + Close < Supertrend đỏ + Supertrend < MA288
+                    is_red_candle = close_p < open_p
+                    is_below_red_st = (close_p < st_val) and (st_dir == -1)
+                    is_st_below_ma288 = st_val < ma_val
+                    is_short_entry = is_red_candle and is_below_red_st and is_st_below_ma288
+
+            if is_short_entry:
+                entry = close_p
+                sl = round(st_val, 2)
+                risk = sl - entry
+                if risk > 0:
+                    tp = round(entry - (risk * rr_ratio), 2) if tp_rr else None
+                    current_trade = {
+                        "trade_no": len(trades) + 1,
+                        "type": "Short",
+                        "status": "Open",
+                        "entry_date": candle_date,
+                        "entry_time": time_str,
+                        "entry_price": entry,
+                        "entry_index": i,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "risk_reward": rr_ratio if tp_rr else None,
+                        "supertrend": round(st_val, 2),
+                        "ma288": round(ma_val, 2),
+                        "exit_date": None,
+                        "exit_time": None,
+                        "exit_price": None,
+                        "exit_reason": None,
+                        "pnl_percent": 0.0,
+                        "pnl_amount": 0.0,
+                    }
+
+                    # Marker hiển thị vào lệnh trên biểu đồ
+                    signals.append({
+                        "date": candle_date,
+                        "time": time_str,
+                        "type": "Short",
+                        "action": "Entry",
+                        "entry": entry,
+                        "price": entry,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "risk_reward": rr_ratio if tp_rr else None,
+                        "supertrend": round(st_val, 2),
+                        "ma288": round(ma_val, 2),
+                        "rule": {
+                            "Name": f"Short ({'ST Reversal' if entry_type == 'st_reversal' else 'ST+MA288'}) Entry: {entry} | SL: {sl} | TP: {tp if tp else 'Theo ST'}",
+                            "Type": "entry"
+                        }
+                    })
+                    continue
+
+    # Nếu lệnh vẫn còn đang mở tại nến cuối cùng
+    if current_trade is not None:
+        last_close = float(df.iloc[-1]['close'])
+        if current_trade['type'] == 'Long':
+            unrealized_pnl = ((last_close - current_trade['entry_price']) / current_trade['entry_price']) * 100
+        else:
+            unrealized_pnl = ((current_trade['entry_price'] - last_close) / current_trade['entry_price']) * 100
+        current_trade['pnl_percent'] = round(unrealized_pnl, 2)
+        current_trade['pnl_amount'] = round(last_close - current_trade['entry_price'] if current_trade['type'] == 'Long' else current_trade['entry_price'] - last_close, 2)
+        current_trade['holding_bars'] = len(df) - 1 - current_trade['entry_index']
+        trades.append(current_trade)
+
+    return {"trades": trades, "signals": signals}
+
+# ==============================================================================
+# 4. ĐỒNG BỘ DATA & PUSH SIGNAL LÊN STRAPI (/trade-station)
+# ==============================================================================
+
+def get_or_create_symbol(ticker: str) -> Optional[str]:
+    """Tìm hoặc tự tạo Symbol trong Strapi nếu chưa có"""
+    ticker_clean = ticker.strip().upper()
+    headers = get_strapi_headers()
+    
+    url = f"{STRAPI_BASE_URL}/api/symbols?filters[Name][$eq]={ticker_clean}"
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        data = res.json().get("data", [])
+        if data:
+            return data[0].get("documentId") or str(data[0].get("id"))
+        
+        # Nếu chưa có thì tự tạo mới
+        create_url = f"{STRAPI_BASE_URL}/api/symbols"
+        create_res = requests.post(create_url, json={"data": {"Name": ticker_clean, "Description": f"{ticker_clean} stock"}}, headers=headers, timeout=10)
+        if create_res.status_code in [200, 201]:
+            created = create_res.json().get("data", {})
+            return created.get("documentId") or str(created.get("id"))
+    except Exception as e:
+        print(f"Lỗi get_or_create_symbol cho {ticker_clean}: {e}")
+    return None
+
+def sync_candles_to_strapi(ticker: str, df: pd.DataFrame, symbol_id: str, max_sync: int = 30):
+    """Tự động đồng bộ các nến mới nhất vào Strapi (mặc định 30 nến gần nhất để chạy siêu nhanh)"""
+    if df.empty or not symbol_id:
+        return
+
+    headers = get_strapi_headers()
+    try:
+        # Lấy ngày nến mới nhất đã lưu trong Strapi
+        latest_res = requests.get(
+            f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={ticker}&sort=date:desc&pagination[pageSize]=1",
+            headers=headers,
+            timeout=10
+        )
+        latest_items = latest_res.json().get("data", [])
+        latest_date_str = None
+        if latest_items:
+            attrs = latest_items[0].get("attributes", latest_items[0])
+            latest_date_str = attrs.get("date")
+
+        # Lọc các nến mới hơn
+        new_candles = df
+        if latest_date_str:
+            new_candles = df[df["date"] > latest_date_str]
+        else:
+            new_candles = df.tail(max_sync)
+
+        if not new_candles.empty:
+            to_insert = new_candles.tail(max_sync)
+            print(f"-> Đang đồng bộ {len(to_insert)} nến mới cho {ticker} vào Strapi...", flush=True)
+            for _, candle in to_insert.iterrows():
+                payload = {
+                    "data": {
+                        "symbol": symbol_id,
+                        "date": candle["date"],
+                        "open": candle["open"],
+                        "high": candle["high"],
+                        "low": candle["low"],
+                        "close": candle["close"],
+                        "volume": candle["volume"]
+                    }
+                }
+                requests.post(f"{STRAPI_BASE_URL}/api/symbol-histories", json=payload, headers=headers, timeout=5)
+            print(f"-> Đã đồng bộ xong nến cho {ticker}.", flush=True)
+    except Exception as e:
+        print(f"Cảnh báo khi sync nến cho {ticker}: {e}", flush=True)
+
+def get_or_create_rule(rule_name: str, rule_type: str = "entry") -> Optional[str]:
+    """Tìm hoặc tạo Rule tương ứng trong Strapi để Trade Station hiển thị màu marker đúng"""
+    headers = get_strapi_headers()
+    try:
+        res = requests.get(f"{STRAPI_BASE_URL}/api/rules?filters[Name][$eq]={rule_name}", headers=headers, timeout=10)
+        data = res.json().get("data", [])
+        if data:
+            return data[0].get("documentId") or str(data[0].get("id"))
+        
+        # Tạo mới rule
+        create_res = requests.post(f"{STRAPI_BASE_URL}/api/rules", json={
+            "data": {
+                "Name": rule_name,
+                "Type": rule_type,
+                "Description": f"Auto rule for {rule_name}",
+                "Active": "Enable"
+            }
+        }, headers=headers, timeout=10)
+        if create_res.status_code in [200, 201]:
+            return create_res.json().get("data", {}).get("documentId")
+    except Exception as e:
+        print(f"Lỗi get_or_create_rule: {e}")
+    return None
+
+def push_signal_to_trade_station(ticker: str, signal: Dict, symbol_id: str):
+    """
+    Đẩy tín hiệu vào Strapi (/api/signals):
+    - Tự động kiểm tra chống trùng lặp theo ngày và mã.
+    - Hiển thị marker Mũi tên (Xanh cho Long, Đỏ cho Short) trên biểu đồ Trade Station.
+    - Hiển thị trong Panel Signals & Strategy.
+    """
+    headers = get_strapi_headers()
+    sig_date = signal["date"]
+    sig_type = signal["type"]
+
+    # 1. Kiểm tra trùng lặp
+    check_url = f"{STRAPI_BASE_URL}/api/signals?filters[symbol][Name][$eq]={ticker}&filters[date][$eq]={sig_date}"
+    try:
+        check_res = requests.get(check_url, headers=headers, timeout=10)
+        existing = check_res.json().get("data", [])
+        if existing:
+            return  # Đã có tín hiệu trong ngày này, không tạo trùng lặp
+    except Exception:
+        pass
+
+    # 2. Lấy rule ID
+    rule_id = get_or_create_rule(f"ST_MA288_{sig_type}", rule_type="entry" if sig_type == "Long" else "exit")
+
+    # 3. Tạo Signal
+    sig_name = f"{ticker} - {sig_type} (ST+MA288) | Entry: {signal['entry']} | SL: {signal['stop_loss']} | TP: {signal['take_profit']}"
+    payload = {
+        "data": {
+            "name": sig_name,
+            "date": sig_date,
+            "symbol": symbol_id,
+            "rules": [rule_id] if rule_id else [],
+            "expired": False
+        }
+    }
+
+    try:
+        post_res = requests.post(f"{STRAPI_BASE_URL}/api/signals", json=payload, headers=headers, timeout=10)
+        if post_res.status_code in [200, 201]:
+            print(f" [SIGNAL ĐÃ ĐẨY LÊN TRADE-STATION] {sig_type.upper()} {ticker} @ {signal['entry']} (SL: {signal['stop_loss']}, TP: {signal['take_profit']})", flush=True)
+        else:
+            print(f"Lỗi đẩy Signal cho {ticker}: {post_res.text}", flush=True)
+    except Exception as e:
+        print(f"Lỗi khi gửi Signal: {e}", flush=True)
+
+# ==============================================================================
+# 5. CHƯƠNG TRÌNH CHÍNH QUÉT TÍN HIỆU TOÀN DIỆN (MAIN)
+# ==============================================================================
+
+def run_scanner(
+    watchlist: List[str] = DEFAULT_WATCHLIST,
+    sync_history: bool = True,
+    rr_ratio: float = RISK_REWARD_RATIO,
+    tp_supertrend: bool = True,
+    tp_rr: bool = True,
+    entry_type: str = "candle_close",
+    st_period: int = SUPERTREND_PERIOD,
+    st_multiplier: float = SUPERTREND_MULTIPLIER,
+    ma_period: int = MA_PERIOD,
+    allow_long: bool = True,
+    allow_short: bool = True
+):
+    print("=" * 90, flush=True)
+    print(f"[*] QUET CHIEN LUOC SUPERTREND({st_period},{st_multiplier}) + MA({ma_period}) (SINGLE ENTRY 1 LUC)", flush=True)
+    print(f"[*] Thoi gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    print(f"[*] Danh sach Watchlist: {', '.join(watchlist)}", flush=True)
+    print(f"[*] Che do vao lenh: EntryType={entry_type} | Long={allow_long} | Short={allow_short}", flush=True)
+    print(f"[*] Che do chot loi: Supertrend Reversal={tp_supertrend}, RR({rr_ratio})={tp_rr}", flush=True)
+    print("=" * 90, flush=True)
+
+    summary_results = []
+
+    for ticker in watchlist:
+        print(f"\n[*] Dang phan tich ma: {ticker} ...", flush=True)
+        
+        # 1. Tự động tải dữ liệu trực tiếp
+        df = fetch_market_candles(ticker, countback=500)
+        if df.empty or len(df) < ma_period:
+            print(f"[-] Khong du du lieu ({len(df)} nen). Bo qua {ticker}.", flush=True)
+            continue
+
+        symbol_id = get_or_create_symbol(ticker)
+
+        # 2. Tự động đồng bộ nến vào Strapi nếu cần
+        if sync_history and symbol_id:
+            sync_candles_to_strapi(ticker, df, symbol_id, max_sync=15)
+
+        # 3. Quét tín hiệu theo rules (Single Position)
+        result = scan_strategy_signals(
+            df,
+            rr_ratio=rr_ratio,
+            tp_supertrend=tp_supertrend,
+            tp_rr=tp_rr,
+            entry_type=entry_type,
+            st_period=st_period,
+            st_multiplier=st_multiplier,
+            ma_period=ma_period,
+            allow_long=allow_long,
+            allow_short=allow_short
+        )
+        trades = result.get("trades", [])
+        signals = result.get("signals", [])
+
+        closed_trades = [t for t in trades if t.get("status") == "Closed"]
+        win_trades = [t for t in closed_trades if str(t.get("exit_reason", "")).startswith("TakeProfit") or t.get("pnl_percent", 0) > 0]
+        win_rate = round(len(win_trades) / len(closed_trades) * 100, 1) if closed_trades else 0.0
+        total_pnl = round(sum(t.get("pnl_percent", 0) for t in trades), 1)
+
+        print(f"-> Tong so Trades: {len(trades)} (Closed: {len(closed_trades)} | Win Rate: {win_rate}% | Tong PnL: {total_pnl:+0.1f}%)", flush=True)
+
+        if trades:
+            last_trade = trades[-1]
+            summary_results.append({
+                "Ticker": ticker,
+                "Trades": len(trades),
+                "WinRate": f"{win_rate}%",
+                "TotalPnL": f"{total_pnl:+0.1f}%",
+                "LastType": last_trade["type"],
+                "EntryDate": last_trade["entry_time"],
+                "Entry": last_trade["entry_price"],
+                "SL": last_trade["stop_loss"],
+                "TP": last_trade["take_profit"],
+                "Status": last_trade["status"],
+                "ExitReason": last_trade["exit_reason"] or "Dang giu",
+                "LastPnL": f"{last_trade['pnl_percent']:+0.1f}%"
+            })
+
+            # 4. Đẩy 3 tín hiệu gần nhất lên Trade Station
+            for sig in signals[-3:]:
+                if symbol_id:
+                    push_signal_to_trade_station(ticker, sig, symbol_id)
+
+    # In bảng tổng kết
+    if summary_results:
+        print("\n" + "=" * 90, flush=True)
+        print("[*] BANG TONG KET HIEU QUA CHIEN LUOC (1 ENTRY 1 LUC)", flush=True)
+        print("=" * 90, flush=True)
+        res_df = pd.DataFrame(summary_results)
+        print(res_df.to_string(index=False), flush=True)
+        print("=" * 90, flush=True)
+    else:
+        print("\n[-] Khong co tin hieu nao phu hop trong dot quet nay.", flush=True)
+
+def scan_symbol_json(
+    ticker: str,
+    countback: int = 500,
+    rr_ratio: float = RISK_REWARD_RATIO,
+    tp_supertrend: bool = True,
+    tp_rr: bool = True,
+    entry_type: str = "candle_close",
+    st_period: int = SUPERTREND_PERIOD,
+    st_multiplier: float = SUPERTREND_MULTIPLIER,
+    ma_period: int = MA_PERIOD,
+    allow_long: bool = True,
+    allow_short: bool = True
+) -> Dict:
+    """Quét dữ liệu và trả về JSON chuẩn để hiển thị trực tiếp trên UI Chart & Table mà không cần lưu vào DB"""
+    df = fetch_market_candles(ticker, countback=countback)
+    if df.empty or len(df) < ma_period:
+        return {
+            "ticker": ticker,
+            "error": f"Khong du du lieu (co {len(df)} nen, can toi thieu {ma_period} nen)",
+            "candles": [],
+            "signals": [],
+            "trades": []
+        }
+
+    res = scan_strategy_signals(
+        df,
+        rr_ratio=rr_ratio,
+        tp_supertrend=tp_supertrend,
+        tp_rr=tp_rr,
+        entry_type=entry_type,
+        st_period=st_period,
+        st_multiplier=st_multiplier,
+        ma_period=ma_period,
+        allow_long=allow_long,
+        allow_short=allow_short
+    )
+    trades = res.get("trades", [])
+    signals = res.get("signals", [])
+
+    candles_list = []
+    for _, row in df.iterrows():
+        d_str = str(row['date'])[:10]
+        candles_list.append({
+            "date": str(row['date']),
+            "time": d_str,
+            "open": float(row['open']),
+            "high": float(row['high']),
+            "low": float(row['low']),
+            "close": float(row['close']),
+            "volume": float(row['volume']),
+            "supertrend": round(float(row['supertrend']), 2) if not pd.isna(row.get('supertrend')) else None,
+            "st_direction": int(row['st_dir']) if not pd.isna(row.get('st_dir')) else None,
+            "ma288": round(float(row['ma288']), 2) if not pd.isna(row.get('ma288')) else None
+        })
+
+    # Thống kê hiệu suất (Metrics)
+    closed_trades = [t for t in trades if t.get("status") == "Closed"]
+    win_trades = [t for t in closed_trades if str(t.get("exit_reason", "")).startswith("TakeProfit") or t.get("pnl_percent", 0) > 0]
+    loss_trades = [t for t in closed_trades if t.get("exit_reason") == "StopLoss" or t.get("pnl_percent", 0) <= 0]
+    win_rate = round(len(win_trades) / len(closed_trades) * 100, 2) if closed_trades else 0.0
+    total_pnl_percent = round(sum(t.get("pnl_percent", 0) for t in trades), 2)
+    active_trade = next((t for t in trades if t.get("status") == "Open"), None)
+
+    # Tính Profit Factor (Tổng Lãi / Tổng Lỗ)
+    gross_profit = sum(t.get("pnl_percent", 0) for t in closed_trades if t.get("pnl_percent", 0) > 0)
+    gross_loss = sum(abs(t.get("pnl_percent", 0)) for t in closed_trades if t.get("pnl_percent", 0) < 0)
+    profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (round(gross_profit, 2) if gross_profit > 0 else 0.0)
+
+    return {
+        "ticker": ticker,
+        "candles": candles_list,
+        "signals": signals,
+        "trades": trades,
+        "summary": {
+            "totalTrades": len(trades),
+            "closedTrades": len(closed_trades),
+            "winTrades": len(win_trades),
+            "lossTrades": len(loss_trades),
+            "winRate": win_rate,
+            "totalPnlPercent": total_pnl_percent,
+            "profitFactor": profit_factor,
+            "grossProfit": round(gross_profit, 2),
+            "grossLoss": round(gross_loss, 2),
+            "activeTrade": active_trade,
+            "latestTrade": trades[-1] if trades else None,
+            "currentPrice": candles_list[-1]['close'] if candles_list else None,
+            "supertrend": candles_list[-1]['supertrend'] if candles_list else None,
+            "ma288": candles_list[-1]['ma288'] if candles_list else None,
+        }
+    }
+
+def fast_backtest_eval(
+    close_arr: np.ndarray,
+    open_arr: np.ndarray,
+    high_arr: np.ndarray,
+    low_arr: np.ndarray,
+    st_val_arr: np.ndarray,
+    st_dir_arr: np.ndarray,
+    ma_arr: np.ndarray,
+    rr_ratio: float,
+    tp_supertrend: bool,
+    tp_rr: bool,
+    entry_type: str,
+    allow_long: bool,
+    allow_short: bool,
+    start_idx: int
+) -> Dict:
+    """Đánh giá backtest tốc độ cao bằng mảng numpy thuần túy để quét Grid Search hàng ngàn tổ hợp trong <1 giây"""
+    n = len(close_arr)
+    current_pos_type = 0  # 0: None, 1: Long, -1: Short
+    entry_p = 0.0
+    sl_p = 0.0
+    tp_p = 0.0
+
+    total_trades = 0
+    closed_trades = 0
+    gross_profit = 0.0
+    gross_loss = 0.0
+    total_pnl = 0.0
+    win_trades = 0
+
+    for i in range(start_idx, n):
+        close_p = close_arr[i]
+        open_p = open_arr[i]
+        high_p = high_arr[i]
+        low_p = low_arr[i]
+        st_val = st_val_arr[i]
+        st_dir = st_dir_arr[i]
+        prev_st_dir = st_dir_arr[i - 1]
+        ma_val = ma_arr[i]
+
+        if np.isnan(ma_val) or np.isnan(st_val):
+            continue
+
+        # 1. Kiểm tra đóng vị thế nếu đang có lệnh
+        if current_pos_type != 0:
+            is_closed = False
+            exit_price = 0.0
+
+            if current_pos_type == 1:  # Long
+                if low_p <= sl_p:
+                    is_closed = True
+                    exit_price = sl_p
+                elif tp_rr and (tp_p > 0) and (high_p >= tp_p):
+                    is_closed = True
+                    exit_price = tp_p
+                elif tp_supertrend and (st_dir == -1 or close_p < st_val):
+                    is_closed = True
+                    exit_price = close_p
+            elif current_pos_type == -1:  # Short
+                if high_p >= sl_p:
+                    is_closed = True
+                    exit_price = sl_p
+                elif tp_rr and (tp_p > 0) and (low_p <= tp_p):
+                    is_closed = True
+                    exit_price = tp_p
+                elif tp_supertrend and (st_dir == 1 or close_p > st_val):
+                    is_closed = True
+                    exit_price = close_p
+
+            if is_closed:
+                closed_trades += 1
+                if current_pos_type == 1:
+                    pnl_pct = ((exit_price - entry_p) / entry_p) * 100
+                else:
+                    pnl_pct = ((entry_p - exit_price) / entry_p) * 100
+
+                total_pnl += pnl_pct
+                if pnl_pct > 0:
+                    gross_profit += pnl_pct
+                    win_trades += 1
+                elif pnl_pct < 0:
+                    gross_loss += abs(pnl_pct)
+
+                current_pos_type = 0
+                continue
+
+        # 2. Kiểm tra vào lệnh mới nếu không có vị thế mở
+        if current_pos_type == 0:
+            is_long_entry = False
+            if allow_long:
+                if entry_type == "st_reversal":
+                    is_long_entry = (prev_st_dir == -1 and st_dir == 1) and (st_val > ma_val)
+                else:
+                    is_green_candle = close_p > open_p
+                    is_above_green_st = (close_p > st_val) and (st_dir == 1)
+                    is_st_above_ma288 = st_val > ma_val
+                    is_long_entry = is_green_candle and is_above_green_st and is_st_above_ma288
+
+            if is_long_entry:
+                entry = close_p
+                sl = st_val
+                risk = entry - sl
+                if risk > 0:
+                    tp = (entry + (risk * rr_ratio)) if tp_rr else 0.0
+                    current_pos_type = 1
+                    entry_p = entry
+                    sl_p = sl
+                    tp_p = tp
+                    total_trades += 1
+                    continue
+
+            is_short_entry = False
+            if allow_short:
+                if entry_type == "st_reversal":
+                    is_short_entry = (prev_st_dir == 1 and st_dir == -1) and (st_val < ma_val)
+                else:
+                    is_red_candle = close_p < open_p
+                    is_below_red_st = (close_p < st_val) and (st_dir == -1)
+                    is_st_below_ma288 = st_val < ma_val
+                    is_short_entry = is_red_candle and is_below_red_st and is_st_below_ma288
+
+            if is_short_entry:
+                entry = close_p
+                sl = st_val
+                risk = sl - entry
+                if risk > 0:
+                    tp = (entry - (risk * rr_ratio)) if tp_rr else 0.0
+                    current_pos_type = -1
+                    entry_p = entry
+                    sl_p = sl
+                    tp_p = tp
+                    total_trades += 1
+                    continue
+
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+    win_rate = (win_trades / closed_trades * 100) if closed_trades > 0 else 0.0
+
+    return {
+        "total_trades": total_trades,
+        "closed_trades": closed_trades,
+        "win_trades": win_trades,
+        "loss_trades": closed_trades - win_trades,
+        "win_rate": round(win_rate, 2),
+        "total_pnl": round(total_pnl, 2),
+        "gross_profit": round(gross_profit, 2),
+        "gross_loss": round(gross_loss, 2),
+        "profit_factor": round(profit_factor, 2)
+    }
+
+def optimize_strategy_parameters(
+    ticker: str,
+    countback: int = 500,
+    allow_long: bool = True,
+    allow_short: bool = True
+) -> Dict:
+    """
+    Tự động chạy Grid Search tối ưu hóa tất cả các tham số để tìm ra bộ cấu hình
+    mang lại Profit Factor (và PnL) cao nhất cho mã cổ phiếu/chỉ số cụ thể.
+    """
+    df = fetch_market_candles(ticker, countback=countback)
+    if df.empty or len(df) < 50:
+        return {
+            "ticker": ticker,
+            "error": f"Không đủ dữ liệu lịch sử nến cho {ticker} (có {len(df)} nến)",
+            "candles": [],
+            "signals": [],
+            "trades": []
+        }
+
+    close_arr = df['close'].values
+    open_arr = df['open'].values
+    high_arr = df['high'].values
+    low_arr = df['low'].values
+    n = len(df)
+
+    # 1. Grid tham số cần tối ưu
+    st_period_grid = [7, 10, 14, 20]
+    st_multiplier_grid = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+
+    all_ma_periods = [34, 50, 89, 100, 150, 200, 288]
+    ma_period_grid = [m for m in all_ma_periods if m <= n - 10]
+    if not ma_period_grid:
+        ma_period_grid = [min(20, n - 5)]
+
+    rr_ratio_grid = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0]
+    entry_type_grid = ["candle_close", "st_reversal"]
+    tp_modes = [
+        (True, False),  # Chỉ theo Supertrend đảo chiều
+        (False, True),  # Chỉ theo R:R
+        (True, True)    # Cả hai: Chốt theo phương thức nào chạm trước
+    ]
+
+    # 2. Precalculate MA indicators
+    ma_cache = {}
+    for m in ma_period_grid:
+        ma_series = calculate_sma(df, period=m, price_col='close')
+        ma_cache[m] = ma_series.values
+
+    # 3. Precalculate Supertrend indicators
+    st_cache = {}
+    for p in st_period_grid:
+        for mult in st_multiplier_grid:
+            st_val, st_dir = calculate_supertrend(df, period=p, multiplier=mult)
+            st_cache[(p, mult)] = (st_val.values, st_dir.values)
+
+    max_ma = max(ma_period_grid)
+    start_idx = max(max_ma, 20)
+
+    best_score = None
+    best_combo = None
+
+    for m in ma_period_grid:
+        ma_arr = ma_cache[m]
+        for p in st_period_grid:
+            for mult in st_multiplier_grid:
+                st_val_arr, st_dir_arr = st_cache[(p, mult)]
+                for rr in rr_ratio_grid:
+                    for entry_t in entry_type_grid:
+                        for (tp_st, tp_rr) in tp_modes:
+                            res = fast_backtest_eval(
+                                close_arr=close_arr,
+                                open_arr=open_arr,
+                                high_arr=high_arr,
+                                low_arr=low_arr,
+                                st_val_arr=st_val_arr,
+                                st_dir_arr=st_dir_arr,
+                                ma_arr=ma_arr,
+                                rr_ratio=rr,
+                                tp_supertrend=tp_st,
+                                tp_rr=tp_rr,
+                                entry_type=entry_t,
+                                allow_long=allow_long,
+                                allow_short=allow_short,
+                                start_idx=start_idx
+                            )
+
+                            closed = res['closed_trades']
+                            if closed == 0:
+                                continue
+
+                            pf = res['profit_factor']
+                            pnl = res['total_pnl']
+                            wr = res['win_rate']
+
+                            # Ưu tiên các combo có đủ mẫu giao dịch (>= 3 lệnh)
+                            tier = 3 if closed >= 5 else (2 if closed >= 3 else (1 if closed >= 1 else 0))
+                            score = (tier, pf, pnl, wr, closed)
+
+                            if best_score is None or score > best_score:
+                                best_score = score
+                                best_combo = {
+                                    "st_period": p,
+                                    "st_multiplier": mult,
+                                    "ma_period": m,
+                                    "rr_ratio": rr,
+                                    "entry_type": entry_t,
+                                    "tp_supertrend": tp_st,
+                                    "tp_rr": tp_rr
+                                }
+
+    if not best_combo:
+        best_combo = {
+            "st_period": SUPERTREND_PERIOD,
+            "st_multiplier": SUPERTREND_MULTIPLIER,
+            "ma_period": min(MA_PERIOD, max(ma_period_grid)),
+            "rr_ratio": RISK_REWARD_RATIO,
+            "entry_type": "candle_close",
+            "tp_supertrend": True,
+            "tp_rr": True
+        }
+
+    # Chạy lại bản chi tiết với combo tối ưu nhất để lấy đầy đủ trades & chart markers
+    full_result = scan_symbol_json(
+        ticker=ticker,
+        countback=countback,
+        rr_ratio=best_combo["rr_ratio"],
+        tp_supertrend=best_combo["tp_supertrend"],
+        tp_rr=best_combo["tp_rr"],
+        entry_type=best_combo["entry_type"],
+        st_period=best_combo["st_period"],
+        st_multiplier=best_combo["st_multiplier"],
+        ma_period=best_combo["ma_period"],
+        allow_long=allow_long,
+        allow_short=allow_short
+    )
+
+    full_result["bestParams"] = {
+        "stPeriod": best_combo["st_period"],
+        "stMultiplier": best_combo["st_multiplier"],
+        "maPeriod": best_combo["ma_period"],
+        "riskReward": best_combo["rr_ratio"],
+        "entryType": best_combo["entry_type"],
+        "tpSupertrend": best_combo["tp_supertrend"],
+        "tpRR": best_combo["tp_rr"],
+        "allowLong": allow_long,
+        "allowShort": allow_short,
+        "profitFactor": full_result.get("summary", {}).get("profitFactor", 0.0),
+        "winRate": full_result.get("summary", {}).get("winRate", 0.0),
+        "totalTrades": full_result.get("summary", {}).get("totalTrades", 0),
+        "totalPnlPercent": full_result.get("summary", {}).get("totalPnlPercent", 0.0),
+        "closedTrades": full_result.get("summary", {}).get("closedTrades", 0)
+    }
+
+    return full_result
+
+if __name__ == "__main__":
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Supertrend + MA Strategy Scanner & Optimizer")
+    parser.add_argument("--ticker", type=str, default=None, help="Mã cổ phiếu cần quét (e.g. FPT, VNINDEX, VN30F1M)")
+    parser.add_argument("--json", action="store_true", help="Trả về kết quả định dạng JSON")
+    parser.add_argument("--optimize", action="store_true", help="Tự động tìm bộ tham số mang lại Profit Factor cao nhất")
+    parser.add_argument("--countback", type=int, default=500, help="Số lượng nến lịch sử cần lấy")
+    parser.add_argument("--rr", type=float, default=RISK_REWARD_RATIO, help="Tỷ lệ Risk:Reward cho Take Profit")
+    parser.add_argument("--entry-type", type=str, default="candle_close", choices=["candle_close", "st_reversal"], help="Loại điều kiện vào lệnh (candle_close / st_reversal)")
+    parser.add_argument("--st-period", type=int, default=SUPERTREND_PERIOD, help="Supertrend ATR Period")
+    parser.add_argument("--st-multiplier", type=float, default=SUPERTREND_MULTIPLIER, help="Supertrend Multiplier")
+    parser.add_argument("--ma-period", type=int, default=MA_PERIOD, help="MA Period (SMA)")
+
+    # Lựa chọn loại lệnh: Long / Short
+    parser.add_argument("--allow-long", dest="allow_long", action="store_true", default=True, help="Cho phép mở lệnh Long")
+    parser.add_argument("--no-long", dest="allow_long", action="store_false", help="Không mở lệnh Long")
+    parser.add_argument("--allow-short", dest="allow_short", action="store_true", default=True, help="Cho phép mở lệnh Short")
+    parser.add_argument("--no-short", dest="allow_short", action="store_false", help="Không mở lệnh Short")
+
+    # 2 Phương thức chốt lời: Supertrend và RR
+    parser.add_argument("--tp-supertrend", dest="tp_supertrend", action="store_true", default=True, help="Chốt lời khi Supertrend đảo chiều")
+    parser.add_argument("--no-tp-supertrend", dest="tp_supertrend", action="store_false", help="Không chốt lời theo Supertrend đảo chiều")
+    parser.add_argument("--tp-rr", dest="tp_rr", action="store_true", default=True, help="Chốt lời theo tỷ lệ Risk:Reward")
+    parser.add_argument("--no-tp-rr", dest="tp_rr", action="store_false", help="Không chốt lời theo Risk:Reward")
+
+    args = parser.parse_args()
+
+    if args.optimize:
+        ticker = args.ticker or "VNINDEX"
+        res = optimize_strategy_parameters(
+            ticker=ticker,
+            countback=args.countback,
+            allow_long=args.allow_long,
+            allow_short=args.allow_short
+        )
+        if args.json:
+            print(json.dumps(res, ensure_ascii=False))
+        else:
+            bp = res.get("bestParams", {})
+            print(f"[*] THAM SỐ TỐI ƯU NHẤT CHO {ticker}:")
+            print(f"    - Supertrend: Period = {bp.get('stPeriod')}, Multiplier = {bp.get('stMultiplier')}")
+            print(f"    - MA Period: {bp.get('maPeriod')}")
+            print(f"    - Entry Type: {bp.get('entryType')}")
+            print(f"    - R:R Ratio: {bp.get('riskReward')}")
+            print(f"    - TP Supertrend: {bp.get('tpSupertrend')} | TP RR: {bp.get('tpRR')}")
+            print(f"    -> Profit Factor: {bp.get('profitFactor')} | Win Rate: {bp.get('winRate')}% | PnL: {bp.get('totalPnlPercent')}%")
+    elif args.json:
+        ticker = args.ticker or "VNINDEX"
+        res = scan_symbol_json(
+            ticker,
+            countback=args.countback,
+            rr_ratio=args.rr,
+            tp_supertrend=args.tp_supertrend,
+            tp_rr=args.tp_rr,
+            entry_type=args.entry_type,
+            st_period=args.st_period,
+            st_multiplier=args.st_multiplier,
+            ma_period=args.ma_period,
+            allow_long=args.allow_long,
+            allow_short=args.allow_short
+        )
+        print(json.dumps(res, ensure_ascii=False))
+    elif args.ticker:
+        run_scanner(
+            watchlist=[args.ticker],
+            sync_history=False,
+            rr_ratio=args.rr,
+            tp_supertrend=args.tp_supertrend,
+            tp_rr=args.tp_rr,
+            entry_type=args.entry_type,
+            st_period=args.st_period,
+            st_multiplier=args.st_multiplier,
+            ma_period=args.ma_period,
+            allow_long=args.allow_long,
+            allow_short=args.allow_short
+        )
+    else:
+        # Chạy quét danh sách cổ phiếu & chỉ số mặc định
+        run_scanner(
+            watchlist=["VNINDEX", "VN30F1M", "FPT", "HPG", "SSI", "MWG"],
+            sync_history=True,
+            rr_ratio=args.rr,
+            tp_supertrend=args.tp_supertrend,
+            tp_rr=args.tp_rr,
+            entry_type=args.entry_type,
+            st_period=args.st_period,
+            st_multiplier=args.st_multiplier,
+            ma_period=args.ma_period,
+            allow_long=args.allow_long,
+            allow_short=args.allow_short
+        )
+
+

@@ -7,6 +7,7 @@ import NewsSummary from './pages/NewsSummary';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
 import Backtest from './pages/Backtest';
+import PythonStrategy from './pages/PythonStrategy';
 import Accounts from './pages/Accounts';
 import ManageMarket from './pages/ManageMarket';
 import ManageScored from './pages/ManageScored';
@@ -63,6 +64,7 @@ function App() {
             <Route path="market-flow" element={<MarketFlow />} />
             <Route path="trades" element={<Trades />} />
             <Route path="backtest" element={<Backtest />} />
+            <Route path="python-strategy" element={<PythonStrategy />} />
             <Route path="journal" element={<Journal />} />
             <Route path="journal-workflow" element={<JournalWorkflow />} />
             <Route path="journal-calendar" element={<JournalCalendar />} />

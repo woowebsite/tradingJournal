@@ -104,6 +104,7 @@ const Sidebar = () => {
                     icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies',
                     subItems: [
                         { label: 'Backtest', path: '/backtest' },
+                        { label: 'Python Strategy', path: '/python-strategy' },
                         { label: 'Rules', path: '/manage-rules' },
                     ]
                 },

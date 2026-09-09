@@ -16,10 +16,14 @@ const TradingViewChart = ({
     disableScrollZoom = false,
     disableChartMove = false,
     focusDate = null,
-    vwapAnchor = 'Year'
+    vwapAnchor = 'Year',
+    supertrendPeriod = 10,
+    supertrendMultiplier = 3,
+    maPeriod = 288
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
+    const previousVisibleLogicalRangeRef = useRef(null);
     const [hoverTooltip, setHoverTooltip] = useState(null);
 
     const strategyRuleLookup = useMemo(() => {
@@ -181,9 +185,9 @@ const TradingViewChart = ({
             drawVWAP(chart, LineSeries, vwapData);
             drawMA(chart, LineSeries, candleData, 20, { lineWidth: 1 });
         } else {
-            const supertrendData = calculateSupertrend(10, 3, sortedData);
+            const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, sortedData);
             drawSupertrend(chart, LineSeries, supertrendData);
-            drawMA(chart, LineSeries, candleData);
+            drawMA(chart, LineSeries, candleData, maPeriod || 288);
         }
 
         // Volume Series 
@@ -207,36 +211,67 @@ const TradingViewChart = ({
 
         // Markers (Signals and an optional externally-selected candle)
         if ((signals && signals.length > 0) || focusDate) {
-            const markerGapRatio = 0.02;
             const markers = signals.map(sig => {
-                const sigDate = sig.date.split('T')[0];
-                const exists = sortedData.find(d => d.date.split('T')[0] === sigDate);
+                const sigDate = String(sig.date || sig.time || '').split('T')[0];
+                const exists = sortedData.find(d => String(d.date || d.time || '').split('T')[0] === sigDate);
                 if (!exists) return null;
 
                 const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : { Name: 'Signal' };
                 const ruleId = String(getRuleId(rule));
-                const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || 'unknown';
+                const rawType = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'entry';
+                const lowerType = String(rawType).toLowerCase();
+                const posType = String(sig.posType || sig.pos_type || sig.type || rule.Name || '').toLowerCase();
+                const isShort = posType.includes('short') || sig.type === 'Short' || sig.pos_type === 'Short';
 
-                const colors = {
-                    entry: '#60a5fa', // blue
-                    takeprofit: '#4ade80', // green
-                    stoploss: '#f87171', // red
-                    exit: '#fb923c', // orange
-                    unknown: '#9ca3af'
-                };
+                let color = '#10b981'; // Green
+                let shape = 'arrowUp';
+                let position = 'belowBar';
+                let text = '';
 
-                const isEntry = type === 'entry';
-                const price = isEntry
-                    ? Number(exists.low) * (1 - markerGapRatio)
-                    : Number(exists.high) * (1 + markerGapRatio);
+                if (lowerType === 'takeprofit') {
+                    // Takeprofit: Luôn là mũi tên blue
+                    // - Long TP: Mũi tên nằm TRÊN nến hướng xuống (aboveBar)
+                    // - Short TP: Mũi tên nằm DƯỚI nến hướng lên (belowBar)
+                    color = '#3b82f6';
+                    if (isShort) {
+                        position = 'belowBar';
+                        shape = 'arrowUp';
+                    } else {
+                        position = 'aboveBar';
+                        shape = 'arrowDown';
+                    }
+                } else if (lowerType === 'stoploss') {
+                    // Stoploss: Hình tròn màu đỏ (circle), không cần text
+                    // - Long SL: nằm DƯỚI nến (belowBar)
+                    // - Short SL: nằm TRÊN nến (aboveBar)
+                    color = '#ef4444';
+                    shape = 'circle';
+                    position = isShort ? 'aboveBar' : 'belowBar';
+                    text = '';
+                } else if (isShort) {
+                    // Short entry: Mũi tên đỏ Red hướng xuống, nằm TRÊN nến
+                    color = '#ef4444';
+                    shape = 'arrowDown';
+                    position = 'aboveBar';
+                } else {
+                    // Long entry: Mũi tên xanh Green hướng lên, nằm DƯỚI nến
+                    color = '#10b981';
+                    shape = 'arrowUp';
+                    position = 'belowBar';
+                }
+
+                // Cho phép override nếu sig có chỉ định trực tiếp hợp lệ
+                if (sig.color) color = sig.color;
+                if (sig.shape && ['arrowUp', 'arrowDown', 'circle', 'square'].includes(sig.shape)) shape = sig.shape;
+                if (sig.position && ['aboveBar', 'belowBar', 'inBar'].includes(sig.position)) position = sig.position;
+                if (sig.text !== undefined && sig.text !== '') text = sig.text;
 
                 return {
                     time: sigDate,
-                    position: isEntry ? 'atPriceBottom' : 'atPriceTop',
-                    price,
-                    color: colors[type] || colors.unknown,
-                    shape: isEntry ? 'arrowUp' : 'arrowDown',
-                    text: '', // Only show symbol icon, hide text from chart
+                    position,
+                    color,
+                    shape,
+                    text,
                     size: 2
                 };
             }).filter(Boolean);
@@ -262,20 +297,31 @@ const TradingViewChart = ({
         const timeScale2 = volumeChart.timeScale();
 
         timeScale1.subscribeVisibleLogicalRangeChange((timeRange) => {
-            if (timeRange) timeScale2.setVisibleLogicalRange(timeRange);
+            if (timeRange) {
+                timeScale2.setVisibleLogicalRange(timeRange);
+                previousVisibleLogicalRangeRef.current = timeRange;
+            }
         });
 
         timeScale2.subscribeVisibleLogicalRangeChange((timeRange) => {
-            if (timeRange) timeScale1.setVisibleLogicalRange(timeRange);
+            if (timeRange) {
+                timeScale1.setVisibleLogicalRange(timeRange);
+                previousVisibleLogicalRangeRef.current = timeRange;
+            }
         });
 
         const normalizedFocusDate = String(focusDate || '').split('T')[0];
         const focusIndex = candleData.findIndex(candle => candle.time === normalizedFocusDate);
         if (focusIndex >= 0) {
-            const visibleRadius = 18;
+            const prevRange = previousVisibleLogicalRangeRef.current;
+            // Preserve the user's current zoom level (number of visible bars), default to 80 bars
+            const span = prevRange && (prevRange.to - prevRange.from > 5)
+                ? (prevRange.to - prevRange.from)
+                : 80;
+            const halfSpan = span / 2;
             const visibleRange = {
-                from: Math.max(-0.5, focusIndex - visibleRadius),
-                to: Math.min(candleData.length - 0.5, focusIndex + visibleRadius),
+                from: focusIndex - halfSpan,
+                to: focusIndex + halfSpan,
             };
             timeScale1.setVisibleLogicalRange(visibleRange);
             timeScale2.setVisibleLogicalRange(visibleRange);
