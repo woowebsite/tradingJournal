@@ -6,11 +6,12 @@ export const normalizeStrategyTemplate = (item) => {
     if (!item) return null;
 
     const attributes = item.attributes || item;
-    const id = item.id ?? attributes.id ?? attributes.documentId ?? item.documentId;
     const documentId = item.documentId ?? attributes.documentId ?? null;
+    const id = documentId || item.id || attributes.id;
 
     return {
         id,
+        rawId: item.id ?? attributes.id ?? null,
         documentId,
         ...attributes
     };

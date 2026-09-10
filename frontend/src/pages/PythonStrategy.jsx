@@ -36,7 +36,7 @@ import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { getPythonStrategies, scanPythonStrategy, optimizePythonStrategy } from '../services/pythonStrategy';
-import { getStrategyTemplates, createStrategyTemplate, deleteStrategyTemplate } from '../services/strategyTemplate';
+import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, deleteStrategyTemplate } from '../services/strategyTemplate';
 import TradingViewChart from '../components/TradingViewChart';
 import { formatNumber } from '../utils/formatNumber';
 import dayjs from 'dayjs';
@@ -90,6 +90,7 @@ const PythonStrategy = () => {
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [saveModalOpen, setSaveModalOpen] = useState(false);
+    const [overwriteTemplateId, setOverwriteTemplateId] = useState('');
     const [templateNameInput, setTemplateNameInput] = useState('');
     const [templateDescInput, setTemplateDescInput] = useState('');
     const [savingTemplate, setSavingTemplate] = useState(false);
@@ -529,12 +530,47 @@ const PythonStrategy = () => {
     };
 
     const handleOpenSaveModal = () => {
+        if (selectedTemplateId) {
+            const activeTpl = symbolTemplates.find(t =>
+                String(t.documentId || t.id) === String(selectedTemplateId) ||
+                String(t.id) === String(selectedTemplateId)
+            );
+            if (activeTpl) {
+                setOverwriteTemplateId(String(activeTpl.documentId || activeTpl.id));
+                setTemplateNameInput(activeTpl.name || '');
+                setTemplateDescInput(activeTpl.description || '');
+                setSaveModalOpen(true);
+                return;
+            }
+        }
+
+        setOverwriteTemplateId('__NEW__');
         const defaultName = isVWAP
             ? `${selectedSymbol} - VWAP MA${vwapMaPeriod} ${vwapAnchor.toUpperCase()} (${timeframe})`
             : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
         setTemplateNameInput(defaultName);
         setTemplateDescInput('');
         setSaveModalOpen(true);
+    };
+
+    const handleModalSelectTemplate = (val) => {
+        setOverwriteTemplateId(val);
+        if (!val || val === '__NEW__') {
+            const defaultName = isVWAP
+                ? `${selectedSymbol} - VWAP MA${vwapMaPeriod} ${vwapAnchor.toUpperCase()} (${timeframe})`
+                : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
+            setTemplateNameInput(defaultName);
+            setTemplateDescInput('');
+        } else {
+            const tpl = symbolTemplates.find(t =>
+                String(t.documentId || t.id) === String(val) ||
+                String(t.id) === String(val)
+            );
+            if (tpl) {
+                setTemplateNameInput(tpl.name || '');
+                setTemplateDescInput(tpl.description || '');
+            }
+        }
     };
 
     const handleSaveTemplate = async (e) => {
@@ -575,20 +611,29 @@ const PythonStrategy = () => {
                 strategyFile: selectedStrategyFile,
                 timeframe,
                 config,
-                symbol: currentSymObj?.id || currentSymObj?.documentId || null,
+                symbol: currentSymObj?.documentId || currentSymObj?.id || null,
                 symbolName: selectedSymbol,
-                account: selectedAccount?.id || selectedAccount?.documentId || null,
+                account: selectedAccount?.documentId || selectedAccount?.id || null,
             };
 
-            const created = await createStrategyTemplate(payload);
+            let savedResult = null;
+            if (overwriteTemplateId && overwriteTemplateId !== '__NEW__') {
+                // Ghi đè template đã chọn
+                savedResult = await updateStrategyTemplate(overwriteTemplateId, payload);
+            } else {
+                // Tạo template mới
+                savedResult = await createStrategyTemplate(payload);
+            }
+
             const updatedTemplates = await getStrategyTemplates();
             setTemplates(updatedTemplates);
-            if (created?.id || created?.documentId) {
-                setSelectedTemplateId(String(created.id || created.documentId));
+            if (savedResult?.documentId || savedResult?.id) {
+                setSelectedTemplateId(String(savedResult.documentId || savedResult.id));
             }
             setSaveModalOpen(false);
             setTemplateNameInput('');
             setTemplateDescInput('');
+            setOverwriteTemplateId('');
         } catch (err) {
             console.error('Failed to save strategy template:', err);
             const errDetail = err?.response?.data?.error?.message || err?.message || 'Không thể lưu template chiến lược.';
@@ -1885,6 +1930,7 @@ const PythonStrategy = () => {
                                 <h3 className="text-base font-bold text-gray-100">Lưu Strategy Template</h3>
                             </div>
                             <button
+                                type="button"
                                 onClick={() => setSaveModalOpen(false)}
                                 className="text-gray-400 hover:text-gray-200 p-1 rounded-lg transition cursor-pointer"
                             >
@@ -1893,12 +1939,47 @@ const PythonStrategy = () => {
                         </div>
 
                         <form onSubmit={handleSaveTemplate} className="space-y-4">
+                            {/* Dropdown: Chọn Template để ghi đè hoặc tạo mới */}
                             <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300">Tên Template *</label>
+                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
+                                    <span>Chọn Template ghi đè hoặc tạo mới:</span>
+                                    {overwriteTemplateId && overwriteTemplateId !== '__NEW__' ? (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                                            Chế độ: Ghi đè
+                                        </span>
+                                    ) : (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                                            Chế độ: Tạo mới
+                                        </span>
+                                    )}
+                                </label>
+                                <select
+                                    value={overwriteTemplateId || '__NEW__'}
+                                    onChange={(e) => handleModalSelectTemplate(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition cursor-pointer font-medium"
+                                >
+                                    <option value="__NEW__">✨ [+ Tạo Template Mới Cho {selectedSymbol}]</option>
+                                    {symbolTemplates.map(tpl => {
+                                        const tplId = String(tpl.id || tpl.documentId);
+                                        return (
+                                            <option key={tplId} value={tplId}>
+                                                🔄 Ghi đè: {tpl.name} ({tpl.timeframe || 'D1'})
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
+                            {/* Tên Template Input */}
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
+                                    <span>Tên Template *</span>
+                                    <span className="text-[11px] text-gray-500 font-normal">Có thể chỉnh sửa</span>
+                                </label>
                                 <input
                                     type="text"
                                     required
-                                    placeholder="VD: VWAP M5 Scalp hoặc Supertrend H4 Trend"
+                                    placeholder="Nhập tên template..."
                                     value={templateNameInput}
                                     onChange={(e) => setTemplateNameInput(e.target.value)}
                                     className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 font-medium"
@@ -1951,17 +2032,26 @@ const PythonStrategy = () => {
                                 <button
                                     type="submit"
                                     disabled={savingTemplate || !templateNameInput.trim()}
-                                    className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-cyan-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+                                    className={`px-5 py-2 text-white rounded-xl text-sm font-bold shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer ${
+                                        overwriteTemplateId && overwriteTemplateId !== '__NEW__'
+                                            ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/25'
+                                            : 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-500/25'
+                                    }`}
                                 >
                                     {savingTemplate ? (
                                         <>
                                             <RefreshCw size={14} className="animate-spin" />
                                             <span>Đang lưu...</span>
                                         </>
+                                    ) : overwriteTemplateId && overwriteTemplateId !== '__NEW__' ? (
+                                        <>
+                                            <RefreshCw size={14} />
+                                            <span>Ghi đè Template</span>
+                                        </>
                                     ) : (
                                         <>
                                             <Save size={14} />
-                                            <span>Lưu Template</span>
+                                            <span>Lưu Template Mới</span>
                                         </>
                                     )}
                                 </button>

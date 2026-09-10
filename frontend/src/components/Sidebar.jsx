@@ -27,7 +27,7 @@ import clsx from 'clsx';
 
 const Sidebar = () => {
     const location = useLocation();
-    const { accounts, selectedAccount, setSelectedAccount, loading } = useAccount();
+    const { accounts, selectedAccount, setSelectedAccount, setDefaultAccountId, loading } = useAccount();
     const { isCollapsed, toggleSidebar } = useSidebar();
 
     const menuGroups = [
@@ -104,7 +104,7 @@ const Sidebar = () => {
                     icon: BrainCircuit, label: 'Strategies', path: '/manage-strategies',
                     subItems: [
                         { label: 'Backtest', path: '/backtest' },
-                        { label: 'Python Strategy', path: '/python-strategy' },
+                        { label: 'Python', path: '/python-strategy' },
                         { label: 'Rules', path: '/manage-rules' },
                     ]
                 },
@@ -181,21 +181,34 @@ const Sidebar = () => {
                     </label>
                     <div className="relative">
                         <select
-                            value={selectedAccount?.id || selectedAccount?.documentId || ''}
+                            value={selectedAccount?.documentId || selectedAccount?.id || ''}
                             onChange={(e) => {
-                                const acc = accounts.find(a => (a.id || a.documentId).toString() === e.target.value);
-                                setSelectedAccount(acc);
+                                const accId = e.target.value;
+                                const acc = accounts.find(a =>
+                                    String(a.documentId || a.id) === accId ||
+                                    String(a.id) === accId ||
+                                    (a.rawId !== undefined && String(a.rawId) === accId)
+                                );
+                                setSelectedAccount(acc || null);
+                                if (acc) {
+                                    setDefaultAccountId(String(acc.documentId || acc.id));
+                                } else {
+                                    setDefaultAccountId('');
+                                }
                             }}
                             className="w-full bg-gray-900 border border-gray-700 text-gray-200 rounded-lg pl-9 pr-8 py-2 text-xs appearance-none focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer truncate"
                             disabled={loading}
                         >
                             {loading && <option>Loading...</option>}
                             {!loading && accounts.length === 0 && <option value="">No Accounts</option>}
-                            {accounts.map(acc => (
-                                <option key={acc.id || acc.documentId} value={acc.id || acc.documentId}>
-                                    {acc.name}
-                                </option>
-                            ))}
+                            {accounts.map(acc => {
+                                const optId = String(acc.documentId || acc.id);
+                                return (
+                                    <option key={optId} value={optId}>
+                                        {acc.name}
+                                    </option>
+                                );
+                            })}
                         </select>
                         <Wallet size={14} className="absolute left-3 top-2.5 text-gray-500 pointer-events-none" />
                         <ChevronDown size={14} className="absolute right-3 top-2.5 text-gray-500 pointer-events-none" />

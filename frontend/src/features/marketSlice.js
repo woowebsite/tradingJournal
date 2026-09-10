@@ -329,49 +329,27 @@ export const loadExternalHistory = createAsyncThunk(
 
 export const deleteAllHistories = createAsyncThunk(
     'market/deleteAllHistories',
-    async (symbolId, { dispatch, rejectWithValue }) => {
+    async (payload, { dispatch, rejectWithValue }) => {
         try {
-            // 1. Fetch all histories for this symbol to get their IDs
-            // We need to loop or set a high limit.
-            // Strapi usually paginates.
-            let allIds = [];
-            let page = 1;
-            let pageSize = 100;
-            let hasMore = true;
+            const symbolId = typeof payload === 'object' && payload !== null ? payload.symbolId : payload;
+            const timeframe = typeof payload === 'object' && payload !== null ? payload.timeframe : undefined;
 
-            while (hasMore) {
-                // Fetch documentId as well for Strapi v5 compatibility
-                const url = `/symbol-histories?filters[symbol][documentId][$eq]=${symbolId}&pagination[page]=${page}&pagination[pageSize]=${pageSize}&fields[0]=id&fields[1]=documentId`;
-                const res = await api.get(url);
-                const data = res.data.data;
-                const meta = res.data.meta;
-
-                if (data.length > 0) {
-                    allIds = [...allIds, ...data];
-                }
-
-                if (page >= meta.pagination.pageCount) {
-                    hasMore = false;
-                } else {
-                    page++;
-                }
+            if (!symbolId) {
+                throw new Error('Symbol ID is required to clear histories.');
             }
 
-            if (allIds.length === 0) return 0;
-
-            // 2. Delete each one
-            // NOTE: Strapi v4 doesn't support bulk delete by default without a plugin or custom controller.
-            // We have to delete one by one.
-            const deletePromises = allIds.map(item => {
-                const idToDelete = item.documentId || item.id;
-                return api.delete(`/symbol-histories/${idToDelete}`);
+            // Gọi endpoint SQL siêu tốc trong backend (1 request duy nhất thực thi câu lệnh SQL DELETE)
+            const res = await api.post('/symbol-histories/clear', {
+                symbolId,
+                timeframe,
             });
-            await Promise.all(deletePromises);
-            return allIds.length;
 
+            const deletedCount = res.data?.data?.count ?? res.data?.count ?? 0;
+            return deletedCount;
         } catch (error) {
-            console.error(error);
-            return rejectWithValue(error.message);
+            console.error('Fast clear history error:', error);
+            const errDetail = error.response?.data?.error?.message || error.response?.data?.error || error.message;
+            return rejectWithValue(typeof errDetail === 'object' ? JSON.stringify(errDetail) : String(errDetail));
         }
     }
 );

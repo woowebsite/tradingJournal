@@ -93,12 +93,12 @@ const ManageSymbols = () => {
     };
 
     const handleClearHistory = async (symbol) => {
-        const symbolId = symbol.id || symbol.documentId;
+        const symbolId = symbol.documentId || symbol.id || symbol.Name;
         if (!symbolId) return;
         if (!window.confirm(`Are you sure you want to CLEAR ALL history records for ${symbol.Name}? This action cannot be undone.`)) return;
         try {
-            await dispatch(deleteAllHistories(symbolId)).unwrap();
-            alert(`Successfully cleared history for ${symbol.Name}`);
+            const count = await dispatch(deleteAllHistories(symbolId)).unwrap();
+            alert(`Successfully cleared ${count} history records for ${symbol.Name}`);
         } catch (error) {
             alert(`Failed to clear history: ${error}`);
         }

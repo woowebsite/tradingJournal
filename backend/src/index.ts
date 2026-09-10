@@ -108,6 +108,12 @@ export default {
         'api::strategy-template.strategy-template.create',
         'api::strategy-template.strategy-template.update',
         'api::strategy-template.strategy-template.delete',
+        'api::symbol-history.symbol-history.find',
+        'api::symbol-history.symbol-history.findOne',
+        'api::symbol-history.symbol-history.create',
+        'api::symbol-history.symbol-history.update',
+        'api::symbol-history.symbol-history.delete',
+        'api::symbol-history.symbol-history.clearHistory',
     ];
 
     const rolesToGrant = ['public', 'authenticated'];

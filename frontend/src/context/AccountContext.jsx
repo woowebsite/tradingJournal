@@ -1,4 +1,3 @@
-
 import { createContext, useState, useEffect, useContext, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchWatchlists } from '../features/watchlistSlice';
@@ -32,22 +31,28 @@ export const AccountProvider = ({ children }) => {
                 const res = await api.get('/accounts?populate=*');
                 const data = res.data.data || [];
                 const formattedAccounts = data.map(item => ({
-                    id: item.id || item.documentId,
-                    ...item
+                    ...item,
+                    id: item.documentId || item.id,
+                    rawId: item.id,
+                    documentId: item.documentId || item.id,
                 }));
 
                 setAccounts(formattedAccounts);
 
                 const savedDefaultId = localStorage.getItem(DEFAULT_ACCOUNT_STORAGE_KEY);
                 const defaultAccount = formattedAccounts.find(account =>
-                    String(account.documentId || account.id) === String(savedDefaultId)
+                    savedDefaultId && (
+                        String(account.documentId) === String(savedDefaultId) ||
+                        String(account.id) === String(savedDefaultId) ||
+                        (account.rawId !== undefined && String(account.rawId) === String(savedDefaultId))
+                    )
                 );
 
                 if (defaultAccount) {
-                    setDefaultAccountIdState(String(defaultAccount.documentId || defaultAccount.id));
+                    const canonicalId = String(defaultAccount.documentId || defaultAccount.id);
+                    setDefaultAccountIdState(canonicalId);
                     setSelectedAccount(defaultAccount);
-                } else if (formattedAccounts.length > 0 && !selectedAccount) {
-                    // Keep the existing first-account fallback when no default is set.
+                } else if (formattedAccounts.length > 0) {
                     setSelectedAccount(formattedAccounts[0]);
                 }
             } catch (error) {
