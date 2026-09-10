@@ -1,12 +1,31 @@
 import React, { useState } from 'react';
-import { Activity, Sparkles, TrendingUp } from 'lucide-react';
+import { Activity, Sparkles, TrendingUp, Bot } from 'lucide-react';
 import RecentTradeBox from '../RecentTradeBox';
 import TCBSRecommendPanel from '../TCBSRecommendPanel';
 import TCBSSignalPanel from '../TCBSSignalPanel';
 import StrategySummary from '../StrategySummary';
+import AutoTradeLogPanel from '../AutoTradeLogPanel';
 import dayjs from 'dayjs';
 
-const StrategyPanel = ({ activeStrategy, trades, onTradeClick, signals = [], recommendations = [], tcbsSignals = [], loadingTcbsInsights = false }) => {
+const StrategyPanel = ({ 
+    activeStrategy, 
+    trades, 
+    onTradeClick, 
+    signals = [], 
+    recommendations = [], 
+    tcbsSignals = [], 
+    loadingTcbsInsights = false,
+    selectedTemplate = null,
+    onAutoTrade = null,
+    autoTrading = false,
+    isAutoTradeEnabled = false,
+    onToggleAutoTrade = () => {},
+    autoTradeLogs = [],
+    isScanningOnCandleClose = false,
+    selectedSymbol = null,
+    timeframe = 'D1',
+    onClearLogs = () => {}
+}) => {
     const [activeTab, setActiveTab] = useState('summary');
 
     return (
@@ -21,6 +40,21 @@ const StrategyPanel = ({ activeStrategy, trades, onTradeClick, signals = [], rec
                         Strategy
                     </button>
                 </div>
+                <button
+                    onClick={() => setActiveTab('autotrade')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'autotrade' ? 'text-white border-b-2 border-emerald-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <div className="relative">
+                        <Bot size={14} className={isAutoTradeEnabled ? 'text-emerald-400' : activeTab === 'autotrade' ? 'text-emerald-300' : 'text-gray-500'} />
+                        {isAutoTradeEnabled && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                        )}
+                    </div>
+                    <span>Auto Trade ({autoTradeLogs.length})</span>
+                </button>
                 <button
                     onClick={() => setActiveTab('signals')}
                     className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'signals' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
@@ -54,6 +88,26 @@ const StrategyPanel = ({ activeStrategy, trades, onTradeClick, signals = [], rec
                 {activeTab === 'summary' ? (
                     <StrategySummary
                         activeStrategy={activeStrategy}
+                        trades={trades}
+                        selectedTemplate={selectedTemplate}
+                        onAutoTrade={onAutoTrade}
+                        autoTrading={autoTrading}
+                        isAutoTradeEnabled={isAutoTradeEnabled}
+                        onToggleAutoTrade={onToggleAutoTrade}
+                        isScanningOnCandleClose={isScanningOnCandleClose}
+                        autoTradeLogsCount={autoTradeLogs.length}
+                        onSwitchToLogs={() => setActiveTab('autotrade')}
+                    />
+                ) : activeTab === 'autotrade' ? (
+                    <AutoTradeLogPanel
+                        isAutoTradeEnabled={isAutoTradeEnabled}
+                        onToggleAutoTrade={onToggleAutoTrade}
+                        logs={autoTradeLogs}
+                        isScanning={isScanningOnCandleClose}
+                        selectedSymbol={selectedSymbol}
+                        selectedTemplate={selectedTemplate}
+                        timeframe={timeframe}
+                        onClearLogs={onClearLogs}
                     />
                 ) : activeTab === 'signals' ? (
                     <div className="text-sm text-gray-300 p-1">
@@ -85,3 +139,4 @@ const StrategyPanel = ({ activeStrategy, trades, onTradeClick, signals = [], rec
 };
 
 export default StrategyPanel;
+

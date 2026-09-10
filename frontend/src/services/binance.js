@@ -1,3 +1,4 @@
+import api from './api';
 
 // Binance External API Service
 
@@ -301,5 +302,165 @@ export const subscribeBinanceKlineWS = (ticker, resolution, onKlineUpdate, onSta
         }
         if (onStatusChange) onStatusChange('disconnected');
     };
+};
+
+/**
+ * Lấy headers cấu hình Binance từ biến môi trường của Frontend
+ */
+export const getBinanceHeaders = () => {
+    const headers = {};
+    const apiKey = import.meta.env.VITE_BINANCE_API_KEY || import.meta.env.BINANCE_API_KEY;
+    const apiSecret = import.meta.env.VITE_BINANCE_API_SECRET || import.meta.env.BINANCE_SECRET_KEY;
+    let useTestnet = import.meta.env.VITE_BINANCE_USE_TESTNET !== undefined 
+        ? import.meta.env.VITE_BINANCE_USE_TESTNET 
+        : import.meta.env.BINANCE_TESTNET;
+
+    if (typeof useTestnet === 'string') {
+        useTestnet = useTestnet.split('#')[0].trim();
+    }
+    
+    if (apiKey) headers['x-binance-api-key'] = String(apiKey).trim();
+    if (apiSecret) headers['x-binance-secret-key'] = String(apiSecret).trim();
+    if (useTestnet !== undefined && useTestnet !== null) {
+        headers['x-binance-use-testnet'] = String(useTestnet).trim();
+    }
+    return headers;
+};
+
+/**
+ * Lấy thông tin cấu hình Binance hiện tại
+ */
+export const getBinanceConfig = () => {
+    const apiKey = import.meta.env.VITE_BINANCE_API_KEY || import.meta.env.BINANCE_API_KEY || '';
+    const apiSecret = import.meta.env.VITE_BINANCE_API_SECRET || import.meta.env.BINANCE_SECRET_KEY || '';
+    let useTestnet = import.meta.env.VITE_BINANCE_USE_TESTNET !== undefined 
+        ? import.meta.env.VITE_BINANCE_USE_TESTNET 
+        : (import.meta.env.BINANCE_TESTNET || false);
+    if (typeof useTestnet === 'string') {
+        useTestnet = useTestnet.split('#')[0].trim();
+    }
+    const isTestnet = String(useTestnet).toLowerCase() === 'true' || useTestnet === true;
+    return {
+        apiKey: String(apiKey).trim(),
+        secretKey: String(apiSecret).trim(),
+        isTestnet,
+        hasKeys: Boolean(apiKey && apiSecret)
+    };
+};
+
+/**
+ * Lấy thông tin tài khoản và số dư từ Binance qua Backend
+ */
+export const getBinanceAccountInfo = async () => {
+    try {
+        const config = getBinanceConfig();
+        const response = await api.get('/binance/account', {
+            headers: getBinanceHeaders(),
+            params: {
+                apiKey: config.apiKey,
+                secretKey: config.secretKey,
+                isTestnet: config.isTestnet
+            }
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to get Binance account info:', error);
+        throw error;
+    }
+};
+
+/**
+ * Gửi lệnh mua/bán trực tiếp lên sàn Binance qua Backend
+ */
+export const sendBinanceOrder = async ({
+    symbol,
+    side,
+    type = 'MARKET',
+    quantity,
+    price,
+    timeInForce = 'GTC',
+    isFutures
+}) => {
+    try {
+        const config = getBinanceConfig();
+        const response = await api.post('/binance/order', {
+            symbol,
+            side,
+            type,
+            quantity,
+            price,
+            timeInForce,
+            isFutures,
+            apiKey: config.apiKey,
+            secretKey: config.secretKey,
+            isTestnet: config.isTestnet
+        }, {
+            headers: getBinanceHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to send Binance order:', error);
+        throw error;
+    }
+};
+
+/**
+ * Tự động thực thi lệnh chiến lược: gửi lệnh sang Binance và lưu Open Trade vào Strapi
+ */
+export const executeBinanceStrategyTrade = async ({
+    symbol,
+    accountId,
+    strategyId,
+    signal,
+    volume,
+    riskAmount,
+    note
+}) => {
+    try {
+        const config = getBinanceConfig();
+        const response = await api.post('/binance/execute-strategy-trade', {
+            symbol,
+            accountId,
+            strategyId,
+            signal,
+            volume,
+            riskAmount,
+            note,
+            apiKey: config.apiKey,
+            secretKey: config.secretKey,
+            isTestnet: config.isTestnet
+        }, {
+            headers: getBinanceHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        const resData = error.response?.data;
+        const errMsg = resData?.message || resData?.error?.message || resData?.error?.msg || error.message;
+        console.error('Failed to execute Binance strategy trade:', errMsg, error);
+        const customErr = new Error(errMsg);
+        customErr.response = error.response;
+        throw customErr;
+    }
+};
+
+/**
+ * Quét chiến lược Python khi nến đóng và tự động vào lệnh nếu có tín hiệu mới
+ */
+export const runCandleCloseAutoTrade = async (params) => {
+    try {
+        const config = getBinanceConfig();
+        const response = await api.post('/binance/scan-and-trade', {
+            ...params,
+            apiKey: config.apiKey,
+            secretKey: config.secretKey,
+            isTestnet: config.isTestnet
+        }, {
+            headers: getBinanceHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to run candle close auto trade:', error);
+        throw error;
+    }
 };
 

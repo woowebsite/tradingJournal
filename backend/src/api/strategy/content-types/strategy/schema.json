@@ -23,9 +23,13 @@
       "type": "enumeration",
       "enum": [
         "Rules",
-        "Webhook"
+        "Webhook",
+        "Python"
       ],
       "default": "Rules"
+    },
+    "strategyFile": {
+      "type": "string"
     },
     "template": {
       "type": "string"

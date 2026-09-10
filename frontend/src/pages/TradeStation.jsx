@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle } from '../features/marketSlice';
 import { subscribeBinanceKlineWS } from '../services/binance';
+import { executeBinanceOrder } from '../services/binanceExecution';
+import api from '../services/api';
 import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { deleteTrade, fetchOpenTrades, fetchTrades, saveTrade } from '../features/tradeSlice';
@@ -16,16 +18,18 @@ import WatchlistSelector from '../components/WatchlistSelector';
 import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
-import { Search, RefreshCw, Plus, History, BookmarkCheck } from 'lucide-react';
+import { Search, RefreshCw, Plus, History, BookmarkCheck, Bot } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { upsertSymbolTechnicalAnalysis } from '../services/tcbs';
 import { calculateSMA } from '../indicators/movingAverages';
 import { calculateSupertrend } from '../indicators/supertrend';
+import { calculateVWAP } from '../indicators/vwap';
 import { calculateIchimoku } from '../indicators/ichimoku/ichimoku';
 import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
 import { getStrategyId } from '../utils/roadmapCalculations';
 import { getStrategyTemplates } from '../services/strategyTemplate';
+import { scanPythonStrategy } from '../services/pythonStrategy';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
@@ -52,12 +56,24 @@ const TradeStation = () => {
     const [stMultiplier, setStMultiplier] = useState(3);
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [tradeFormSetup, setTradeFormSetup] = useState({ price: '', slPrice: '', tpPrice: '' });
+    const [autoTrading, setAutoTrading] = useState(false);
+    const [isAutoTradeEnabled, setIsAutoTradeEnabled] = useState(() => {
+        try {
+            return localStorage.getItem('auto_trade_enabled') === 'true';
+        } catch { return false; }
+    });
+    const [autoTradeLogs, setAutoTradeLogs] = useState([]);
+    const [isScanningOnCandleClose, setIsScanningOnCandleClose] = useState(false);
     const [liveCandle, setLiveCandle] = useState(null);
     const [wsStatus, setWsStatus] = useState('disconnected');
     const [livePrice, setLivePrice] = useState(null);
     const lastAutoRefreshedSymbolRef = useRef(null);
     const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
+    const lastScannedCandleTimeRef = useRef(null);
+    const lastExecutedTradeTimeRef = useRef(null);
+    const autoTradeContextRef = useRef({});
     const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
     const priceParam = searchParams.get('price');
@@ -84,14 +100,24 @@ const TradeStation = () => {
     }, [symbolParam, symbols]);
 
     const tradeSetupValue = useMemo(() => ({
-        price: priceParam || '',
-        slPrice: slPriceParam || '',
-        tpPrice: tpPriceParam || ''
-    }), [priceParam, slPriceParam, tpPriceParam]);
+        price: tradeFormSetup.price || priceParam || '',
+        slPrice: tradeFormSetup.slPrice || slPriceParam || '',
+        tpPrice: tradeFormSetup.tpPrice || tpPriceParam || ''
+    }), [tradeFormSetup, priceParam, slPriceParam, tpPriceParam]);
 
     const tradeSetupKey = useMemo(() => (
-        [symbolParam || '', priceParam || '', slPriceParam || '', tpPriceParam || ''].join(':')
-    ), [priceParam, slPriceParam, symbolParam, tpPriceParam]);
+        [
+            selectedSymbolId || '',
+            symbolParam || '',
+            tradeFormSetup.price || priceParam || '',
+            tradeFormSetup.slPrice || slPriceParam || '',
+            tradeFormSetup.tpPrice || tpPriceParam || ''
+        ].join(':')
+    ), [selectedSymbolId, symbolParam, tradeFormSetup, priceParam, slPriceParam, tpPriceParam]);
+
+    useEffect(() => {
+        setTradeFormSetup({ price: '', slPrice: '', tpPrice: '' });
+    }, [selectedSymbolId]);
 
     const selectedSymbol = useMemo(() => {
         if (!selectedSymbolId || !symbols || symbols.length === 0) return null;
@@ -110,6 +136,213 @@ const TradeStation = () => {
     }, [selectedAccount?.market?.Name, selectedSymbol, symbolParam]);
 
     const lastReduxDispatchTimeRef = useRef(0);
+
+    const refreshSelectedAccountTrades = useCallback(() => {
+        const accountId = selectedAccount?.documentId || selectedAccount?.id;
+        if (!accountId) return Promise.resolve();
+        return dispatch(fetchTrades({ accountId, pageSize: 50 }))
+            .unwrap()
+            .then(fetchedTrades => {
+                setAccountTrades(fetchedTrades || []);
+                return fetchedTrades;
+            });
+    }, [dispatch, selectedAccount]);
+
+    const addAutoTradeLog = useCallback((message, type = 'info', meta = null) => {
+        const timeStr = new Date().toLocaleTimeString();
+        const newEntry = {
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            time: timeStr,
+            message,
+            type, // 'info' | 'success' | 'warn' | 'error' | 'scan'
+            meta
+        };
+        setAutoTradeLogs(prev => [newEntry, ...prev.slice(0, 49)]);
+    }, []);
+
+    const toggleAutoTrade = useCallback(() => {
+        setIsAutoTradeEnabled(prev => {
+            const next = !prev;
+            try {
+                localStorage.setItem('auto_trade_enabled', String(next));
+            } catch { }
+            addAutoTradeLog(
+                next 
+                    ? `🟢 Đã BẬT Auto Trade. Hệ thống sẽ tự động quét Python Strategy và gửi Order Binance mỗi lần đóng nến.` 
+                    : `🔴 Đã TẮT Auto Trade.`,
+                next ? 'success' : 'warn'
+            );
+            return next;
+        });
+    }, [addAutoTradeLog]);
+
+    const handleCandleCloseAutoTrade = useCallback(async (candle, symName, currentTf) => {
+        const ctx = autoTradeContextRef.current;
+        if (!ctx?.isAutoTradeEnabled) return;
+
+        const tpl = ctx.selectedTemplate;
+        const cfg = tpl?.config || {};
+        const stratFile = tpl?.strategyFile || (ctx.chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py');
+        const stratName = tpl?.name || stratFile.replace('.py', '');
+
+        addAutoTradeLog(`🔔 Nến ${currentTf} [${symName}] vừa ĐÓNG @ $${candle.close}. Đang quét Python Strategy [${stratName}]...`, 'scan');
+        setIsScanningOnCandleClose(true);
+
+        try {
+            const scanParams = {
+                strategyFile: stratFile,
+                ticker: symName,
+                timeframe: currentTf,
+                countback: 500,
+                ...(cfg || {})
+            };
+
+            const res = await scanPythonStrategy(scanParams);
+            if (!res) {
+                addAutoTradeLog(`⚠️ Không nhận được phản hồi từ Python Strategy scan.`, 'warn');
+                return;
+            }
+
+            const activeTrade = res.summary?.activeTrade;
+            const latestTrade = res.summary?.latestTrade;
+
+            let targetSignal = null;
+            if (activeTrade && activeTrade.entry_price && activeTrade.stop_loss && activeTrade.status === 'Open') {
+                targetSignal = {
+                    type: activeTrade.type || 'Long',
+                    entry: activeTrade.entry_price,
+                    stop_loss: activeTrade.stop_loss,
+                    take_profit: activeTrade.take_profit,
+                    date: activeTrade.entry_date,
+                };
+            } else if (latestTrade && latestTrade.entry_price && latestTrade.stop_loss) {
+                targetSignal = {
+                    type: latestTrade.type || 'Long',
+                    entry: latestTrade.entry_price,
+                    stop_loss: latestTrade.stop_loss,
+                    take_profit: latestTrade.take_profit,
+                    date: latestTrade.entry_date,
+                };
+            }
+
+            if (!targetSignal) {
+                addAutoTradeLog(`ℹ️ Nến ${currentTf} đóng @ $${candle.close}: Không có tín hiệu vào lệnh mới.`, 'info');
+                return;
+            }
+
+            const signalKey = `${symName}:${targetSignal.date || candle.rawTime || candle.date}:${targetSignal.type}`;
+            if (lastExecutedTradeTimeRef.current === signalKey) {
+                addAutoTradeLog(`ℹ️ Tín hiệu ${targetSignal.type} @ $${targetSignal.entry} đã được thực thi trước đó. Bỏ qua duplicate.`, 'info');
+                return;
+            }
+
+            // Check existing open trade for this symbol in current account
+            const existingOpen = (ctx.accountTrades || []).some(t => {
+                const sName = t.symbol?.Name || t.symbol?.name || '';
+                return sName.toUpperCase() === symName.toUpperCase() && t.trade_status === 'Open';
+            });
+
+            if (existingOpen) {
+                addAutoTradeLog(`⚠️ Symbol ${symName} đã có vị thế mở (Open Trade). Bỏ qua để tránh duplicate.`, 'warn');
+                return;
+            }
+
+            // Calculate position volume from account risk
+            const account = ctx.selectedAccount;
+            const balance = Number(account?.initial_balance || account?.balance || account?.current_balance || 1000);
+            const riskPct = Number(account?.setting?.riskPerTrade || 1);
+            const riskAmount = (balance * riskPct) / 100;
+            const stopDist = Math.abs(Number(targetSignal.entry) - Number(targetSignal.stop_loss));
+            const volume = (riskAmount > 0 && stopDist > 0) ? Number((riskAmount / stopDist).toFixed(6)) : 0.001;
+
+            addAutoTradeLog(`🎯 Phát hiện tín hiệu ${targetSignal.type.toUpperCase()} @ $${targetSignal.entry}! Đang gửi Order sang Binance...`, 'info', {
+                signal: targetSignal,
+                volume,
+                riskAmount
+            });
+
+            // 1. Send Order directly to Binance via executeBinanceOrder (Client-side signed, zero API Key exposure)
+            const symbolUpper = symName.toUpperCase();
+            const isFutures = symbolUpper.endsWith('.P') || 
+                              symbolUpper.includes('PERP') || 
+                              symbolUpper.includes('FUTURES');
+            const side = targetSignal.type.toLowerCase() === 'long' ? 'BUY' : 'SELL';
+
+            const binanceOrderResult = await executeBinanceOrder({
+                symbol: symName,
+                side,
+                type: 'MARKET',
+                quantity: volume,
+                price: targetSignal.entry,
+                isFutures
+            });
+
+            const orderId = binanceOrderResult?.orderId || binanceOrderResult?.clientOrderId || 'SUCCESS';
+            const nowIso = targetSignal.date || new Date().toISOString();
+
+            // 2. Save Open Trade and Trade Detail in Strapi DB
+            const plannedNotes = [
+                `Auto Trade on Candle Close (${currentTf}) via Python Strategy ${stratName}`,
+                `Binance Order ID: ${orderId} (${isFutures ? 'Futures' : 'Spot'})`,
+                targetSignal.stop_loss ? `Planned SL: ${targetSignal.stop_loss}` : null,
+                targetSignal.take_profit ? `Planned TP: ${targetSignal.take_profit}` : null,
+            ].filter(Boolean).join('\n');
+
+            try {
+                const tradeData = {
+                    type: targetSignal.type,
+                    trade_status: 'Open',
+                    mode: 'Real',
+                    date: nowIso,
+                    symbol: ctx.selectedSymbolId,
+                    account: account?.documentId || account?.id,
+                    strategy: ctx.activeStrategyId,
+                    note: plannedNotes
+                };
+
+                const res = await api.post('/trades', { data: tradeData });
+                const createdTrade = res.data?.data;
+                const createdTradeId = createdTrade?.documentId || createdTrade?.id;
+
+                if (createdTradeId) {
+                    try {
+                        await api.post('/trade-details', {
+                            data: {
+                                trade: createdTradeId,
+                                date: nowIso,
+                                signal: 'Entry',
+                                type: targetSignal.type.toLowerCase() === 'long' ? 'Buy' : 'Sell',
+                                price: Number(targetSignal.entry),
+                                volume: Number(volume),
+                                note: `Auto Trade entry filled @ ${targetSignal.entry}. SL: ${targetSignal.stop_loss || '--'}, TP: ${targetSignal.take_profit || '--'}. Order ID: ${orderId}`
+                            }
+                        });
+                    } catch (detailErr) {
+                        console.warn('Could not create trade detail in Strapi (optional):', detailErr);
+                    }
+                }
+            } catch (dbErr) {
+                console.error('Failed to save trade record in DB:', dbErr);
+            }
+
+            lastExecutedTradeTimeRef.current = signalKey;
+
+            addAutoTradeLog(`🚀 [KHỚP LỆNH LIVE BINANCE] Đã gửi thành công lệnh ${targetSignal.type.toUpperCase()} ${symName} @ $${targetSignal.entry} lên Binance (Order #${orderId})! Đã tạo Open Trade vào DB.`, 'success');
+
+            // Refresh account trades
+            const accountId = account?.documentId || account?.id;
+            if (accountId) {
+                dispatch(fetchOpenTrades({ accountId }));
+                refreshSelectedAccountTrades();
+            }
+        } catch (err) {
+            console.error('Auto Trade Candle Close execution failed:', err);
+            const errMsg = err?.message || JSON.stringify(err);
+            addAutoTradeLog(`❌ Lỗi thực thi Auto Trade Binance: ${errMsg}`, 'error');
+        } finally {
+            setIsScanningOnCandleClose(false);
+        }
+    }, [addAutoTradeLog, dispatch, refreshSelectedAccountTrades]);
 
     // Binance WebSocket Real-time Kline Connection
     useEffect(() => {
@@ -144,6 +377,18 @@ const TradeStation = () => {
                         timeframe: currentTf
                     }));
                 }
+
+                // Tự động quét Python Strategy và gửi Order Binance khi nến đóng
+                if (candle.isClosed) {
+                    const ctx = autoTradeContextRef.current;
+                    if (ctx?.isAutoTradeEnabled) {
+                        const candleKey = `${symName}:${currentTf}:${candle.rawTime || candle.date || candle.tradingDate}`;
+                        if (lastScannedCandleTimeRef.current !== candleKey) {
+                            lastScannedCandleTimeRef.current = candleKey;
+                            handleCandleCloseAutoTrade(candle, symName, currentTf);
+                        }
+                    }
+                }
             },
             (status) => {
                 setWsStatus(status);
@@ -153,7 +398,7 @@ const TradeStation = () => {
         return () => {
             unsubscribe();
         };
-    }, [dispatch, isCryptoSymbol, selectedSymbol?.Name, selectedSymbol?.name, selectedSymbolId, symbolParam, timeframe]);
+    }, [dispatch, handleCandleCloseAutoTrade, isCryptoSymbol, selectedSymbol?.Name, selectedSymbol?.name, selectedSymbolId, symbolParam, timeframe]);
 
     useEffect(() => {
         dispatch(fetchSymbols());
@@ -304,6 +549,14 @@ const TradeStation = () => {
             return tSymName === cleanSym;
         });
     }, [templates, selectedSymbol]);
+
+    const selectedTemplate = useMemo(() => {
+        if (!selectedTemplateId) return null;
+        return symbolTemplates.find(t =>
+            String(t.documentId || t.id) === String(selectedTemplateId) ||
+            String(t.id) === String(selectedTemplateId)
+        ) || null;
+    }, [selectedTemplateId, symbolTemplates]);
 
     useEffect(() => {
         if (selectedTemplateId) {
@@ -485,17 +738,6 @@ const TradeStation = () => {
             console.error(`Failed to save technical analysis for ${selectedSymbol.Name}:`, error);
         });
     }, [activeSymbolHistories, selectedSymbol?.Name, selectedSymbolId, timeframe]);
-
-    const refreshSelectedAccountTrades = useCallback(() => {
-        const accountId = selectedAccount?.documentId || selectedAccount?.id;
-        if (!accountId) return Promise.resolve();
-        return dispatch(fetchTrades({ accountId, pageSize: 50 }))
-            .unwrap()
-            .then(fetchedTrades => {
-                setAccountTrades(fetchedTrades || []);
-                return fetchedTrades;
-            });
-    }, [dispatch, selectedAccount]);
 
     const handleEditTrade = useCallback((trade) => {
         setSelectedTrade(null);
@@ -686,8 +928,13 @@ const TradeStation = () => {
                 );
                 setChartTemplate(matched || rawTemplate);
             }
+        } else if (activeStrategy?.strategyFile) {
+            const stratLower = activeStrategy.strategyFile.toLowerCase();
+            if (stratLower.includes('ichimoku')) setChartTemplate('Ichimoku');
+            else if (stratLower.includes('vwap')) setChartTemplate('VWAP');
+            else if (stratLower.includes('supertrend')) setChartTemplate('Supertrend');
         }
-    }, [activeStrategy?.template]);
+    }, [activeStrategy?.template, activeStrategy?.strategyFile]);
 
     const activeStrategyRuleIds = useMemo(() => {
         return new Set([
@@ -802,6 +1049,170 @@ const TradeStation = () => {
 
     }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId, timeframe]);
 
+    // Keep autoTradeContextRef up to date
+    useEffect(() => {
+        autoTradeContextRef.current = {
+            isAutoTradeEnabled,
+            selectedTemplate,
+            selectedAccount,
+            accountTrades,
+            activeStrategyId,
+            selectedSymbol,
+            selectedSymbolId,
+            chartTemplate,
+            timeframe,
+            vwapAnchor,
+            stPeriod,
+            stMultiplier,
+            activeSymbolHistories
+        };
+    }, [isAutoTradeEnabled, selectedTemplate, selectedAccount, accountTrades, activeStrategyId, selectedSymbol, selectedSymbolId, chartTemplate, timeframe, vwapAnchor, stPeriod, stMultiplier, activeSymbolHistories]);
+
+    const handleAutoTrade = useCallback(async () => {
+        if (!selectedSymbol) {
+            alert('Vui lòng chọn một Symbol trước khi Auto Trade.');
+            return;
+        }
+
+        const symName = selectedSymbol.Name || selectedSymbol.name;
+        setAutoTrading(true);
+
+        try {
+            // 1. Determine template & configuration
+            const tpl = selectedTemplate;
+            const cfg = tpl?.config || {};
+            const stratFile = tpl?.strategyFile || (chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py');
+            const isVWAP = chartTemplate === 'VWAP' || (stratFile && stratFile.toLowerCase().includes('vwap')) || (tpl?.name && tpl.name.toLowerCase().includes('vwap'));
+            const targetTf = tpl?.timeframe || timeframe || 'D1';
+
+            let entry = null;
+            let sl = null;
+            let tp = null;
+
+            // 2. Try Python Strategy scan if template or python strategy is specified
+            if (tpl?.strategyFile || tpl?.type === 'Python' || stratFile) {
+                try {
+                    const scanParams = {
+                        strategyFile: stratFile,
+                        ticker: symName,
+                        timeframe: targetTf,
+                        countback: 500,
+                        ...(cfg || {})
+                    };
+                    const res = await scanPythonStrategy(scanParams);
+                    if (res) {
+                        const activeTrade = res.summary?.activeTrade;
+                        const latestTrade = res.summary?.latestTrade;
+                        
+                        if (activeTrade && activeTrade.entry_price && activeTrade.stop_loss) {
+                            entry = activeTrade.entry_price;
+                            sl = activeTrade.stop_loss;
+                            tp = activeTrade.take_profit;
+                        } else if (latestTrade && latestTrade.entry_price && latestTrade.stop_loss) {
+                            entry = latestTrade.entry_price;
+                            sl = latestTrade.stop_loss;
+                            tp = latestTrade.take_profit;
+                        } else if (res.summary?.currentPrice) {
+                            entry = livePrice || res.summary.currentPrice;
+                            if (isVWAP) {
+                                const lastCandle = res.candles?.at(-1);
+                                const vwapVal = lastCandle?.vwap || res.summary?.vwap;
+                                sl = vwapVal ? +Number(vwapVal).toFixed(2) : null;
+                                if (entry && sl) {
+                                    const dist = Math.abs(entry - sl);
+                                    tp = +(entry >= sl ? entry + dist * (cfg.rr || 1.5) : entry - dist * (cfg.rr || 1.5)).toFixed(2);
+                                }
+                            } else {
+                                const stVal = res.summary.supertrend || res.candles?.at(-1)?.supertrend;
+                                const stDir = res.summary.st_direction || res.candles?.at(-1)?.st_direction || 1;
+                                sl = stVal ? +Number(stVal).toFixed(2) : null;
+                                if (entry && sl) {
+                                    const dist = Math.abs(entry - sl);
+                                    tp = +(stDir === 1 ? entry + dist * (cfg.rr || 1.5) : entry - dist * (cfg.rr || 1.5)).toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                } catch (scanErr) {
+                    console.warn('Python strategy scan fallback to local indicator:', scanErr);
+                }
+            }
+
+            // 3. Fallback to client-side indicator calculation if Entry/SL/TP not yet computed
+            if (!entry || !sl || !tp) {
+                const sortedHistory = [...activeSymbolHistories]
+                    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                const candles = sortedHistory.map(candle => ({
+                    time: candle.date,
+                    open: Number(candle.open),
+                    high: Number(candle.high),
+                    low: Number(candle.low),
+                    close: Number(candle.close),
+                    volume: Number(candle.volume || 0),
+                }));
+
+                if (candles.length > 0) {
+                    const lastCandle = candles[candles.length - 1];
+                    const curPrice = Number(livePrice || lastCandle.close);
+                    entry = curPrice;
+
+                    if (isVWAP) {
+                        const anchor = cfg.vwapAnchor || vwapAnchor || 'Year';
+                        const vwapData = calculateVWAP(candles, anchor);
+                        const lastVwap = vwapData.at(-1);
+                        if (lastVwap) {
+                            sl = lastVwap.value;
+                            if (curPrice >= lastVwap.value) {
+                                tp = lastVwap.upper1 || Number((curPrice + Math.abs(curPrice - sl) * 1.5).toFixed(2));
+                            } else {
+                                tp = lastVwap.lower1 || Number((curPrice - Math.abs(curPrice - sl) * 1.5).toFixed(2));
+                            }
+                        }
+                    } else {
+                        const curStPeriod = parseInt(cfg.stPeriod || stPeriod || 10, 10);
+                        const curStMultiplier = parseFloat(cfg.stMultiplier || stMultiplier || 3.0);
+                        const curRr = parseFloat(cfg.rr || 1.5);
+                        const stData = calculateSupertrend(curStPeriod, curStMultiplier, candles);
+                        const lastSt = stData.at(-1);
+                        if (lastSt) {
+                            sl = lastSt.value;
+                            const risk = Math.abs(curPrice - sl);
+                            if (lastSt.direction === 1 || curPrice >= sl) {
+                                tp = Number((curPrice + risk * curRr).toFixed(2));
+                            } else {
+                                tp = Number((curPrice - risk * curRr).toFixed(2));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Update the order form state
+            if (entry && sl) {
+                const actualEntry = livePrice && Number(livePrice) > 0 ? Number(livePrice) : Number(entry);
+                const actualSl = Number(sl);
+                const isLong = actualEntry >= actualSl;
+                const rrRatio = cfg.rr ? parseFloat(cfg.rr) : 1.5;
+                const calculatedTp = isLong ? (actualEntry + Math.abs(actualEntry - actualSl) * rrRatio) : (actualEntry - Math.abs(actualEntry - actualSl) * rrRatio);
+                const finalTp = tp ? Number(tp) : calculatedTp;
+
+                setTradeFormSetup({
+                    price: String(Number(actualEntry.toFixed(6))),
+                    slPrice: String(Number(actualSl.toFixed(6))),
+                    tpPrice: String(Number(finalTp.toFixed(6)))
+                });
+            } else {
+                alert('Chưa tính được điểm Entry/SL/TP. Vui lòng kiểm tra lại lịch sử giá hoặc template.');
+            }
+        } catch (err) {
+            console.error('Auto Trade calculation failed:', err);
+            alert(`Auto Trade thất bại: ${err?.message || err}`);
+        } finally {
+            setAutoTrading(false);
+        }
+    }, [selectedSymbol, selectedTemplate, chartTemplate, timeframe, livePrice, activeSymbolHistories, vwapAnchor, stPeriod, stMultiplier]);
+
     // 3. Mỗi lần change symbol từ watchlist, hãy kiểm tra từ localStorage xem symbol đó đã có data của ngày hôm nay chưa (chỉ cho D1).
     useEffect(() => {
         if (!symbolParam || !selectedSymbol || !selectedSymbolId) return;
@@ -863,7 +1274,7 @@ const TradeStation = () => {
                                 <span className="text-sm text-gray-400">{selectedSymbol?.exchange} - {selectedSymbol?.sector}</span>
 
                                 {isCryptoSymbol && (
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition ${
                                             wsStatus === 'connected'
                                                 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
@@ -879,6 +1290,19 @@ const TradeStation = () => {
                                                 ${Number(livePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
                                             </span>
                                         )}
+                                        <button
+                                            type="button"
+                                            onClick={toggleAutoTrade}
+                                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition cursor-pointer shadow-sm ${
+                                                isAutoTradeEnabled
+                                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/60 hover:bg-emerald-500/30'
+                                                    : 'bg-gray-800/80 text-gray-400 border border-gray-700 hover:bg-gray-700 hover:text-gray-300'
+                                            }`}
+                                            title={isAutoTradeEnabled ? 'Auto Trade đang BẬT: Quét nến đóng và gửi Order Binance' : 'Bấm để Bật Auto Trade'}
+                                        >
+                                            <span className={`w-2 h-2 rounded-full ${isAutoTradeEnabled ? 'bg-emerald-400 animate-ping' : 'bg-gray-500'}`} />
+                                            <span>{isAutoTradeEnabled ? 'Auto Trade: ON' : 'Auto Trade: OFF'}</span>
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -1003,6 +1427,16 @@ const TradeStation = () => {
                         recommendations={tcbsRecommendations}
                         tcbsSignals={tcbsRecentSignals}
                         loadingTcbsInsights={loadingTcbsInsights}
+                        selectedTemplate={selectedTemplate}
+                        onAutoTrade={handleAutoTrade}
+                        autoTrading={autoTrading}
+                        isAutoTradeEnabled={isAutoTradeEnabled}
+                        onToggleAutoTrade={toggleAutoTrade}
+                        autoTradeLogs={autoTradeLogs}
+                        isScanningOnCandleClose={isScanningOnCandleClose}
+                        selectedSymbol={selectedSymbol}
+                        timeframe={timeframe}
+                        onClearLogs={() => setAutoTradeLogs([])}
                     />
                 </div>
                 <div className="w-80 flex flex-col gap-4 h-full shrink-0">

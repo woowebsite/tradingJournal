@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, Edit, Trash2, Save, X, Search } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, X, Search, Code2, Terminal } from 'lucide-react';
 import { fetchStrategies, createStrategy, updateStrategy, deleteStrategy } from '../features/strategySlice';
 import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
+import { getPythonStrategies, DEFAULT_PYTHON_STRATEGIES } from '../services/pythonStrategy';
 import RuleModal from '../components/RuleModal';
 
 /* eslint-disable react-hooks/set-state-in-effect */
@@ -211,12 +212,15 @@ const RuleGroupSelector = ({
 
 export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availableRules = [], availableWebhooks = [] }) => {
     const dispatch = useDispatch();
+    const [pythonStrategies, setPythonStrategies] = useState(DEFAULT_PYTHON_STRATEGIES);
+    const [loadingPythonStrategies, setLoadingPythonStrategies] = useState(false);
     const [formData, setFormData] = useState({
         name: '',
         description: '',
         template: '',
         type: 'Rules',
         webhook: '',
+        strategyFile: '',
         entryRules: [],
         takeProfitRules: [],
         stoplossRules: [],
@@ -226,6 +230,16 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
     const [ruleSearchTerms, setRuleSearchTerms] = useState({});
     const [editingRule, setEditingRule] = useState(null);
     const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            setLoadingPythonStrategies(true);
+            getPythonStrategies()
+                .then(data => setPythonStrategies(data || []))
+                .catch(err => console.error('Failed to load python strategies in StrategyModal:', err))
+                .finally(() => setLoadingPythonStrategies(false));
+        }
+    }, [isOpen]);
 
     useEffect(() => {
         if (initialData) {
@@ -262,13 +276,15 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
 
             const rawWebhook = initialData.webhook;
             const webhookId = typeof rawWebhook === 'object' ? (rawWebhook?.documentId || rawWebhook?.id) : rawWebhook;
+            const rawStrategyFile = initialData.strategyFile || '';
 
             setFormData({
                 name: initialData.name || '',
                 description: initialData.description || '',
                 template: initialData.template || '',
-                type: initialData.type || (webhookId ? 'Webhook' : 'Rules'),
+                type: initialData.type || (rawStrategyFile ? 'Python' : (webhookId ? 'Webhook' : 'Rules')),
                 webhook: webhookId || '',
+                strategyFile: rawStrategyFile,
                 entryRules: getInitialRules('entryRules'),
                 takeProfitRules: getInitialRules('takeProfitRules'),
                 stoplossRules: getInitialRules('stoplossRules'),
@@ -283,6 +299,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                 template: '',
                 type: 'Rules',
                 webhook: '',
+                strategyFile: '',
                 entryRules: [],
                 takeProfitRules: [],
                 stoplossRules: [],
@@ -303,11 +320,20 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                     ...prev,
                     type: value,
                     webhook: value === 'Webhook' ? prev.webhook : '',
+                    strategyFile: value === 'Python' ? (prev.strategyFile || (pythonStrategies[0]?.fileName || '')) : '',
                     entryRules: value === 'Rules' ? prev.entryRules : [],
                     takeProfitRules: value === 'Rules' ? prev.takeProfitRules : [],
                     stoplossRules: value === 'Rules' ? prev.stoplossRules : [],
                     exitRules: value === 'Rules' ? prev.exitRules : []
                 };
+            }
+            if (name === 'strategyFile') {
+                const valLower = (value || '').toLowerCase();
+                let suggestedTemplate = prev.template;
+                if (valLower.includes('supertrend')) suggestedTemplate = 'Supertrend';
+                else if (valLower.includes('ichimoku')) suggestedTemplate = 'Ichimoku';
+                else if (valLower.includes('vwap')) suggestedTemplate = 'VWAP';
+                return { ...prev, [name]: value, template: suggestedTemplate };
             }
             return { ...prev, [name]: value };
         });
@@ -421,6 +447,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
             ...formData,
             template: formData.template?.trim() || '',
             webhook: formData.type === 'Webhook' ? (formData.webhook || null) : null,
+            strategyFile: formData.type === 'Python' ? (formData.strategyFile?.trim() || null) : null,
             rules: formData.type === 'Rules' ? allRules : [],
             entryRules,
             takeProfitRules,
@@ -483,6 +510,7 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                             >
                                 <option value="Rules">Rules</option>
                                 <option value="Webhook">Webhook</option>
+                                <option value="Python">Python</option>
                             </select>
                         </div>
                         <div>
@@ -504,7 +532,54 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
                         </div>
                     </div>
 
-                    {formData.type === 'Webhook' ? (
+                    {formData.type === 'Python' ? (
+                        <div className="space-y-4 bg-gray-900/60 p-5 rounded-xl border border-yellow-500/30 shadow-inner">
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm font-semibold text-yellow-400 flex items-center gap-2">
+                                    <Code2 size={16} className="text-yellow-400" />
+                                    <span>Python Strategy Script</span>
+                                </label>
+                                {loadingPythonStrategies && (
+                                    <span className="text-xs text-yellow-400/80 animate-pulse">Đang tải danh sách...</span>
+                                )}
+                            </div>
+                            <div>
+                                <select
+                                    name="strategyFile"
+                                    required
+                                    value={formData.strategyFile}
+                                    onChange={handleChange}
+                                    className="w-full bg-gray-800 border border-yellow-500/40 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-yellow-500 outline-none text-white font-mono text-sm cursor-pointer"
+                                >
+                                    <option value="">-- Chọn Python Strategy File --</option>
+                                    {pythonStrategies.map(file => (
+                                        <option key={file.fileName} value={file.fileName}>
+                                            {file.name || file.fileName}
+                                        </option>
+                                    ))}
+                                </select>
+                                {pythonStrategies.length === 0 && !loadingPythonStrategies && (
+                                    <p className="mt-2 text-xs text-amber-400">
+                                        Chưa tìm thấy file Python Strategy nào trong thư mục <code>python-strategy/</code>.
+                                    </p>
+                                )}
+                            </div>
+
+                            {formData.strategyFile && (
+                                <div className="bg-gray-800/90 p-3.5 rounded-lg border border-gray-700/80 text-xs space-y-2 text-gray-300">
+                                    <div className="flex justify-between items-center text-gray-400 font-medium flex-wrap gap-2">
+                                        <span>File đang áp dụng:</span>
+                                        <span className="font-mono text-yellow-300 bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/30 font-semibold">
+                                            {formData.strategyFile}
+                                        </span>
+                                    </div>
+                                    <p className="text-gray-400">
+                                        Chiến lược này sẽ chạy mã nguồn Python từ thư mục <code className="text-yellow-400/90 font-mono">python-strategy/{formData.strategyFile}</code> để quét tín hiệu và tự động giao dịch.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    ) : formData.type === 'Webhook' ? (
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Webhook</label>
                             <select
@@ -706,15 +781,25 @@ const ManageStrategies = () => {
                         {/* Show strategy source & template */}
                         <div className="mt-auto pt-4 border-t border-gray-700 text-xs text-gray-500 flex justify-between items-center">
                             <div className="flex items-center gap-2">
-                                <span>{strategy.type === 'Webhook' ? 'Webhook' : 'Rules'}</span>
+                                <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                    strategy.type === 'Python'
+                                        ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                                        : strategy.type === 'Webhook'
+                                        ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                        : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                }`}>
+                                    {strategy.type === 'Python' ? '🐍 Python' : strategy.type === 'Webhook' ? 'Webhook' : 'Rules'}
+                                </span>
                                 {strategy.template && (
                                     <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[10px] font-bold">
                                         {strategy.template}
                                     </span>
                                 )}
                             </div>
-                            <span className="text-gray-300 font-medium">
-                                {strategy.type === 'Webhook'
+                            <span className="text-gray-300 font-medium font-mono text-[11px] truncate max-w-[150px]">
+                                {strategy.type === 'Python'
+                                    ? (strategy.strategyFile || 'Python Script')
+                                    : strategy.type === 'Webhook'
                                     ? (strategy.webhook?.Title || strategy.webhook?.App || '-')
                                     : `${getStrategyRuleCount(strategy)} rules`}
                             </span>

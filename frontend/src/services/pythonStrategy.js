@@ -1,20 +1,37 @@
 import api from './api';
 
+export const DEFAULT_PYTHON_STRATEGIES = [
+    {
+        fileName: 'strategy_supertrend_ma288.py',
+        name: 'Supertrend MA288 Strategy'
+    },
+    {
+        fileName: 'strategy_vwap_ma9.py',
+        name: 'VWAP MA9 Strategy'
+    }
+];
+
 /**
  * Lấy danh sách các file chiến lược trong thư mục python-strategy
  */
 export const getPythonStrategies = async () => {
     try {
         const response = await api.get('/python-strategies');
-        return response.data?.data || [];
+        const list = response.data?.data;
+        if (Array.isArray(list) && list.length > 0) {
+            const existingFileNames = new Set(list.map(s => s.fileName));
+            const merged = [...list];
+            DEFAULT_PYTHON_STRATEGIES.forEach(d => {
+                if (!existingFileNames.has(d.fileName)) {
+                    merged.push(d);
+                }
+            });
+            return merged;
+        }
+        return DEFAULT_PYTHON_STRATEGIES;
     } catch (error) {
         console.error('Failed to load python strategies:', error);
-        return [
-            {
-                fileName: 'strategy_supertrend_ma288.py',
-                name: 'Supertrend MA288 Strategy'
-            }
-        ];
+        return DEFAULT_PYTHON_STRATEGIES;
     }
 };
 

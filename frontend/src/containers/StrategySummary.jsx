@@ -1,13 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Edit } from 'lucide-react';
+import { Edit, Bot, RefreshCw, Sparkles } from 'lucide-react';
 import { fetchTrades } from '../features/tradeSlice';
 import { fetchStrategies, updateStrategy } from '../features/strategySlice';
 import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 import { StrategyModal } from '../pages/ManageStrategies';
 
-const StrategySummary = ({ activeStrategy, trades = [] }) => {
+const StrategySummary = ({ 
+    activeStrategy, 
+    trades = [], 
+    onAutoTrade = null, 
+    selectedTemplate = null, 
+    autoTrading = false,
+    isAutoTradeEnabled = false,
+    onToggleAutoTrade = () => {},
+    isScanningOnCandleClose = false,
+    autoTradeLogsCount = 0,
+    onSwitchToLogs = () => {}
+}) => {
     const dispatch = useDispatch();
     const { items: availableRules } = useSelector(state => state.rules);
     const { items: availableWebhooks } = useSelector(state => state.webhooks);
@@ -106,13 +117,88 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
         }
     };
 
+    const renderAutoTradeControls = () => (
+        <div className="flex items-center gap-2 flex-wrap pt-2">
+            {/* Master Toggle Switch */}
+            <button
+                type="button"
+                onClick={onToggleAutoTrade}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm cursor-pointer ${
+                    isAutoTradeEnabled
+                        ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/60 hover:bg-emerald-600/40 shadow-emerald-900/30'
+                        : 'bg-gray-700/60 text-gray-300 border border-gray-600 hover:bg-gray-700'
+                }`}
+                title={isAutoTradeEnabled ? 'Đang bật Auto Trade: Tự động quét khi đóng nến và gửi Order Binance' : 'Bật Auto Trade để tự động giao dịch'}
+            >
+                {isAutoTradeEnabled ? (
+                    <>
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span>Auto Trade: ON</span>
+                    </>
+                ) : (
+                    <>
+                        <Bot size={13} className="text-gray-400" />
+                        <span>Auto Trade: OFF</span>
+                    </>
+                )}
+            </button>
+
+            {/* Quick Fill Button */}
+            {onAutoTrade && (
+                <button
+                    type="button"
+                    onClick={onAutoTrade}
+                    disabled={autoTrading}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-600/20 px-2.5 py-1.5 text-xs font-medium text-purple-300 transition hover:bg-purple-600/30 hover:text-purple-200 cursor-pointer disabled:opacity-50"
+                    title="Tính nhanh Entry, SL, TP để điền vào Form đặt lệnh"
+                >
+                    {autoTrading ? (
+                        <>
+                            <RefreshCw size={12} className="animate-spin text-purple-400" />
+                            <span>Đang tính...</span>
+                        </>
+                    ) : (
+                        <>
+                            <Sparkles size={12} className="text-purple-400" />
+                            <span>Tính Form</span>
+                        </>
+                    )}
+                </button>
+            )}
+
+            {/* Logs Link Button */}
+            {autoTradeLogsCount > 0 && (
+                <button
+                    type="button"
+                    onClick={onSwitchToLogs}
+                    className="text-[11px] text-cyan-300 hover:text-cyan-200 underline font-mono px-1 py-0.5"
+                >
+                    Xem log ({autoTradeLogsCount})
+                </button>
+            )}
+
+            {isScanningOnCandleClose && (
+                <span className="text-[11px] font-mono text-amber-300 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-600/40 animate-pulse">
+                    ⚡ Đang quét nến đóng...
+                </span>
+            )}
+        </div>
+    );
+
     if (!activeStrategy) {
-        return <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>;
+        return (
+            <div className="p-3 space-y-3">
+                <p className="text-gray-500 italic">No active strategy for this account.</p>
+                {renderAutoTradeControls()}
+            </div>
+        );
     }
 
     return (
         <div className="grid grid-cols-2 gap-4">
-
             <div>
                 <p className="mb-1">
                     <span className="font-semibold text-gray-400">Name:</span>{' '}
@@ -154,18 +240,17 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
                     availableWebhooks={availableWebhooks}
                 />
 
-                {activeStrategy && (
-                    <div className="col-span-2 flex justify-start mt-4">
-                        <button
-                            type="button"
-                            onClick={() => setIsEditModalOpen(true)}
-                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200"
-                        >
-                            <Edit size={13} />
-                            Edit
-                        </button>
-                    </div>
-                )}
+                <div className="col-span-2 flex items-center gap-2 mt-4 flex-wrap">
+                    <button
+                        type="button"
+                        onClick={() => setIsEditModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200 cursor-pointer shadow-sm"
+                    >
+                        <Edit size={13} />
+                        <span>Edit</span>
+                    </button>
+                    {renderAutoTradeControls()}
+                </div>
             </div>
             <div>
                 <p className="mb-1">
@@ -184,5 +269,6 @@ const StrategySummary = ({ activeStrategy, trades = [] }) => {
         </div>
     );
 };
+
 
 export default StrategySummary;
