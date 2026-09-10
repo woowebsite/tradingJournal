@@ -389,7 +389,7 @@ def fetch_history_from_strapi(ticker: str, countback: int = 500, timeframe: str 
                 if data:
                     df = pd.DataFrame(data)
                     df["dt"] = pd.to_datetime(df["date"])
-                    df = df.sort_values("dt").reset_index(drop=True)
+                    df = df.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
                     if len(df) > target_count:
                         df = df.tail(target_count).reset_index(drop=True)
                     return df
@@ -400,96 +400,94 @@ def fetch_history_from_strapi(ticker: str, countback: int = 500, timeframe: str 
 
 def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 500, timeframe: str = None) -> pd.DataFrame:
     """
-    Quy trình chuẩn hóa 2 bước:
-    1. Đọc dữ liệu từ Strapi symbol-histories theo đúng Timeframe đã chọn.
-    2. Nếu Strapi chưa có hoặc thiếu nến, fetch từ External (Binance / 24hMoney) đúng Timeframe, 
-       đồng bộ vào Strapi symbol-histories, sau đó đọc lại từ Strapi để chạy scan/optimize.
+    Quy trình chuẩn hóa lấy dữ liệu nến:
+    1. Đối với Crypto (Binance): LUÔN LẤY DỮ LIỆU MỚI NHẤT TỪ BINANCE API để đảm bảo nến đóng thời gian thực.
+    2. Đối với Cổ phiếu / Chỉ số / Phái sinh VN: Ưu tiên lấy từ 24hMoney API.
+    3. Fallback: Nếu không kết nối được nguồn ngoài mới đọc từ Strapi symbol-histories.
     """
     tf = str(timeframe or resolution or "D1").strip().upper()
     ticker_clean = ticker.strip().upper()
     req_count = max(int(countback), 500)
 
-    # 1. Ưu tiên đọc trực tiếp từ Strapi symbol-histories theo đúng Timeframe
-    df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
-    if not df_strapi.empty and len(df_strapi) >= min(req_count, 50):
-        return df_strapi
-
-    # 2. Nếu Strapi chưa đủ nến -> Fetch từ External Provider theo đúng Timeframe
-    df_external = pd.DataFrame()
+    # 1. Ưu tiên dữ liệu Binance đối với tiền mã hóa Crypto
     if is_crypto_symbol(ticker_clean):
-        df_external = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
+        df_binance = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
+        if not df_binance.empty and len(df_binance) > 0:
+            df_binance = df_binance.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+            return df_binance
+
+    # 2. Lấy dữ liệu 24hMoney cho Stock / Index / Derivatives
+    df_external = pd.DataFrame()
+    resolution_24h = map_timeframe_to_24h(tf)
+    if resolution_24h in ["1D", "D"]:
+        step_sec = 86400
+    elif resolution_24h in ["1W", "W"]:
+        step_sec = 604800
     else:
-        # 24hMoney cho Stock / Index / Derivatives
-        resolution_24h = map_timeframe_to_24h(tf)
-        if resolution_24h in ["1D", "D"]:
-            step_sec = 86400
-        elif resolution_24h in ["1W", "W"]:
-            step_sec = 604800
-        else:
-            try:
-                step_sec = int(resolution_24h) * 60
-            except Exception:
-                step_sec = 86400
-
-        to_ts = int(time.time())
-        from_ts = to_ts - int(req_count * 3.5 * step_sec)
-        url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
-
-        is_daily_or_weekly = tf.upper() in ["D1", "1D", "D", "W1", "1W", "W"]
         try:
-            res = requests.get(url_24h, timeout=15)
-            if res.status_code == 200:
-                data = res.json()
-                if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
-                    candles = []
-                    multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
-                    first_close = float(data["c"][0])
-                    if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"] and not is_crypto_symbol(ticker_clean):
-                        multiplier = 1000
-                    else:
-                        multiplier = 1
-
-                    for i in range(len(data["t"])):
-                        dt = datetime.utcfromtimestamp(data["t"][i])
-                        if is_daily_or_weekly:
-                            date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
-                            time_str = dt.strftime("%Y-%m-%d")
-                        else:
-                            date_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                            time_str = dt.strftime("%H:%M:%S")
-
-                        candles.append({
-                            "date": date_str,
-                            "time": time_str,
-                            "open": round(float(data["o"][i]) * multiplier, 2),
-                            "high": round(float(data["h"][i]) * multiplier, 2),
-                            "low": round(float(data["l"][i]) * multiplier, 2),
-                            "close": round(float(data["c"][i]) * multiplier, 2),
-                            "volume": float(data["v"][i]),
-                        })
-
-                    df_external = pd.DataFrame(candles)
-                    df_external["dt"] = pd.to_datetime(df_external["date"])
-                    df_external = df_external.sort_values("dt").reset_index(drop=True)
+            step_sec = int(resolution_24h) * 60
         except Exception:
-            pass
+            step_sec = 86400
 
-    # Nếu chưa lấy được từ 24hMoney, thử lại Binance (cho trường hợp mã crypto dạng không có hậu tố .P)
-    if df_external.empty:
-        df_external = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
+    to_ts = int(time.time())
+    from_ts = to_ts - int(req_count * 3.5 * step_sec)
+    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
 
-    # 3. Đồng bộ nến mới nhất vào Strapi theo đúng Timeframe
+    is_daily_or_weekly = tf.upper() in ["D1", "1D", "D", "W1", "1W", "W"]
+    try:
+        res = requests.get(url_24h, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
+                candles = []
+                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
+                first_close = float(data["c"][0])
+                if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"] and not is_crypto_symbol(ticker_clean):
+                    multiplier = 1000
+                else:
+                    multiplier = 1
+
+                for i in range(len(data["t"])):
+                    dt = datetime.utcfromtimestamp(data["t"][i])
+                    if is_daily_or_weekly:
+                        date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
+                        time_str = dt.strftime("%Y-%m-%d")
+                    else:
+                        date_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                        time_str = dt.strftime("%H:%M:%S")
+
+                    candles.append({
+                        "date": date_str,
+                        "time": time_str,
+                        "open": round(float(data["o"][i]) * multiplier, 2),
+                        "high": round(float(data["h"][i]) * multiplier, 2),
+                        "low": round(float(data["l"][i]) * multiplier, 2),
+                        "close": round(float(data["c"][i]) * multiplier, 2),
+                        "volume": float(data["v"][i]),
+                    })
+
+                df_external = pd.DataFrame(candles)
+                df_external["dt"] = pd.to_datetime(df_external["date"])
+                df_external = df_external.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+    except Exception:
+        pass
+
     if not df_external.empty and len(df_external) > 0:
-        symbol_id = get_or_create_symbol_in_strapi(ticker_clean)
-        if symbol_id:
-            sync_candles_to_strapi(ticker_clean, df_external, symbol_id, timeframe=tf, max_sync=req_count)
+        return df_external
 
-    # 4. Đọc dữ liệu trực tiếp từ Strapi symbol-histories theo đúng Timeframe
+    # Nếu chưa lấy được từ 24hMoney, thử lại Binance (cho trường hợp mã crypto không có hậu tố .P)
+    df_binance_fallback = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
+    if not df_binance_fallback.empty and len(df_binance_fallback) > 0:
+        df_binance_fallback = df_binance_fallback.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+        return df_binance_fallback
+
+    # 3. Fallback đọc từ Strapi symbol-histories
     df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
     if not df_strapi.empty and len(df_strapi) > 0:
+        df_strapi = df_strapi.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
         return df_strapi
 
-    return df_external
+    return pd.DataFrame()
 
 # ==============================================================================
 # 2. TÍNH TOÁN CHỈ BÁO: SMA & YEARLY ANCHORED VWAP KÈM BANDS
