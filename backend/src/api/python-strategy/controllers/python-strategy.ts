@@ -45,8 +45,11 @@ export default {
       const {
         strategyFile = 'strategy_supertrend_ma288.py',
         ticker = 'VNINDEX',
-        countback = 500,
-        rr = 1.5,
+        countback = 1000,
+        rr,
+        riskReward,
+        risk_reward,
+        rewardRisk,
         entryType = 'candle_close',
         entry_type,
         stPeriod,
@@ -59,6 +62,8 @@ export default {
         supertrend_multiplier,
         maPeriod,
         ma_period,
+        vwapMaPeriod,
+        vwap_ma_period,
         tpSupertrend,
         tp_supertrend,
         tpRR,
@@ -74,14 +79,23 @@ export default {
         mult3,
         tpTarget,
         tp_target,
+        vwapTpTarget,
+        vwap_tp_target,
         timeframe = 'D1',
       } = ctx.request.body || {};
       
       const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
+      const cleanRR = rr !== undefined ? rr : (riskReward !== undefined ? riskReward : (risk_reward !== undefined ? risk_reward : (rewardRisk !== undefined ? rewardRisk : 1.5)));
       const cleanEntryType = entry_type || entryType || 'candle_close';
       const cleanStPeriod = st_period || stPeriod || supertrend_period || supertrendPeriod || 10;
       const cleanStMultiplier = st_multiplier || stMultiplier || supertrend_multiplier || supertrendMultiplier || 3.0;
       const cleanMaPeriod = ma_period || maPeriod || 288;
+      const cleanVwapMa = vwapMaPeriod || vwap_ma_period || ma_period || maPeriod || 9;
+      const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
+      const cleanMult1 = mult1 !== undefined ? mult1 : 1.0;
+      const cleanMult2 = mult2 !== undefined ? mult2 : 2.0;
+      const cleanMult3 = mult3 !== undefined ? mult3 : 3.0;
+      const cleanTpTarget = vwapTpTarget || vwap_tp_target || tp_target || tpTarget || 'tp1_vwap';
       const isTpSupertrend = tpSupertrend !== undefined ? tpSupertrend : (tp_supertrend !== undefined ? tp_supertrend : true);
       const isTpRR = tpRR !== undefined ? tpRR : (tp_rr !== undefined ? tp_rr : true);
       const isAllowLong = allowLong !== undefined ? allowLong : (allow_long !== undefined ? allow_long : true);
@@ -112,13 +126,6 @@ export default {
       ];
 
       if (isVWAP) {
-        const cleanVwapMa = ma_period || maPeriod || 9;
-        const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
-        const cleanMult1 = mult1 !== undefined ? mult1 : 1.0;
-        const cleanMult2 = mult2 !== undefined ? mult2 : 2.0;
-        const cleanMult3 = mult3 !== undefined ? mult3 : 3.0;
-        const cleanTpTarget = tp_target || tpTarget || 'tp1_vwap';
-
         args.push(
           '--ma-period', String(cleanVwapMa),
           '--vwap-anchor', String(cleanVwapAnchor),
@@ -129,7 +136,7 @@ export default {
         );
       } else {
         args.push(
-          '--rr', String(rr),
+          '--rr', String(cleanRR),
           '--entry-type', String(cleanEntryType),
           '--st-period', String(cleanStPeriod),
           '--st-multiplier', String(cleanStMultiplier),

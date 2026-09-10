@@ -96,37 +96,119 @@ const TradingViewChart = ({
         return String(rawDate || rawTime).split('T')[0];
     }, [isIntraday]);
 
+    // Find the corresponding candle time for a trade / signal (handles exact match, intraday bar span, and daily dates)
+    const findMatchingCandleTime = useCallback((sig, sortedCandles) => {
+        if (!sig || !sortedCandles || sortedCandles.length === 0) return null;
+        const rawDate = sig.date || sig.time || '';
+        if (!rawDate) return null;
+
+        // 1. Direct match on getTimeKey
+        const directKey = getTimeKey(sig);
+        if (sortedCandles.some(c => c._timeKey === directKey)) {
+            return directKey;
+        }
+
+        // 2. Intraday numeric timestamp matching (seconds)
+        if (isIntraday) {
+            let sigSeconds = typeof directKey === 'number' ? directKey : null;
+            if (sigSeconds === null) {
+                const dt = new Date(rawDate);
+                if (!isNaN(dt.getTime())) {
+                    sigSeconds = Math.floor(dt.getTime() / 1000);
+                }
+            }
+
+            if (typeof sigSeconds === 'number') {
+                // Find candle whose open time is <= sigSeconds (the bar in which the trade occurred)
+                const candidate = sortedCandles
+                    .filter(c => typeof c._timeKey === 'number' && c._timeKey <= sigSeconds)
+                    .at(-1);
+
+                if (candidate) {
+                    return candidate._timeKey;
+                }
+
+                // If signal was just created now and latest candle is the current candle
+                const lastCandle = sortedCandles[sortedCandles.length - 1];
+                if (lastCandle && typeof lastCandle._timeKey === 'number' && sigSeconds >= lastCandle._timeKey) {
+                    return lastCandle._timeKey;
+                }
+
+                // If signal was created right around the first candle
+                const firstCandle = sortedCandles[0];
+                if (firstCandle && typeof firstCandle._timeKey === 'number') {
+                    return firstCandle._timeKey;
+                }
+            }
+        }
+
+        // 3. Daily / Date string matching ('YYYY-MM-DD')
+        const sigDateStr = String(rawDate).split('T')[0];
+        const dateMatch = sortedCandles.find(c => String(c._timeKey).split('T')[0] === sigDateStr);
+        if (dateMatch) {
+            return dateMatch._timeKey;
+        }
+
+        // Try local date string
+        try {
+            const dt = new Date(rawDate);
+            if (!isNaN(dt.getTime())) {
+                const localStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                const localMatch = sortedCandles.find(c => String(c._timeKey).split('T')[0] === localStr);
+                if (localMatch) return localMatch._timeKey;
+            }
+        } catch {
+            // ignore
+        }
+
+        // Fallback: If signal is very recent, snap to the latest candle
+        const lastCandle = sortedCandles[sortedCandles.length - 1];
+        if (lastCandle) {
+            return lastCandle._timeKey;
+        }
+
+        return null;
+    }, [getTimeKey, isIntraday]);
+
     const signalsByDate = useMemo(() => {
         const map = new Map();
-        if (!signals || signals.length === 0) return map;
+        if (!signals || signals.length === 0 || !data || data.length === 0) return map;
+
+        const sortedCandles = [...data]
+            .map(item => ({ ...item, _timeKey: getTimeKey(item) }))
+            .filter(item => item._timeKey !== undefined && item._timeKey !== null && item._timeKey !== '');
+
         signals.forEach(sig => {
-            const sigKey = getTimeKey(sig);
-            if (!sigKey) return;
+            const matchedTime = findMatchingCandleTime(sig, sortedCandles);
+            if (!matchedTime) return;
 
             const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
             const ruleId = String(getRuleId(rule));
-            const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'unknown';
+            const type = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'entry';
 
             const colors = {
-                entry: '#60a5fa', // blue
-                takeprofit: '#4ade80', // green
-                stoploss: '#f87171', // red
+                entry: '#10b981', // green
+                takeprofit: '#3b82f6', // blue
+                stoploss: '#ef4444', // red
                 exit: '#fb923c', // orange
                 unknown: '#9ca3af'
             };
 
-            const list = map.get(sigKey) || [];
+            const list = map.get(matchedTime) || [];
             list.push({
-                name: (rule.signalText || rule.signal_text)?.trim() || rule.Name || 'Signal',
+                name: (rule.signalText || rule.signal_text)?.trim() || rule.Name || sig.text || sig.action || 'Executed Trade',
                 type,
-                date: sigKey,
-                color: colors[type] || colors.unknown,
+                date: matchedTime,
+                color: sig.color || colors[type] || colors.unknown,
+                price: sig.price,
+                volume: sig.volume,
+                status: sig.status,
                 rule
             });
-            map.set(sigKey, list);
+            map.set(matchedTime, list);
         });
         return map;
-    }, [signals, strategyRuleLookup, isIntraday]);
+    }, [signals, data, findMatchingCandleTime, getTimeKey, strategyRuleLookup]);
 
     useEffect(() => {
         if (!data || data.length === 0) return;
@@ -274,9 +356,8 @@ const TradingViewChart = ({
         // Markers (Signals and an optional externally-selected candle)
         if ((signals && signals.length > 0) || focusDate) {
             const markers = signals.map(sig => {
-                const sigKey = getTimeKey(sig);
-                const exists = sortedData.some(d => d._timeKey === sigKey);
-                if (!exists) return null;
+                const matchedTime = findMatchingCandleTime(sig, sortedData);
+                if (!matchedTime) return null;
 
                 const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
                 const ruleId = String(getRuleId(rule));
@@ -288,9 +369,9 @@ const TradingViewChart = ({
                 let color = '#10b981'; // Green
                 let shape = 'arrowUp';
                 let position = 'belowBar';
-                let text = '';
+                let text = sig.text || '';
 
-                if (lowerType === 'takeprofit') {
+                if (lowerType === 'takeprofit' || lowerType.includes('take') || lowerType.includes('tp')) {
                     color = '#3b82f6';
                     if (isShort) {
                         position = 'belowBar';
@@ -299,11 +380,14 @@ const TradingViewChart = ({
                         position = 'aboveBar';
                         shape = 'arrowDown';
                     }
-                } else if (lowerType === 'stoploss') {
+                } else if (lowerType === 'stoploss' || lowerType.includes('stop') || lowerType.includes('sl')) {
                     color = '#ef4444';
                     shape = 'circle';
                     position = isShort ? 'aboveBar' : 'belowBar';
-                    text = '';
+                } else if (lowerType === 'exit' || lowerType.includes('exit') || lowerType.includes('close')) {
+                    color = '#fb923c';
+                    shape = isShort ? 'arrowUp' : 'arrowDown';
+                    position = isShort ? 'belowBar' : 'aboveBar';
                 } else if (isShort) {
                     color = '#ef4444';
                     shape = 'arrowDown';
@@ -321,7 +405,7 @@ const TradingViewChart = ({
                 if (sig.text !== undefined && sig.text !== '') text = sig.text;
 
                 return {
-                    time: sigKey,
+                    time: matchedTime,
                     position,
                     color,
                     shape,

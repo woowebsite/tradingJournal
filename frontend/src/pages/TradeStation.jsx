@@ -57,6 +57,7 @@ const TradeStation = () => {
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [tradeFormSetup, setTradeFormSetup] = useState({ price: '', slPrice: '', tpPrice: '' });
+    const [pythonScanResult, setPythonScanResult] = useState(null);
     const [autoTrading, setAutoTrading] = useState(false);
     const [isAutoTradeEnabled, setIsAutoTradeEnabled] = useState(() => {
         try {
@@ -189,44 +190,70 @@ const TradeStation = () => {
         setIsScanningOnCandleClose(true);
 
         try {
-            const scanParams = {
+            const isVWAPStrat = (stratFile || '').toLowerCase().includes('vwap') || (stratName || '').toLowerCase().includes('vwap');
+            const scanParams = isVWAPStrat ? {
                 strategyFile: stratFile,
                 ticker: symName,
                 timeframe: currentTf,
-                countback: 500,
-                ...(cfg || {})
+                countback: cfg.countback || 1000,
+                maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
+                vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
+                vwapAnchor: cfg.vwapAnchor || 'year',
+                mult1: parseFloat(cfg.mult1) || 1.0,
+                mult2: parseFloat(cfg.mult2) || 2.0,
+                mult3: parseFloat(cfg.mult3) || 3.0,
+                tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+                vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+            } : {
+                strategyFile: stratFile,
+                ticker: symName,
+                timeframe: currentTf,
+                countback: cfg.countback || 1000,
+                rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
+                riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+                entryType: cfg.entryType || 'candle_close',
+                stPeriod: parseInt(cfg.stPeriod) || 10,
+                stMultiplier: parseFloat(cfg.stMultiplier) || 3.0,
+                maPeriod: parseInt(cfg.maPeriod) || 288,
+                tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
+                tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
+                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
             };
 
             const res = await scanPythonStrategy(scanParams);
+            if (res && !res.error) {
+                setPythonScanResult(res);
+            }
             if (!res) {
                 addAutoTradeLog(`⚠️ Không nhận được phản hồi từ Python Strategy scan.`, 'warn');
                 return;
             }
 
             const activeTrade = res.summary?.activeTrade;
-            const latestTrade = res.summary?.latestTrade;
 
             let targetSignal = null;
             if (activeTrade && activeTrade.entry_price && activeTrade.stop_loss && activeTrade.status === 'Open') {
-                targetSignal = {
-                    type: activeTrade.type || 'Long',
-                    entry: activeTrade.entry_price,
-                    stop_loss: activeTrade.stop_loss,
-                    take_profit: activeTrade.take_profit,
-                    date: activeTrade.entry_date,
-                };
-            } else if (latestTrade && latestTrade.entry_price && latestTrade.stop_loss) {
-                targetSignal = {
-                    type: latestTrade.type || 'Long',
-                    entry: latestTrade.entry_price,
-                    stop_loss: latestTrade.stop_loss,
-                    take_profit: latestTrade.take_profit,
-                    date: latestTrade.entry_date,
-                };
+                const isLong = String(activeTrade.type).toLowerCase() === 'long';
+                const isAllowed = isLong ? scanParams.allowLong : scanParams.allowShort;
+                if (isAllowed) {
+                    targetSignal = {
+                        type: activeTrade.type || (isLong ? 'Long' : 'Short'),
+                        entry: activeTrade.entry_price,
+                        stop_loss: activeTrade.stop_loss,
+                        take_profit: activeTrade.take_profit,
+                        date: activeTrade.entry_date || activeTrade.entry_time || candle.date || new Date().toISOString(),
+                    };
+                } else {
+                    addAutoTradeLog(`ℹ️ Tín hiệu ${activeTrade.type} @ $${activeTrade.entry_price} bị bỏ qua do cấu hình ${isLong ? 'allowLong' : 'allowShort'} = false.`, 'info');
+                    return;
+                }
             }
 
             if (!targetSignal) {
-                addAutoTradeLog(`ℹ️ Nến ${currentTf} đóng @ $${candle.close}: Không có tín hiệu vào lệnh mới.`, 'info');
+                addAutoTradeLog(`ℹ️ Nến ${currentTf} đóng @ $${candle.close}: Điều kiện chiến lược [${stratName}] chưa thỏa mãn tín hiệu vào lệnh.`, 'info');
                 return;
             }
 
@@ -641,6 +668,60 @@ const TradeStation = () => {
         }
     };
 
+    // Auto scan python strategy when template is selected or changed to keep signals and chart in sync
+    useEffect(() => {
+        if (!selectedTemplate || !selectedSymbol?.Name) {
+            setPythonScanResult(null);
+            return;
+        }
+
+        const symName = selectedSymbol.Name.trim().toUpperCase();
+        const cfg = selectedTemplate.config || {};
+        const stratFile = selectedTemplate.strategyFile || (chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py');
+        const isVWAPStrat = (stratFile || '').toLowerCase().includes('vwap') || (selectedTemplate.name || '').toLowerCase().includes('vwap');
+        const targetTf = selectedTemplate.timeframe || timeframe || 'D1';
+
+        const scanParams = isVWAPStrat ? {
+            strategyFile: stratFile,
+            ticker: symName,
+            timeframe: targetTf,
+            countback: cfg.countback || 1000,
+            maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
+            vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
+            vwapAnchor: cfg.vwapAnchor || 'year',
+            mult1: parseFloat(cfg.mult1) || 1.0,
+            mult2: parseFloat(cfg.mult2) || 2.0,
+            mult3: parseFloat(cfg.mult3) || 3.0,
+            tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+            vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+        } : {
+            strategyFile: stratFile,
+            ticker: symName,
+            timeframe: targetTf,
+            countback: cfg.countback || 1000,
+            rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
+            riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+            entryType: cfg.entryType || 'candle_close',
+            stPeriod: parseInt(cfg.stPeriod) || 10,
+            stMultiplier: parseFloat(cfg.stMultiplier) || 3.0,
+            maPeriod: parseInt(cfg.maPeriod) || 288,
+            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
+            tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
+            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+        };
+
+        scanPythonStrategy(scanParams)
+            .then(res => {
+                if (res && !res.error) {
+                    setPythonScanResult(res);
+                }
+            })
+            .catch(err => console.warn('Could not sync python strategy signals for template:', err));
+    }, [selectedTemplate, selectedSymbol?.Name, timeframe, chartTemplate]);
+
     const handleTimeframeChange = (newTf) => {
         setTimeframe(newTf);
         if (selectedSymbol && selectedSymbolId) {
@@ -999,6 +1080,117 @@ const TradeStation = () => {
         });
     }, [selectedSymbolId, realTrades, selectedSymbol]);
 
+    // Convert executed Real Trades & TradeDetails from Strapi DB into Chart Markers / Signals
+    const executedTradeSignals = useMemo(() => {
+        if (!symbolTrades || symbolTrades.length === 0) return [];
+        const signalsList = [];
+
+        symbolTrades.forEach(trade => {
+            const tradeType = trade.type || 'Long';
+            const isLong = String(tradeType).toLowerCase() === 'long';
+            const details = trade.trade_details || [];
+
+            if (details.length > 0) {
+                details.forEach(detail => {
+                    const signalKind = String(detail.signal || 'Entry').toLowerCase();
+                    const detailType = String(detail.type || (isLong ? 'Buy' : 'Sell')).toLowerCase();
+                    const isBuy = detailType === 'buy';
+                    const isShortPos = !isLong || !isBuy;
+
+                    let markerType = 'entry';
+                    let shape = isBuy ? 'arrowUp' : 'arrowDown';
+                    let position = isBuy ? 'belowBar' : 'aboveBar';
+                    let color = isBuy ? '#10b981' : '#ef4444';
+                    let signalText = isBuy ? 'Buy' : 'Sell';
+
+                    if (signalKind.includes('take') || signalKind.includes('tp')) {
+                        markerType = 'takeprofit';
+                        color = '#3b82f6';
+                        signalText = 'TP';
+                        shape = isShortPos ? 'arrowUp' : 'arrowDown';
+                        position = isShortPos ? 'belowBar' : 'aboveBar';
+                    } else if (signalKind.includes('stop') || signalKind.includes('sl')) {
+                        markerType = 'stoploss';
+                        color = '#ef4444';
+                        signalText = 'SL';
+                        shape = 'circle';
+                        position = isShortPos ? 'aboveBar' : 'belowBar';
+                    } else if (signalKind.includes('exit') || signalKind.includes('close')) {
+                        markerType = 'exit';
+                        color = '#fb923c';
+                        signalText = 'Exit';
+                        shape = isBuy ? 'arrowUp' : 'arrowDown';
+                        position = isBuy ? 'belowBar' : 'aboveBar';
+                    } else {
+                        markerType = 'entry';
+                        signalText = isLong ? 'Long' : 'Short';
+                        color = isLong ? '#10b981' : '#ef4444';
+                        shape = isLong ? 'arrowUp' : 'arrowDown';
+                        position = isLong ? 'belowBar' : 'aboveBar';
+                    }
+
+                    signalsList.push({
+                        id: `detail-${detail.documentId || detail.id || Math.random()}`,
+                        date: detail.date || trade.date,
+                        time: detail.date || trade.date,
+                        type: markerType,
+                        posType: isLong ? 'Long' : 'Short',
+                        action: detail.signal || (isLong ? 'Long Entry' : 'Short Entry'),
+                        color,
+                        shape,
+                        position,
+                        text: `${signalText} @ ${detail.price || trade.price || ''}`,
+                        price: detail.price,
+                        volume: detail.volume,
+                        note: detail.note || trade.note,
+                        tradeId: trade.documentId || trade.id,
+                        status: trade.trade_status,
+                        rule: {
+                            Name: `${signalText} @ ${detail.price || ''}`,
+                            Type: markerType,
+                            signalText,
+                        },
+                        rules: [{
+                            Name: `${signalText} @ ${detail.price || ''}`,
+                            Type: markerType,
+                            signalText,
+                        }]
+                    });
+                });
+            } else if (trade.date) {
+                const markerType = 'entry';
+                signalsList.push({
+                    id: `trade-${trade.documentId || trade.id}`,
+                    date: trade.date,
+                    time: trade.date,
+                    type: markerType,
+                    posType: isLong ? 'Long' : 'Short',
+                    action: isLong ? 'Long' : 'Short',
+                    color: isLong ? '#10b981' : '#ef4444',
+                    shape: isLong ? 'arrowUp' : 'arrowDown',
+                    position: isLong ? 'belowBar' : 'aboveBar',
+                    text: `${isLong ? 'Long' : 'Short'} @ ${trade.price || ''}`,
+                    price: trade.price,
+                    note: trade.note,
+                    tradeId: trade.documentId || trade.id,
+                    status: trade.trade_status,
+                    rule: {
+                        Name: `${isLong ? 'Long' : 'Short'} (${trade.trade_status || 'Open'})`,
+                        Type: markerType,
+                        signalText: isLong ? 'Long' : 'Short',
+                    },
+                    rules: [{
+                        Name: `${isLong ? 'Long' : 'Short'}`,
+                        Type: markerType,
+                        signalText: isLong ? 'Long' : 'Short',
+                    }]
+                });
+            }
+        });
+
+        return signalsList.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }, [symbolTrades]);
+
 
     const handleRefresh = useCallback(() => {
         if (!selectedSymbol || !selectedSymbolId) return;
@@ -1092,15 +1284,41 @@ const TradeStation = () => {
             // 2. Try Python Strategy scan if template or python strategy is specified
             if (tpl?.strategyFile || tpl?.type === 'Python' || stratFile) {
                 try {
-                    const scanParams = {
+                    const isVWAPStrat = (stratFile || '').toLowerCase().includes('vwap') || (tpl?.name || '').toLowerCase().includes('vwap');
+                    const scanParams = isVWAPStrat ? {
                         strategyFile: stratFile,
                         ticker: symName,
                         timeframe: targetTf,
-                        countback: 500,
-                        ...(cfg || {})
+                        countback: cfg.countback || 1000,
+                        maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
+                        vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
+                        vwapAnchor: cfg.vwapAnchor || 'year',
+                        mult1: parseFloat(cfg.mult1) || 1.0,
+                        mult2: parseFloat(cfg.mult2) || 2.0,
+                        mult3: parseFloat(cfg.mult3) || 3.0,
+                        tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+                        vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+                        allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                        allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+                    } : {
+                        strategyFile: stratFile,
+                        ticker: symName,
+                        timeframe: targetTf,
+                        countback: cfg.countback || 1000,
+                        rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
+                        riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+                        entryType: cfg.entryType || 'candle_close',
+                        stPeriod: parseInt(cfg.stPeriod) || 10,
+                        stMultiplier: parseFloat(cfg.stMultiplier) || 3.0,
+                        maPeriod: parseInt(cfg.maPeriod) || 288,
+                        tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
+                        tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
+                        allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                        allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
                     };
                     const res = await scanPythonStrategy(scanParams);
-                    if (res) {
+                    if (res && !res.error) {
+                        setPythonScanResult(res);
                         const activeTrade = res.summary?.activeTrade;
                         const latestTrade = res.summary?.latestTrade;
                         
@@ -1405,7 +1623,7 @@ const TradeStation = () => {
                             <TradingViewChart
                                 data={activeSymbolHistories}
                                 symbol={selectedSymbol?.Name}
-                                signals={symbolSignals}
+                                signals={executedTradeSignals}
                                 strategy={activeStrategy}
                                 template={chartTemplate}
                                 vwapAnchor={vwapAnchor}
@@ -1423,7 +1641,7 @@ const TradeStation = () => {
                         activeStrategy={activeStrategy}
                         trades={symbolTrades}
                         onTradeClick={setSelectedTrade}
-                        signals={symbolSignals}
+                        signals={executedTradeSignals}
                         recommendations={tcbsRecommendations}
                         tcbsSignals={tcbsRecentSignals}
                         loadingTcbsInsights={loadingTcbsInsights}
