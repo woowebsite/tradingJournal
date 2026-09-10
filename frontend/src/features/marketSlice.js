@@ -587,6 +587,66 @@ const marketSlice = createSlice({
         },
         clearError: (state) => {
             state.error = null;
+        },
+        updateRealtimeCandle: (state, action) => {
+            const { symbolId, symbolName, candle, timeframe } = action.payload;
+            if (!candle) return;
+            const targetTf = String(timeframe || candle.timeframe || 'D1').toUpperCase();
+            const targetSymId = symbolId ? String(symbolId) : null;
+            const targetSymName = symbolName ? String(symbolName).trim().toUpperCase() : null;
+
+            // Update latest price in map
+            if (targetSymId && candle.close !== undefined) {
+                state.latestPricesMap[targetSymId] = candle.close;
+            }
+
+            // Find if candle for this time already exists in state.histories
+            const candleDate = candle.date;
+
+            let updatedExisting = false;
+            state.histories = state.histories.map(h => {
+                const symDocId = h.symbol?.documentId;
+                const symNumId = h.symbol?.id;
+                const symName = h.symbol?.Name ? String(h.symbol.Name).trim().toUpperCase() : null;
+                const isSameSym = (targetSymId && (String(symDocId) === targetSymId || String(symNumId) === targetSymId)) ||
+                                  (targetSymName && symName === targetSymName);
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                if (isSameSym && hTf === targetTf) {
+                    const hDate = new Date(h.date).getTime();
+                    const cDate = new Date(candleDate).getTime();
+                    if (hDate === cDate || Math.abs(hDate - cDate) < 1000) {
+                        updatedExisting = true;
+                        return {
+                            ...h,
+                            open: candle.open !== undefined ? candle.open : h.open,
+                            high: candle.high !== undefined ? Math.max(Number(h.high) || candle.high, candle.high) : h.high,
+                            low: candle.low !== undefined ? Math.min(Number(h.low) || candle.low, candle.low) : h.low,
+                            close: candle.close !== undefined ? candle.close : h.close,
+                            volume: candle.volume !== undefined ? candle.volume : h.volume,
+                            date: candle.date || h.date,
+                        };
+                    }
+                }
+                return h;
+            });
+
+            if (!updatedExisting && candle.isClosed) {
+                const symObj = state.symbols.find(s => 
+                    (targetSymId && (String(s.documentId) === targetSymId || String(s.id) === targetSymId)) ||
+                    (targetSymName && String(s.Name).trim().toUpperCase() === targetSymName)
+                );
+                state.histories.push({
+                    id: `realtime-${Date.now()}`,
+                    symbol: symObj || { id: targetSymId, documentId: targetSymId, Name: targetSymName },
+                    date: candle.date,
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close,
+                    volume: candle.volume,
+                    timeframe: targetTf
+                });
+            }
         }
     },
     extraReducers: (builder) => {
@@ -718,5 +778,5 @@ const marketSlice = createSlice({
     }
 });
 
-export const { setSymbolFilter, clearError } = marketSlice.actions;
+export const { setSymbolFilter, clearError, updateRealtimeCandle } = marketSlice.actions;
 export default marketSlice.reducer;

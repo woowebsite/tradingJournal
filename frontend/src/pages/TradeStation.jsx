@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle } from '../features/marketSlice';
+import { subscribeBinanceKlineWS } from '../services/binance';
 import { fetchSignals, scanSignals } from '../features/signalSlice';
 import { fetchStrategies } from '../features/strategySlice';
 import { deleteTrade, fetchOpenTrades, fetchTrades, saveTrade } from '../features/tradeSlice';
@@ -51,6 +52,9 @@ const TradeStation = () => {
     const [stMultiplier, setStMultiplier] = useState(3);
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [liveCandle, setLiveCandle] = useState(null);
+    const [wsStatus, setWsStatus] = useState('disconnected');
+    const [livePrice, setLivePrice] = useState(null);
     const lastAutoRefreshedSymbolRef = useRef(null);
     const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
@@ -93,6 +97,63 @@ const TradeStation = () => {
         if (!selectedSymbolId || !symbols || symbols.length === 0) return null;
         return symbols.find(s => (s.documentId || s.id) === selectedSymbolId || String(s.id) === String(selectedSymbolId) || String(s.documentId) === String(selectedSymbolId)) || null;
     }, [symbols, selectedSymbolId]);
+
+    const isCryptoSymbol = useMemo(() => {
+        const symName = String(selectedSymbol?.Name || selectedSymbol?.name || symbolParam || '').toUpperCase();
+        return selectedAccount?.market?.Name === 'Crypto' ||
+            symName.includes('USDT') ||
+            symName.includes('USDC') ||
+            symName.includes('BUSD') ||
+            symName.endsWith('.P') ||
+            symName.includes('PERP') ||
+            symName.startsWith('BINANCE:');
+    }, [selectedAccount?.market?.Name, selectedSymbol, symbolParam]);
+
+    const lastReduxDispatchTimeRef = useRef(0);
+
+    // Binance WebSocket Real-time Kline Connection
+    useEffect(() => {
+        const symName = selectedSymbol?.Name || selectedSymbol?.name || symbolParam;
+        if (!symName || !isCryptoSymbol) {
+            setWsStatus('disconnected');
+            setLiveCandle(null);
+            setLivePrice(null);
+            return;
+        }
+
+        const currentTf = timeframe || 'D1';
+
+        const unsubscribe = subscribeBinanceKlineWS(
+            symName,
+            currentTf,
+            (candle) => {
+                setLiveCandle(candle);
+                if (candle.close !== undefined) {
+                    setLivePrice(candle.close);
+                }
+
+                // Throttle Redux dispatch to candle close or once every 5000ms
+                // This prevents state.histories from continuously churning and recreating chart instances
+                const now = Date.now();
+                if (candle.isClosed || now - lastReduxDispatchTimeRef.current > 5000) {
+                    lastReduxDispatchTimeRef.current = now;
+                    dispatch(updateRealtimeCandle({
+                        symbolId: selectedSymbolId,
+                        symbolName: symName,
+                        candle,
+                        timeframe: currentTf
+                    }));
+                }
+            },
+            (status) => {
+                setWsStatus(status);
+            }
+        );
+
+        return () => {
+            unsubscribe();
+        };
+    }, [dispatch, isCryptoSymbol, selectedSymbol?.Name, selectedSymbol?.name, selectedSymbolId, symbolParam, timeframe]);
 
     useEffect(() => {
         dispatch(fetchSymbols());
@@ -605,15 +666,15 @@ const TradeStation = () => {
     }, [selectedSymbol?.Name, selectedAccount?.market?.Name]);
 
     // Active Strategy Look-up
-    const activeStrategyId = getStrategyId(selectedAccount?.strategy);
+    const activeStrategyId = useMemo(() => getStrategyId(selectedAccount?.strategy), [selectedAccount?.strategy]);
 
-    const activeStrategy = (() => {
-        if (!activeStrategyId) return null;
+    const activeStrategy = useMemo(() => {
+        if (!activeStrategyId || !strategies) return null;
         return strategies.find(s => {
             const strategyId = getStrategyId(s);
             return strategyId === activeStrategyId || s.documentId === activeStrategyId || s.id === activeStrategyId;
-        });
-    })();
+        }) || null;
+    }, [activeStrategyId, strategies]);
 
     // Automatically sync chart template from strategy if specified
     useEffect(() => {
@@ -628,57 +689,68 @@ const TradeStation = () => {
         }
     }, [activeStrategy?.template]);
 
-    const activeStrategyRuleIds = new Set([
-        ...(activeStrategy?.rules || []),
-        ...(activeStrategy?.entryRules || []),
-        ...(activeStrategy?.takeProfitRules || []),
-        ...(activeStrategy?.stoplossRules || []),
-        ...(activeStrategy?.exitRules || [])
-    ]
-        .map(rule => rule?.documentId || rule?.id || rule)
-        .filter(Boolean)
-        .map(id => id.toString()));
+    const activeStrategyRuleIds = useMemo(() => {
+        return new Set([
+            ...(activeStrategy?.rules || []),
+            ...(activeStrategy?.entryRules || []),
+            ...(activeStrategy?.takeProfitRules || []),
+            ...(activeStrategy?.stoplossRules || []),
+            ...(activeStrategy?.exitRules || [])
+        ]
+            .map(rule => rule?.documentId || rule?.id || rule)
+            .filter(Boolean)
+            .map(id => id.toString()));
+    }, [activeStrategy]);
 
     // Signals do not store the strategy directly. They are linked to the
     // account and to rules, so use the active strategy's rule IDs here.
-    const symbolSignals = selectedSymbolId
-        ? allSignals.filter(signal => {
+    const symbolSignals = useMemo(() => {
+        if (!selectedSymbolId || !allSignals || allSignals.length === 0) return [];
+        const selectedAccountId = selectedAccount?.documentId || selectedAccount?.id;
+        if (!selectedAccountId || activeStrategyRuleIds.size === 0) return [];
+
+        return allSignals.filter(signal => {
             const signalSymbolId = signal.symbol?.documentId || signal.symbol?.id;
             if (signalSymbolId?.toString() !== selectedSymbolId?.toString()) return false;
 
             const signalAccountId = signal.account?.documentId || signal.account?.id;
-            const selectedAccountId = selectedAccount?.documentId || selectedAccount?.id;
-            if (!signalAccountId || !selectedAccountId || signalAccountId.toString() !== selectedAccountId.toString()) {
+            if (!signalAccountId || signalAccountId.toString() !== selectedAccountId.toString()) {
                 return false;
             }
 
-            if (activeStrategyRuleIds.size === 0) return false;
             return (signal.rules || []).some(rule => {
                 const ruleId = rule?.documentId || rule?.id || rule;
                 return ruleId && activeStrategyRuleIds.has(ruleId.toString());
             });
-        })
-        : [];
+        });
+    }, [selectedSymbolId, allSignals, selectedAccount?.documentId, selectedAccount?.id, activeStrategyRuleIds]);
 
     // Older manually-created trades may not have `mode` persisted even though
     // Real is the schema default. Demo trades are always explicitly marked.
-    const realTrades = accountTrades.filter(trade => trade.mode !== 'Demo');
+    const realTrades = useMemo(() => {
+        if (!accountTrades) return [];
+        return accountTrades.filter(trade => trade.mode !== 'Demo');
+    }, [accountTrades]);
 
-    const symbolTrades = selectedSymbolId
-        ? realTrades.filter(trade => {
-            const tradeSymbolIds = [trade.symbol?.documentId, trade.symbol?.id]
-                .filter(id => id !== undefined && id !== null)
-                .map(String);
-            const selectedSymbolIds = [selectedSymbol?.documentId, selectedSymbol?.id, selectedSymbolId]
-                .filter(id => id !== undefined && id !== null)
-                .map(String);
-            const idsMatch = tradeSymbolIds.some(id => selectedSymbolIds.includes(id));
-            const namesMatch = trade.symbol?.Name && selectedSymbol?.Name
-                && trade.symbol.Name.trim().toUpperCase() === selectedSymbol.Name.trim().toUpperCase();
+    const symbolTrades = useMemo(() => {
+        if (!selectedSymbolId) return realTrades;
+        const selSymName = selectedSymbol?.Name?.trim().toUpperCase();
+        const selSymDocId = selectedSymbol?.documentId ? String(selectedSymbol.documentId) : null;
+        const selSymNumId = selectedSymbol?.id ? String(selectedSymbol.id) : null;
+        const targetId = String(selectedSymbolId);
+
+        return realTrades.filter(trade => {
+            const tradeSymbolDocId = trade.symbol?.documentId ? String(trade.symbol.documentId) : null;
+            const tradeSymbolNumId = trade.symbol?.id ? String(trade.symbol.id) : null;
+            const tradeSymName = trade.symbol?.Name?.trim().toUpperCase();
+
+            const idsMatch = (tradeSymbolDocId && (tradeSymbolDocId === targetId || tradeSymbolDocId === selSymDocId)) ||
+                             (tradeSymbolNumId && (tradeSymbolNumId === targetId || tradeSymbolNumId === selSymNumId));
+            const namesMatch = tradeSymName && selSymName && tradeSymName === selSymName;
 
             return idsMatch || namesMatch;
-        })
-        : realTrades;
+        });
+    }, [selectedSymbolId, realTrades, selectedSymbol]);
 
 
     const handleRefresh = useCallback(() => {
@@ -783,12 +855,32 @@ const TradeStation = () => {
                 <div className="flex flex-col flex-1 gap-4 min-h-0">
                     {/* Left Panel: Chart */}
                     <div className="flex-1 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
-                        <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center">
-                            <div className="flex items-center justify-between gap-3">
+                        <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center flex-wrap gap-2">
+                            <div className="flex items-center gap-3 flex-wrap">
                                 <h2 className="text-xl font-bold text-white">
                                     {selectedSymbol ? `${selectedSymbol.Name}` : 'Select a Symbol'}
                                 </h2>
                                 <span className="text-sm text-gray-400">{selectedSymbol?.exchange} - {selectedSymbol?.sector}</span>
+
+                                {isCryptoSymbol && (
+                                    <div className="flex items-center gap-2">
+                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition ${
+                                            wsStatus === 'connected'
+                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                                : wsStatus === 'connecting'
+                                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
+                                                : 'bg-gray-700/50 text-gray-400 border border-gray-600'
+                                        }`}>
+                                            <span className={`w-2 h-2 rounded-full ${wsStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-gray-400'}`} />
+                                            <span>{wsStatus === 'connected' ? 'Binance Live' : wsStatus === 'connecting' ? 'Connecting...' : 'Offline'}</span>
+                                        </span>
+                                        {livePrice && (
+                                            <span className="text-xs font-mono font-bold text-emerald-300 bg-gray-900 px-2 py-0.5 rounded border border-emerald-500/30 shadow-sm animate-pulse">
+                                                ${Number(livePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
@@ -897,6 +989,7 @@ const TradeStation = () => {
                                 supertrendMultiplier={stMultiplier}
                                 maPeriod={maPeriod}
                                 timeframe={timeframe}
+                                liveCandle={liveCandle}
                             />
                         </div>
                     </div>

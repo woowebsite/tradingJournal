@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { calculateSMA, drawMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
@@ -24,10 +24,13 @@ const TradingViewChart = ({
     timeframe = 'D1',
     onLoadMore = null,
     isLoadingMore = false,
-    hasMore = true
+    hasMore = true,
+    liveCandle = null
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
+    const candlestickSeriesRef = useRef(null);
+    const volumeSeriesRef = useRef(null);
     const previousVisibleLogicalRangeRef = useRef(null);
     const [hoverTooltip, setHoverTooltip] = useState(null);
 
@@ -74,7 +77,7 @@ const TradingViewChart = ({
         });
     }, [data, timeframe]);
 
-    const getTimeKey = (item) => {
+    const getTimeKey = useCallback((item) => {
         if (!item) return '';
         if (typeof item.time === 'number') return item.time;
         if (typeof item._timeKey === 'number') return item._timeKey;
@@ -91,7 +94,7 @@ const TradingViewChart = ({
             return isNaN(dt.getTime()) ? String(rawDate || rawTime) : Math.floor(dt.getTime() / 1000);
         }
         return String(rawDate || rawTime).split('T')[0];
-    };
+    }, [isIntraday]);
 
     const signalsByDate = useMemo(() => {
         const map = new Map();
@@ -228,6 +231,7 @@ const TradingViewChart = ({
             },
         });
         candlestickSeries.setData(candleData);
+        candlestickSeriesRef.current = candlestickSeries;
 
         if (template === 'Ichimoku') {
             // Ichimoku Cloud (9, 26, 52, displacement 26)
@@ -256,6 +260,7 @@ const TradingViewChart = ({
             priceScaleId: '', // Default axis
         });
         volumeSeries.setData(volumeData);
+        volumeSeriesRef.current = volumeSeries;
 
         // Sync price scale widths
         chart.priceScale('right').applyOptions({
@@ -417,47 +422,75 @@ const TradingViewChart = ({
         }
 
         // Sync Crosshairs & Tooltip
-        chart.subscribeCrosshairMove((param) => {
-            if (!param.time || param.point.x < 0 || param.point.y < 0) {
-                volumeChart.clearCrosshairPosition();
-                setHoverTooltip(null);
-            } else {
-                const volData = volumeData.find(d => d.time === param.time);
-                if (volData) {
-                    volumeChart.setCrosshairPosition(volData.value, param.time, volumeSeries);
-                }
+        let isSyncingCrosshair = false;
+        const volumeMap = new Map(volumeData.map(d => [d.time, d.value]));
+        const candleMap = new Map(candleData.map(d => [d.time, d.close]));
 
-                let dateDisplay = String(param.time);
-                if (typeof param.time === 'number') {
-                    const dt = new Date(param.time * 1000);
-                    dateDisplay = dt.toISOString().replace('T', ' ').substring(0, 19);
-                } else if (param.time?.year) {
-                    dateDisplay = `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}`;
+        chart.subscribeCrosshairMove((param) => {
+            if (isSyncingCrosshair) return;
+            if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+                isSyncingCrosshair = true;
+                volumeChart.clearCrosshairPosition();
+                isSyncingCrosshair = false;
+                setHoverTooltip(prev => (prev !== null ? null : prev));
+            } else {
+                const volVal = volumeMap.get(param.time);
+                if (volVal !== undefined) {
+                    isSyncingCrosshair = true;
+                    volumeChart.setCrosshairPosition(volVal, param.time, volumeSeries);
+                    isSyncingCrosshair = false;
                 }
 
                 const activeSignals = signalsByDate.get(param.time);
                 if (activeSignals && activeSignals.length > 0) {
-                    setHoverTooltip({
-                        x: param.point.x,
-                        y: param.point.y,
-                        date: dateDisplay,
-                        signals: activeSignals,
-                        chartWidth: chartContainerRef.current?.clientWidth || 300,
-                        chartHeight: chartContainerRef.current?.clientHeight || 300,
+                    let dateDisplay = String(param.time);
+                    if (typeof param.time === 'number') {
+                        const dt = new Date(param.time * 1000);
+                        dateDisplay = dt.toISOString().replace('T', ' ').substring(0, 19);
+                    } else if (param.time?.year) {
+                        dateDisplay = `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}`;
+                    }
+
+                    const posX = Math.round(param.point.x);
+                    const posY = Math.round(param.point.y);
+
+                    setHoverTooltip(prev => {
+                        if (
+                            prev &&
+                            prev.time === param.time &&
+                            Math.abs(prev.x - posX) < 4 &&
+                            Math.abs(prev.y - posY) < 4
+                        ) {
+                            return prev;
+                        }
+                        return {
+                            time: param.time,
+                            x: posX,
+                            y: posY,
+                            date: dateDisplay,
+                            signals: activeSignals,
+                            chartWidth: chartContainerRef.current?.clientWidth || 300,
+                            chartHeight: chartContainerRef.current?.clientHeight || 300,
+                        };
                     });
                 } else {
-                    setHoverTooltip(null);
+                    setHoverTooltip(prev => (prev !== null ? null : prev));
                 }
             }
         });
 
         volumeChart.subscribeCrosshairMove((param) => {
-            if (!param.time || param.point.x < 0 || param.point.y < 0) {
+            if (isSyncingCrosshair) return;
+            if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+                isSyncingCrosshair = true;
                 chart.clearCrosshairPosition();
+                isSyncingCrosshair = false;
             } else {
-                const canData = candleData.find(d => d.time === param.time);
-                if (canData) {
-                    chart.setCrosshairPosition(canData.close, param.time, candlestickSeries);
+                const canClose = candleMap.get(param.time);
+                if (canClose !== undefined) {
+                    isSyncingCrosshair = true;
+                    chart.setCrosshairPosition(canClose, param.time, candlestickSeries);
+                    isSyncingCrosshair = false;
                 }
             }
         });
@@ -477,7 +510,7 @@ const TradingViewChart = ({
         };
 
         const handleMouseLeave = () => {
-            setHoverTooltip(null);
+            setHoverTooltip(prev => (prev !== null ? null : prev));
         };
 
         const chartContainer = chartContainerRef.current;
@@ -493,10 +526,37 @@ const TradingViewChart = ({
             if (chartContainer) {
                 chartContainer.removeEventListener('mouseleave', handleMouseLeave);
             }
+            candlestickSeriesRef.current = null;
+            volumeSeriesRef.current = null;
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, vwapAnchor, disableScrollZoom, disableChartMove, focusDate, timeframe, supertrendPeriod, supertrendMultiplier, maPeriod]);
+    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, vwapAnchor, disableScrollZoom, disableChartMove, focusDate, timeframe, supertrendPeriod, supertrendMultiplier, maPeriod, getTimeKey]);
+
+    // Live Realtime Kline Update Effect
+    useEffect(() => {
+        if (!liveCandle || !candlestickSeriesRef.current) return;
+        try {
+            const timeKey = getTimeKey(liveCandle);
+            if (!timeKey) return;
+            candlestickSeriesRef.current.update({
+                time: timeKey,
+                open: Number(liveCandle.open),
+                high: Number(liveCandle.high),
+                low: Number(liveCandle.low),
+                close: Number(liveCandle.close),
+            });
+            if (volumeSeriesRef.current && liveCandle.volume !== undefined) {
+                volumeSeriesRef.current.update({
+                    time: timeKey,
+                    value: Number(liveCandle.volume || 0),
+                    color: Number(liveCandle.close) >= Number(liveCandle.open) ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+                });
+            }
+        } catch (e) {
+            console.warn('[Realtime Chart Update Warning]', e?.message || e);
+        }
+    }, [liveCandle, isIntraday]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">
@@ -560,4 +620,4 @@ const TradingViewChart = ({
     );
 };
 
-export default TradingViewChart;
+export default React.memo(TradingViewChart);
