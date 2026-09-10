@@ -59,7 +59,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     if (!template) return ctx.badRequest('Unsupported TCBS resource');
 
     const ticker = String(ctx.query.ticker || '').trim().toUpperCase();
-    if (template.includes(':ticker') && !/^[A-Z0-9]{1,20}$/.test(ticker)) {
+    if (template.includes(':ticker') && !/^[A-Z0-9._-]{1,30}$/.test(ticker)) {
       return ctx.badRequest('A valid ticker is required');
     }
 

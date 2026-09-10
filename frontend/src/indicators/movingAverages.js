@@ -22,6 +22,7 @@ export const drawMA = (chart, LineSeries, candleData, period = 200, options = {}
     const maData = isCalculated ? candleData : calculateSMA(candleData, period);
 
     const maSeries = chart.addSeries(LineSeries, {
+        title: options.title || `SMA (${period})`,
         color: 'white',
         lineWidth: 2,
         crosshairMarkerVisible: false,

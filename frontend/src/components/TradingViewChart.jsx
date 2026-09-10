@@ -236,7 +236,7 @@ const TradingViewChart = ({
                 basePeriod: 78,
             });
             drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
-            drawMA(chart, LineSeries, candleData);
+            drawMA(chart, LineSeries, candleData, maPeriod || 78);
         } else if (template === 'VWAP') {
             const vwapData = calculateVWAP(candleData, vwapAnchor || 'Year');
             drawVWAP(chart, LineSeries, vwapData);

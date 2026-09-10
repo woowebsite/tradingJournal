@@ -16,5 +16,14 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/symbol-histories/bulk',
+      handler: 'symbol-history.bulkCreate',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };
+

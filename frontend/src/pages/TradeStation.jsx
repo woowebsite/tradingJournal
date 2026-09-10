@@ -15,7 +15,7 @@ import WatchlistSelector from '../components/WatchlistSelector';
 import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
-import { Search, RefreshCw, Plus, History } from 'lucide-react';
+import { Search, RefreshCw, Plus, History, BookmarkCheck } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { upsertSymbolTechnicalAnalysis } from '../services/tcbs';
@@ -24,6 +24,7 @@ import { calculateSupertrend } from '../indicators/supertrend';
 import { calculateIchimoku } from '../indicators/ichimoku/ichimoku';
 import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
 import { getStrategyId } from '../utils/roadmapCalculations';
+import { getStrategyTemplates } from '../services/strategyTemplate';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
@@ -44,6 +45,12 @@ const TradeStation = () => {
     const [addingToWatchlist, setAddingToWatchlist] = useState(false);
     const [chartTemplate, setChartTemplate] = useState('Supertrend');
     const [vwapAnchor, setVwapAnchor] = useState('Year');
+    const [timeframe, setTimeframe] = useState('D1');
+    const [maPeriod, setMaPeriod] = useState(288);
+    const [stPeriod, setStPeriod] = useState(10);
+    const [stMultiplier, setStMultiplier] = useState(3);
+    const [templates, setTemplates] = useState([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const lastAutoRefreshedSymbolRef = useRef(null);
     const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
@@ -82,6 +89,11 @@ const TradeStation = () => {
         [symbolParam || '', priceParam || '', slPriceParam || '', tpPriceParam || ''].join(':')
     ), [priceParam, slPriceParam, symbolParam, tpPriceParam]);
 
+    const selectedSymbol = useMemo(() => {
+        if (!selectedSymbolId || !symbols || symbols.length === 0) return null;
+        return symbols.find(s => (s.documentId || s.id) === selectedSymbolId || String(s.id) === String(selectedSymbolId) || String(s.documentId) === String(selectedSymbolId)) || null;
+    }, [symbols, selectedSymbolId]);
+
     useEffect(() => {
         dispatch(fetchSymbols());
         dispatch(fetchSignals());
@@ -94,13 +106,25 @@ const TradeStation = () => {
 
     useEffect(() => {
         if (selectedSymbolId) {
-            // Check if the history for this symbol is already loaded in Redux or localStorage
+            const curTf = String(timeframe || 'D1').toUpperCase();
+            // Check if the history for this symbol is already loaded in Redux or localStorage for current timeframe
             const isLoaded = histories && histories.some(h => {
-                const symId = h.symbol?.documentId || h.symbol?.id;
-                return symId && symId.toString() === selectedSymbolId.toString();
+                const symDocId = h.symbol?.documentId;
+                const symNumId = h.symbol?.id;
+                const target = String(selectedSymbolId);
+                const matchesSym = (symDocId && String(symDocId) === target) ||
+                                   (symNumId && String(symNumId) === target) ||
+                                   (selectedSymbol && (
+                                       (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
+                                       (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
+                                       (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
+                                   ));
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                return matchesSym && hTf === curTf;
             });
 
             const hasInLocal = (() => {
+                if (curTf !== 'D1') return false; // Intraday histories are not in localStorage
                 try {
                     const cachedStr = localStorage.getItem('watchlist_histories');
                     if (!cachedStr) return false;
@@ -113,16 +137,29 @@ const TradeStation = () => {
             })();
 
             if (!isLoaded && !hasInLocal) {
-                dispatch(fetchHistories(selectedSymbolId));
+                if (selectedSymbol && selectedSymbol.Name) {
+                    dispatch(loadExternalHistory({
+                        symbol: selectedSymbol.Name,
+                        symbolId: selectedSymbolId,
+                        marketType: selectedAccount?.market?.Name,
+                        resolution: curTf
+                    }));
+                } else {
+                    dispatch(fetchHistories({ symbolId: selectedSymbolId, timeframe: curTf, forceRefresh: true }));
+                }
             }
 
-            // Also fetch external indicators
+            // Also fetch external indicators (only for VN stocks)
             const sym = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
             if (sym && sym.Name) {
-                dispatch(fetchExternalIndicators(sym.Name));
+                const isCrypto = selectedAccount?.market?.Name === 'Crypto' ||
+                    /USDT|\.P|BINANCE:/i.test(sym.Name);
+                if (!isCrypto) {
+                    dispatch(fetchExternalIndicators(sym.Name));
+                }
             }
         }
-    }, [dispatch, selectedSymbolId, symbols, histories]);
+    }, [dispatch, selectedSymbolId, symbols, histories, timeframe, selectedSymbol, selectedAccount]);
 
     // 1. Thực hiện handleWatchlistRefresh để tải toàn bộ data cho symbol ngày mới nhất.
     // 2. Load toàn bộ symbol-history có symbol nằm trong watchlist vào localStorage vào key watchlist_histories và set watchlist_updated_latest = true.
@@ -192,18 +229,146 @@ const TradeStation = () => {
         };
     }, [dispatch, selectedAccount]);
 
-    const selectedSymbol = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
+    useEffect(() => {
+        getStrategyTemplates()
+            .then(data => setTemplates(data || []))
+            .catch(err => console.error('Failed to load strategy templates in TradeStation:', err));
+    }, []);
+
+    const symbolTemplates = useMemo(() => {
+        if (!selectedSymbol) return [];
+        const cleanSym = String(selectedSymbol.Name || selectedSymbol.name || '').trim().toUpperCase();
+        return templates.filter(t => {
+            const tSymName = String(t.symbolName || t.symbol?.Name || t.symbol?.name || '').trim().toUpperCase();
+            return tSymName === cleanSym;
+        });
+    }, [templates, selectedSymbol]);
+
+    useEffect(() => {
+        if (selectedTemplateId) {
+            const exists = symbolTemplates.some(t =>
+                String(t.documentId || t.id) === String(selectedTemplateId) ||
+                String(t.id) === String(selectedTemplateId)
+            );
+            if (!exists) {
+                setSelectedTemplateId('');
+                setChartTemplate('Supertrend');
+                setMaPeriod(288);
+                setStPeriod(10);
+                setStMultiplier(3);
+            }
+        } else {
+            setChartTemplate('Supertrend');
+            setMaPeriod(288);
+            setStPeriod(10);
+            setStMultiplier(3);
+        }
+    }, [selectedSymbol, symbolTemplates, selectedTemplateId]);
+
+    const handleSelectTemplate = (templateId) => {
+        setSelectedTemplateId(templateId);
+        if (!templateId) {
+            setChartTemplate('Supertrend');
+            setMaPeriod(288);
+            setStPeriod(10);
+            setStMultiplier(3);
+            return;
+        }
+        const tpl = symbolTemplates.find(t =>
+            String(t.documentId || t.id) === String(templateId) ||
+            String(t.id) === String(templateId)
+        );
+        if (!tpl) {
+            setChartTemplate('Supertrend');
+            setMaPeriod(288);
+            setStPeriod(10);
+            setStMultiplier(3);
+            return;
+        }
+
+        const cfg = tpl.config || {};
+        const targetTf = tpl.timeframe || timeframe || 'D1';
+        if (tpl.timeframe) {
+            setTimeframe(tpl.timeframe);
+        }
+
+        const stratFile = (tpl.strategyFile || '').toLowerCase();
+        const tplName = (tpl.name || '').toLowerCase();
+        const isVWAP = stratFile.includes('vwap') || tplName.includes('vwap');
+        const isIchimoku = stratFile.includes('ichimoku') || tplName.includes('ichimoku');
+
+        if (isVWAP) {
+            setChartTemplate('VWAP');
+            const targetMa = parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9;
+            setMaPeriod(targetMa);
+            if (cfg.vwapAnchor) {
+                const anchorMap = { 'day': 'Day', 'week': 'Week', 'month': 'Month', 'year': 'Year', 'quarter': 'Quarter' };
+                setVwapAnchor(anchorMap[cfg.vwapAnchor.toLowerCase()] || cfg.vwapAnchor);
+            }
+        } else if (isIchimoku) {
+            setChartTemplate('Ichimoku');
+            const targetMa = parseInt(cfg.maPeriod) || 78;
+            setMaPeriod(targetMa);
+        } else {
+            setChartTemplate('Supertrend');
+            const targetMa = parseInt(cfg.maPeriod) || 288;
+            setMaPeriod(targetMa);
+            if (cfg.stPeriod !== undefined) setStPeriod(parseInt(cfg.stPeriod) || 10);
+            if (cfg.stMultiplier !== undefined) setStMultiplier(parseFloat(cfg.stMultiplier) || 3.0);
+        }
+
+        if (selectedSymbol && selectedSymbolId) {
+            dispatch(loadExternalHistory({
+                symbol: selectedSymbol.Name,
+                symbolId: selectedSymbolId,
+                marketType: selectedAccount?.market?.Name,
+                resolution: targetTf
+            }));
+        }
+    };
+
+    const handleTimeframeChange = (newTf) => {
+        setTimeframe(newTf);
+        if (selectedSymbol && selectedSymbolId) {
+            dispatch(loadExternalHistory({
+                symbol: selectedSymbol.Name,
+                symbolId: selectedSymbolId,
+                marketType: selectedAccount?.market?.Name,
+                resolution: newTf
+            }));
+        }
+    };
 
     const activeSymbolHistories = useMemo(() => {
         if (!selectedSymbolId || !histories) return [];
         return histories.filter(h => {
-            const symId = h.symbol?.documentId || h.symbol?.id;
-            return symId && selectedSymbolId && symId.toString() === selectedSymbolId.toString();
+            const symDocId = h.symbol?.documentId;
+            const symNumId = h.symbol?.id;
+            const target = String(selectedSymbolId);
+            const matchesSym = (symDocId && String(symDocId) === target) ||
+                               (symNumId && String(symNumId) === target) ||
+                               (selectedSymbol && (
+                                   (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
+                                   (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
+                                   (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
+                               ));
+            if (!matchesSym) return false;
+            if (timeframe) {
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                const currentTf = String(timeframe || 'D1').toUpperCase();
+                return hTf === currentTf;
+            }
+            return true;
         });
-    }, [histories, selectedSymbolId]);
+    }, [histories, selectedSymbolId, selectedSymbol, timeframe]);
 
     useEffect(() => {
         if (!selectedSymbolId || !selectedSymbol?.Name) return;
+        const symName = selectedSymbol.Name.trim().toUpperCase();
+        const isCrypto = selectedAccount?.market?.Name === 'Crypto' ||
+            /USDT|\.P|BINANCE:/i.test(symName);
+        if (isCrypto) return;
+
         if (metadataSyncedSymbolRef.current === selectedSymbolId) return;
         metadataSyncedSymbolRef.current = selectedSymbolId;
 
@@ -217,10 +382,11 @@ const TradeStation = () => {
             metadataSyncedSymbolRef.current = null;
             console.error(`Failed to sync metadata and stock ratio: ${err}`);
         });
-    }, [dispatch, selectedSymbol?.Name, selectedSymbolId]);
+    }, [dispatch, selectedSymbol?.Name, selectedSymbolId, selectedAccount?.market?.Name]);
 
     useEffect(() => {
         if (!selectedSymbolId || !activeSymbolHistories || activeSymbolHistories.length === 0) return;
+        if (timeframe && timeframe !== 'D1') return; // Only calculate daily technical analysis cache for D1
 
         const sortedHistory = [...activeSymbolHistories]
             .sort((a, b) => new Date(a.date) - new Date(b.date))
@@ -257,7 +423,7 @@ const TradeStation = () => {
         }).catch(error => {
             console.error(`Failed to save technical analysis for ${selectedSymbol.Name}:`, error);
         });
-    }, [activeSymbolHistories, selectedSymbol?.Name, selectedSymbolId]);
+    }, [activeSymbolHistories, selectedSymbol?.Name, selectedSymbolId, timeframe]);
 
     const refreshSelectedAccountTrades = useCallback(() => {
         const accountId = selectedAccount?.documentId || selectedAccount?.id;
@@ -391,20 +557,28 @@ const TradeStation = () => {
 
     const handleClearHistory = useCallback(async () => {
         if (!selectedSymbol || !selectedSymbolId) return;
-        if (!window.confirm(`Are you sure you want to CLEAR ALL history records for ${selectedSymbol.Name}? This action cannot be undone.`)) return;
+        if (!window.confirm(`Are you sure you want to CLEAR history records for ${selectedSymbol.Name} (${timeframe || 'D1'})? This action cannot be undone.`)) return;
         try {
-            await dispatch(deleteAllHistories(selectedSymbolId)).unwrap();
-            alert(`Successfully cleared history for ${selectedSymbol.Name}`);
-            dispatch(fetchHistories(selectedSymbolId));
+            await dispatch(deleteAllHistories({ symbolId: selectedSymbolId, timeframe })).unwrap();
+            alert(`Successfully cleared history for ${selectedSymbol.Name} (${timeframe || 'D1'})`);
+            dispatch(fetchHistories({ symbolId: selectedSymbolId, timeframe, forceRefresh: true }));
         } catch (error) {
             alert(`Failed to clear history: ${error}`);
         }
-    }, [dispatch, selectedSymbol, selectedSymbolId]);
+    }, [dispatch, selectedSymbol, selectedSymbolId, timeframe]);
 
     useEffect(() => {
         const loadTcbsInsights = async () => {
             const ticker = selectedSymbol?.Name?.trim().toUpperCase();
             if (!ticker) {
+                setTcbsRecommendations([]);
+                setTcbsRecentSignals([]);
+                return;
+            }
+
+            const isCrypto = selectedAccount?.market?.Name === 'Crypto' ||
+                /USDT|\.P|BINANCE:/i.test(ticker);
+            if (isCrypto) {
                 setTcbsRecommendations([]);
                 setTcbsRecentSignals([]);
                 return;
@@ -428,7 +602,7 @@ const TradeStation = () => {
         };
 
         loadTcbsInsights();
-    }, [selectedSymbol?.Name]);
+    }, [selectedSymbol?.Name, selectedAccount?.market?.Name]);
 
     // Active Strategy Look-up
     const activeStrategyId = getStrategyId(selectedAccount?.strategy);
@@ -529,7 +703,8 @@ const TradeStation = () => {
         dispatch(loadExternalHistory({
             symbol: ticker,
             symbolId: selectedSymbolId,
-            marketType: selectedAccount?.market?.Name // Pass Account Market Type
+            marketType: selectedAccount?.market?.Name, // Pass Account Market Type
+            resolution: timeframe || 'D1'
         }))
             .unwrap()
             .then(count => {
@@ -553,12 +728,12 @@ const TradeStation = () => {
             })
             .catch(err => console.error(`Failed to refresh history: ${err}`));
 
-    }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId]);
+    }, [activeStrategy, activeStrategyId, dispatch, refreshSelectedAccountTrades, selectedAccount, selectedSymbol, selectedSymbolId, timeframe]);
 
-    // 3. Mỗi lần change symbol từ watchlist, hãy kiểm tra từ localStorage xem symbol đó đã có data của ngày hôm nay chưa.
-    // Nếu chưa thì get data mới nhất từ API và lưu vào symbol-history, đồng thời cập nhật vào localStorage.
+    // 3. Mỗi lần change symbol từ watchlist, hãy kiểm tra từ localStorage xem symbol đó đã có data của ngày hôm nay chưa (chỉ cho D1).
     useEffect(() => {
         if (!symbolParam || !selectedSymbol || !selectedSymbolId) return;
+        if (timeframe && timeframe !== 'D1') return; // Only auto-refresh D1 candles on symbol param change
 
         let symbolCandles = [];
         const cachedStr = localStorage.getItem('watchlist_histories');
@@ -590,7 +765,7 @@ const TradeStation = () => {
 
         lastAutoRefreshedSymbolRef.current = refreshKey;
         handleRefresh();
-    }, [activeSymbolHistories, handleRefresh, selectedSymbol, selectedSymbolId, symbolParam]);
+    }, [activeSymbolHistories, handleRefresh, selectedSymbol, selectedSymbolId, symbolParam, timeframe]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
@@ -618,31 +793,56 @@ const TradeStation = () => {
 
                             {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
 
-                            <div className="ml-auto flex items-end justify-end gap-2">
-                                <label className="inline-flex items-center gap-2 text-sm text-gray-400">
+                            <div className="ml-auto flex items-center justify-end gap-2 flex-wrap">
+                                {/* Timeframe Dropdown */}
+                                <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                                    <span>Timeframe</span>
+                                    <select
+                                        aria-label="Timeframe"
+                                        value={timeframe}
+                                        onChange={e => handleTimeframeChange(e.target.value)}
+                                        className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-xs text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium cursor-pointer"
+                                    >
+                                        <option value="M1">1m (M1)</option>
+                                        <option value="M5">5m (M5)</option>
+                                        <option value="M15">15m (M15)</option>
+                                        <option value="M30">30m (M30)</option>
+                                        <option value="H1">1h (H1)</option>
+                                        <option value="H4">4h (H4)</option>
+                                        <option value="D1">1D (D1)</option>
+                                        <option value="W1">1W (W1)</option>
+                                    </select>
+                                </label>
+
+                                {/* Strategy Template Dropdown */}
+                                <label className="inline-flex items-center gap-1.5 text-xs text-cyan-300">
+                                    <BookmarkCheck size={14} className="text-cyan-400 shrink-0" />
                                     <span>Template</span>
                                     <select
-                                        aria-label="Chart template"
-                                        value={chartTemplate}
-                                        onChange={event => setChartTemplate(event.target.value)}
-                                        className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        aria-label="Strategy Template"
+                                        value={selectedTemplateId}
+                                        onChange={e => handleSelectTemplate(e.target.value)}
+                                        className="rounded-lg border border-cyan-700/60 bg-gray-900 px-2.5 py-1.5 text-xs text-cyan-200 transition hover:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 max-w-[170px] truncate font-medium cursor-pointer"
                                     >
-                                        <option value="Supertrend">Supertrend</option>
-                                        <option value="Ichimoku">Ichimoku</option>
-                                        <option value="VWAP">VWAP</option>
-                                        {!['Supertrend', 'Ichimoku', 'VWAP'].includes(chartTemplate) && (
-                                            <option value={chartTemplate}>{chartTemplate}</option>
-                                        )}
+                                        <option value="">-- Template ({symbolTemplates.length}) --</option>
+                                        {symbolTemplates.map(tpl => {
+                                            const tplId = String(tpl.documentId || tpl.id);
+                                            return (
+                                                <option key={tplId} value={tplId}>
+                                                    {tpl.name} ({tpl.timeframe || 'D1'})
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </label>
                                 {chartTemplate === 'VWAP' && (
-                                    <label className="inline-flex items-center gap-2 text-sm text-gray-400">
+                                    <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
                                         <span>Anchor</span>
                                         <select
                                             aria-label="VWAP Anchor"
                                             value={vwapAnchor}
                                             onChange={event => setVwapAnchor(event.target.value)}
-                                            className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-sm text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            className="rounded-lg border border-gray-600 bg-gray-700 px-2.5 py-1.5 text-xs text-white transition hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium cursor-pointer"
                                         >
                                             <option value="Day">Day</option>
                                             <option value="Week">Week</option>
@@ -677,7 +877,7 @@ const TradeStation = () => {
                                         type="button"
                                         onClick={handleRefresh}
                                         disabled={historyLoading}
-                                        className="refresh-btn inline-flex items-center rounded-lg bg-gray-700 p-2 text-blue-400 transition hover:bg-gray-600 disabled:opacity-50"
+                                        className="refresh-btn inline-flex items-center rounded-lg bg-gray-700 p-2 text-blue-400 transition hover:bg-gray-600 disabled:opacity-50 cursor-pointer"
                                         title={historyLoading ? 'Refreshing...' : 'Refresh data'}
                                     >
                                         <RefreshCw size={18} className={historyLoading ? 'animate-spin' : ''} />
@@ -686,7 +886,18 @@ const TradeStation = () => {
                             </div>
                         </div>
                         <div className="flex-1 min-h-0">
-                            <TradingViewChart data={activeSymbolHistories} symbol={selectedSymbol?.Name} signals={symbolSignals} strategy={activeStrategy} template={chartTemplate} vwapAnchor={vwapAnchor} />
+                            <TradingViewChart
+                                data={activeSymbolHistories}
+                                symbol={selectedSymbol?.Name}
+                                signals={symbolSignals}
+                                strategy={activeStrategy}
+                                template={chartTemplate}
+                                vwapAnchor={vwapAnchor}
+                                supertrendPeriod={stPeriod}
+                                supertrendMultiplier={stMultiplier}
+                                maPeriod={maPeriod}
+                                timeframe={timeframe}
+                            />
                         </div>
                     </div>
 

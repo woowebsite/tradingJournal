@@ -106,27 +106,42 @@ export const getMarketFlowLeader = async ({ exchange = 'ALL', industry = '2300',
 
 
 export const getTechnicalIndicators = async (ticker) => {
-    // URL: /api-tcbs/ta/v1/summary/gaugechart/${ticker}?period=D
-    const url = 'technical-indicators';
+    const cleanTicker = String(ticker || '')
+        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+        .trim()
+        .toUpperCase();
 
+    if (!cleanTicker || /USDT|\.P|BINANCE:/i.test(cleanTicker) || !/^[A-Z0-9]{1,10}$/.test(cleanTicker)) {
+        return null;
+    }
+
+    const url = 'technical-indicators';
     try {
-        const data = await fetchTcbs(url, { ticker, period: 'D' });
+        const data = await fetchTcbs(url, { ticker: cleanTicker, period: 'D' });
         return data;
     } catch (error) {
-        console.error("Failed to fetch indicators:", error);
-        throw error; // Or return [] if we want to digest error?
+        console.warn("Failed to fetch indicators for", cleanTicker, error);
+        return null;
     }
 };
-
 
 export const getTickerOverview = async (ticker) => {
     const normalizedTicker = String(ticker || '')
         .replace(/:(HOSE|HNX|UPCOM)$/i, '')
         .trim()
         .toUpperCase();
+
+    if (!normalizedTicker || /USDT|\.P|BINANCE:/i.test(normalizedTicker) || !/^[A-Z0-9]{1,10}$/.test(normalizedTicker)) {
+        return {};
+    }
+
     const url = 'ticker-overview';
-    const data = await fetchTcbs(url, { ticker: normalizedTicker });
-    return data?.data || data || {};
+    try {
+        const data = await fetchTcbs(url, { ticker: normalizedTicker });
+        return data?.data || data || {};
+    } catch (error) {
+        return {};
+    }
 };
 
 export const getStockRatio = async (ticker) => {
@@ -134,9 +149,18 @@ export const getStockRatio = async (ticker) => {
         .replace(/:(HOSE|HNX|UPCOM)$/i, '')
         .trim()
         .toUpperCase();
+
+    if (!normalizedTicker || /USDT|\.P|BINANCE:/i.test(normalizedTicker) || !/^[A-Z0-9]{1,10}$/.test(normalizedTicker)) {
+        return {};
+    }
+
     const url = 'stock-ratio';
-    const data = await fetchTcbs(url, { ticker: normalizedTicker });
-    return data?.data || data || {};
+    try {
+        const data = await fetchTcbs(url, { ticker: normalizedTicker });
+        return data?.data || data || {};
+    } catch (error) {
+        return {};
+    }
 };
 
 const upsertStockRatio = async (symbolId, ratio) => {
