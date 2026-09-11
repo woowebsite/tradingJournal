@@ -105,6 +105,7 @@ const Sidebar = () => {
                     subItems: [
                         { label: 'Backtest', path: '/backtest' },
                         { label: 'Python', path: '/python-strategy' },
+                        { label: 'Insight', path: '/strategy-insight' },
                         { label: 'Rules', path: '/manage-rules' },
                     ]
                 },

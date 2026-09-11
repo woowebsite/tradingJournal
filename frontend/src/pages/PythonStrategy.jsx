@@ -53,7 +53,7 @@ const PythonStrategy = () => {
     const [strategyFiles, setStrategyFiles] = useState([]);
     const [selectedStrategyFile, setSelectedStrategyFile] = useState('strategy_supertrend_ma288.py');
     const [selectedWatchlistId, setSelectedWatchlistId] = useState('');
-    const [selectedSymbol, setSelectedSymbol] = useState('VNINDEX');
+    const [selectedSymbol, setSelectedSymbol] = useState('');
 
     // Supertrend Strategy States
     const [riskReward, setRiskReward] = useState(1.5);
@@ -184,21 +184,25 @@ const PythonStrategy = () => {
         }
     }, [accountWatchlists, selectedWatchlistId]);
 
-    // Khi đổi Watchlist -> tự động chọn Symbol đầu tiên trong Watchlist
+    // Khi đổi Watchlist -> nếu selectedSymbol không nằm trong Watchlist mới thì reset
     useEffect(() => {
-        if (watchlistSymbols.length > 0) {
+        if (watchlistSymbols.length > 0 && selectedSymbol) {
             const currentSelectedInList = watchlistSymbols.includes(selectedSymbol);
             if (!currentSelectedInList) {
-                setSelectedSymbol(watchlistSymbols[0]);
+                setSelectedSymbol('');
+                setScanResult(null);
             }
         }
     }, [watchlistSymbols, selectedSymbol]);
 
     // 4. Hàm thực hiện Scan Signal qua Python Backend
     const handleScan = useCallback(async (tickerToScan = null, customCountback = null, customTimeframe = null) => {
-        const ticker = String(tickerToScan || selectedSymbol || 'VNINDEX').trim().toUpperCase();
+        const ticker = String(tickerToScan || selectedSymbol || '').trim().toUpperCase();
         const currentTf = String(customTimeframe || timeframe || 'D1').trim().toUpperCase();
-        if (!ticker) return;
+        if (!ticker) {
+            setErrorMessage('Vui lòng chọn Symbol trước khi chạy Scan.');
+            return;
+        }
 
         if (!allowLong && !allowShort) {
             setErrorMessage('Vui lòng chọn ít nhất 1 loại lệnh (Long Trade hoặc Short Trade).');
@@ -279,7 +283,8 @@ const PythonStrategy = () => {
 
         setLoadingMore(true);
         try {
-            const ticker = String(selectedSymbol || 'VNINDEX').trim().toUpperCase();
+            const ticker = String(selectedSymbol || '').trim().toUpperCase();
+            if (!ticker) return;
             const payload = isVWAP ? {
                 strategyFile: selectedStrategyFile,
                 ticker,
@@ -325,8 +330,11 @@ const PythonStrategy = () => {
 
     // 4.2 Hàm tối ưu hóa tham số (Best Params Optimizer)
     const handleOptimize = useCallback(async (tickerToOptimize) => {
-        const ticker = String(tickerToOptimize || selectedSymbol || 'VNINDEX').trim().toUpperCase();
-        if (!ticker) return;
+        const ticker = String(tickerToOptimize || selectedSymbol || '').trim().toUpperCase();
+        if (!ticker) {
+            setErrorMessage('Vui lòng chọn Symbol trước khi chạy Optimize.');
+            return;
+        }
 
         if (!allowLong && !allowShort) {
             setErrorMessage('Vui lòng chọn ít nhất 1 loại lệnh (Long Trade hoặc Short Trade).');
@@ -390,8 +398,7 @@ const PythonStrategy = () => {
     const handleResetDefault = useCallback(() => {
         setBestInfo(null);
         setErrorMessage('');
-
-        const ticker = String(selectedSymbol || 'VNINDEX').trim().toUpperCase();
+        const ticker = String(selectedSymbol || '').trim().toUpperCase();
 
         if (isVWAP) {
             const defaultVWAP = {
@@ -858,24 +865,9 @@ const PythonStrategy = () => {
                             onChange={(e) => {
                                 const newWlId = e.target.value;
                                 setSelectedWatchlistId(newWlId);
-                                let firstSym = null;
-                                if (newWlId) {
-                                    const wl = accountWatchlists.find(w => String(w.documentId || w.id) === String(newWlId));
-                                    if (wl?.symbols && wl.symbols.length > 0) {
-                                        const s = wl.symbols[0];
-                                        firstSym = typeof s === 'string' ? s.trim().toUpperCase() : String(s?.Name || s?.name || s?.ticker || '').trim().toUpperCase();
-                                    }
-                                }
-                                if (!firstSym && symbols && symbols.length > 0) {
-                                    firstSym = String(symbols[0].Name || symbols[0].name || '').trim().toUpperCase();
-                                }
-                                if (firstSym) {
-                                    setSelectedSymbol(firstSym);
-                                    setBestInfo(null);
-                                    setCountback(1000);
-                                    setHasMore(true);
-                                    handleScan(firstSym, 1000, timeframe);
-                                }
+                                setSelectedSymbol('');
+                                setScanResult(null);
+                                setBestInfo(null);
                             }}
                             className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition cursor-pointer"
                         >
@@ -902,10 +894,15 @@ const PythonStrategy = () => {
                                 setBestInfo(null);
                                 setCountback(1000);
                                 setHasMore(true);
-                                handleScan(newSym, 1000, timeframe);
+                                if (newSym) {
+                                    handleScan(newSym, 1000, timeframe);
+                                } else {
+                                    setScanResult(null);
+                                }
                             }}
                             className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-semibold uppercase"
                         >
+                            <option value="">-- Chọn Symbol --</option>
                             {watchlistSymbols.map((sym, idx) => (
                                 <option key={`${sym}-${idx}`} value={sym}>
                                     {sym}
@@ -919,7 +916,7 @@ const PythonStrategy = () => {
                         <div className="flex items-center justify-between">
                             <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                                 <Bookmark size={14} className="text-cyan-400" />
-                                Strategy Template ({selectedSymbol})
+                                Strategy Template {selectedSymbol ? `(${selectedSymbol})` : ''}
                             </label>
                             {selectedTemplateId && (
                                 <button
@@ -1482,7 +1479,7 @@ const PythonStrategy = () => {
                         {/* Button Save Config - Lưu cấu hình thành template */}
                         <button
                             onClick={handleOpenSaveModal}
-                            disabled={scanning || optimizing}
+                            disabled={scanning || optimizing || !selectedSymbol}
                             title="Lưu cấu hình hiện tại thành Strategy Template vào Strapi"
                             className="h-[42px] bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 hover:text-white border border-cyan-500/40 hover:border-cyan-500 active:scale-[0.98] font-semibold rounded-xl px-3.5 sm:px-4 flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
                         >
@@ -1493,7 +1490,7 @@ const PythonStrategy = () => {
                         {/* Button Optimize - Tìm tham số có Profit Factor cao nhất */}
                         <button
                             onClick={() => handleOptimize(selectedSymbol)}
-                            disabled={scanning || optimizing}
+                            disabled={scanning || optimizing || !selectedSymbol}
                             title="Tự động tìm bộ tham số mang lại Profit Factor cao nhất"
                             className="h-[42px] bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-white font-bold rounded-xl px-4 sm:px-5 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
                         >
@@ -1513,7 +1510,7 @@ const PythonStrategy = () => {
                         {/* Button Run Scan */}
                         <button
                             onClick={() => handleScan(selectedSymbol)}
-                            disabled={scanning || optimizing}
+                            disabled={scanning || optimizing || !selectedSymbol}
                             className="h-[42px] bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 active:scale-[0.98] text-white font-semibold rounded-xl px-5 sm:px-6 flex items-center justify-center gap-2 shadow-lg shadow-purple-600/25 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
                         >
                             {scanning ? (
