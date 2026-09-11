@@ -953,6 +953,23 @@ const PythonStrategy = () => {
         handleScan(selectedSymbol, reqCount, targetTf);
     };
 
+    const generateDefaultDescription = useCallback(() => {
+        if (isVWAP) {
+            return `VWAP(${vwapAnchor}) + MA${vwapMaPeriod} | TP: ${vwapTpTarget} | Dải: ${mult1}x/${mult2}x/${mult3}x | ${allowLong ? 'Long' : ''} ${allowShort ? 'Short' : ''}`.trim();
+        } else if (isPriceAction) {
+            const pas = [];
+            if (paEngulfing) pas.push('Engulfing');
+            if (paBd3bu2) pas.push('BD3BU2');
+            if (paIncludeOpposite) pas.push('IncludeOpposite');
+            if (paPointUp) pas.push('PointUp');
+            if (paSwingUp) pas.push('SwingUp');
+            const paStr = pas.length > 0 ? pas.join(', ') : 'All PA';
+            return `ST(${stPeriod}, ${stMultiplier}) + PA [${paStr}] | TP: ${tpType} | SL: ${slType} | ${allowLong ? 'Long' : ''} ${allowShort ? 'Short' : ''}`.trim();
+        } else {
+            return `Supertrend(${stPeriod}, ${stMultiplier}) + MA${maPeriod} | Entry: ${entryType === 'st_reversal' ? 'ST Reversal' : 'Nến đóng'} | R:R: 1:${riskReward} | TP ST: ${tpSupertrend ? 'Bật' : 'Tắt'} | ${allowLong ? 'Long' : ''} ${allowShort ? 'Short' : ''}`.trim();
+        }
+    }, [isVWAP, isPriceAction, vwapAnchor, vwapMaPeriod, vwapTpTarget, mult1, mult2, mult3, allowLong, allowShort, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, stPeriod, stMultiplier, tpType, slType, maPeriod, entryType, riskReward, tpSupertrend]);
+
     const handleOpenSaveModal = () => {
         if (selectedTemplateId) {
             const activeTpl = symbolTemplates.find(t =>
@@ -962,7 +979,7 @@ const PythonStrategy = () => {
             if (activeTpl) {
                 setOverwriteTemplateId(String(activeTpl.documentId || activeTpl.id));
                 setTemplateNameInput(activeTpl.name || '');
-                setTemplateDescInput(activeTpl.description || '');
+                setTemplateDescInput(activeTpl.description || generateDefaultDescription());
                 setSaveModalOpen(true);
                 return;
             }
@@ -975,7 +992,7 @@ const PythonStrategy = () => {
                 ? `${selectedSymbol} - ST(${stPeriod},${stMultiplier}) + PA (TP:${tpType}, SL:${slType}) (${timeframe})`
                 : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
         setTemplateNameInput(defaultName);
-        setTemplateDescInput('');
+        setTemplateDescInput(generateDefaultDescription());
         setSaveModalOpen(true);
     };
 
@@ -988,7 +1005,7 @@ const PythonStrategy = () => {
                     ? `${selectedSymbol} - ST(${stPeriod},${stMultiplier}) + PA (TP:${tpType}, SL:${slType}) (${timeframe})`
                     : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
             setTemplateNameInput(defaultName);
-            setTemplateDescInput('');
+            setTemplateDescInput(generateDefaultDescription());
         } else {
             const tpl = symbolTemplates.find(t =>
                 String(t.documentId || t.id) === String(val) ||
@@ -996,7 +1013,7 @@ const PythonStrategy = () => {
             );
             if (tpl) {
                 setTemplateNameInput(tpl.name || '');
-                setTemplateDescInput(tpl.description || '');
+                setTemplateDescInput(tpl.description || generateDefaultDescription());
             }
         }
     };
@@ -1058,7 +1075,7 @@ const PythonStrategy = () => {
 
             const payload = {
                 name,
-                description: templateDescInput.trim(),
+                description: templateDescInput.trim() || generateDefaultDescription(),
                 strategyFile: selectedStrategyFile,
                 timeframe,
                 config,

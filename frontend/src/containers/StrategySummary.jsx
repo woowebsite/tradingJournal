@@ -110,14 +110,18 @@ const StrategySummary = ({
         };
     }, [activeStrategy]);
 
-    // Generate dynamic template rules details if using a strategy template (e.g. Supertrend MA288 / VWAP MA9)
+    // Generate dynamic template rules details if using a strategy template (e.g. Price Action / Supertrend MA288 / VWAP MA9 / Ichimoku)
     const templateInfo = useMemo(() => {
-        if (!selectedTemplate && !activeStrategy?.strategyFile) return null;
+        if (!selectedTemplate && !activeStrategy?.strategyFile && !activeStrategy?.template) return null;
         const tpl = selectedTemplate || {};
         const cfg = tpl.config || activeStrategy?.config || {};
         const stratFile = (tpl.strategyFile || activeStrategy?.strategyFile || '').toLowerCase();
         const tplName = (tpl.name || activeStrategy?.name || '').toLowerCase();
-        const isVWAP = stratFile.includes('vwap') || tplName.includes('vwap');
+        const rawTemplate = (tpl.template || activeStrategy?.template || '').toLowerCase();
+
+        const isVWAP = stratFile.includes('vwap') || tplName.includes('vwap') || rawTemplate.includes('vwap');
+        const isPriceAction = stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || tplName.includes('price action') || tplName.includes('pa') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined;
+        const isIchimoku = stratFile.includes('ichimoku') || tplName.includes('ichimoku') || rawTemplate.includes('ichimoku');
 
         if (isVWAP) {
             const ma = cfg.vwapMaPeriod || cfg.maPeriod || 9;
@@ -129,11 +133,61 @@ const StrategySummary = ({
             const allowL = cfg.allowLong !== undefined ? cfg.allowLong : true;
             const allowS = cfg.allowShort !== undefined ? cfg.allowShort : true;
 
+            const tpLabel = tpTarget === 'tp1_vwap' ? 'Đường VWAP' : tpTarget === 'tp2_upper2' ? `Dải Upper 2 (${mult2}x)` : `Dải Upper 3 (${mult3}x)`;
+
             return {
                 type: 'VWAP MA9',
-                entryText: `• Long: Giá đóng cửa > MA${ma} & nằm trên VWAP (${anchor}) ${allowL ? '✅' : '❌'}\n• Short: Giá đóng cửa < MA${ma} & nằm dưới VWAP (${anchor}) ${allowS ? '✅' : '❌'}`,
-                slText: `• Đặt Stop Loss tại đường VWAP hoặc Dải Lower Band 1 (${mult1}x StdDev).`,
-                tpText: `• Chốt lời theo dải mục tiêu ${tpTarget} (Upper Band ${mult1}x / ${mult2}x / ${mult3}x StdDev) hoặc theo tỷ lệ R:R.`
+                summaryDesc: `VWAP (${anchor.toUpperCase()}) + MA${ma} | Dải: ${mult1}x/${mult2}x/${mult3}x | TP: ${tpTarget} | ${allowL ? 'Long' : ''} ${allowS ? 'Short' : ''}`.trim(),
+                entryText: `• Long: Giá đóng cửa > MA${ma} & nằm trên VWAP (${anchor.toUpperCase()}) ${allowL ? '✅' : '❌'}\n• Short: Giá đóng cửa < MA${ma} & nằm dưới VWAP (${anchor.toUpperCase()}) ${allowS ? '✅' : '❌'}`,
+                slText: `• Đặt Stop Loss tại đường VWAP hoặc Dải Lower Band 2 (${mult2}x StdDev).`,
+                tpText: `• Chốt lời theo dải mục tiêu: ${tpLabel} (hoặc dải Lower tương ứng khi Short).`
+            };
+        } else if (isPriceAction) {
+            const stPeriod = cfg.stPeriod || 10;
+            const stMult = cfg.stMultiplier || 3.0;
+            const allowL = cfg.allowLong !== undefined ? cfg.allowLong : true;
+            const allowS = cfg.allowShort !== undefined ? cfg.allowShort : true;
+            const tpType = cfg.tpType || 'P50';
+            const slType = cfg.slType || 'P75';
+            const customTp = parseFloat(cfg.customTpVal) || 0;
+            const customSl = parseFloat(cfg.customSlVal) || 0;
+            const tpST = cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false;
+
+            const paList = [];
+            if (cfg.paEngulfing) paList.push('Engulfing');
+            if (cfg.paBd3bu2) paList.push('BD3BU2/BU3BD2');
+            if (cfg.paIncludeOpposite) paList.push('IncludeOpposite');
+            if (cfg.paPointUp) paList.push('PointUp/Down');
+            if (cfg.paSwingUp) paList.push('SwingUp/Down');
+            const paText = paList.length > 0 ? paList.join(', ') : 'Tất cả nến theo xu hướng';
+
+            const slDesc = slType === 'supertrend'
+                ? `• Đặt Stop Loss bám theo đường Supertrend (${stPeriod}, ${stMult}).`
+                : customSl > 0
+                    ? `• Đặt Stop Loss cố định ${customSl} điểm/giá.`
+                    : `• Đặt Stop Loss theo Spread Percentile ${slType} (Độ giãn nến trung bình).`;
+
+            const tpDesc = customTp > 0
+                ? `• Chốt lời cố định ${customTp} điểm/giá.${tpST ? ' (Thoát khi Supertrend đảo chiều)' : ''}`
+                : `• Chốt lời theo Spread Percentile ${tpType} (Độ giãn nến).${tpST ? ' (Thoát khi Supertrend đảo chiều)' : ''}`;
+
+            return {
+                type: 'Supertrend + Price Action',
+                summaryDesc: `ST(${stPeriod}, ${stMult}) + PA [${paText}] | TP: ${tpType} | SL: ${slType} | ${allowL ? 'Long' : ''} ${allowS ? 'Short' : ''}`.trim(),
+                entryText: `• Long: Supertrend Uptrend (${stPeriod}, ${stMult}) + Mô hình PA Bullish [${paText}] ${allowL ? '✅' : '❌'}\n• Short: Supertrend Downtrend (${stPeriod}, ${stMult}) + Mô hình PA Bearish [${paText}] ${allowS ? '✅' : '❌'}`,
+                slText: slDesc,
+                tpText: tpDesc
+            };
+        } else if (isIchimoku) {
+            const ma = cfg.maPeriod || 78;
+            const allowL = cfg.allowLong !== undefined ? cfg.allowLong : true;
+            const allowS = cfg.allowShort !== undefined ? cfg.allowShort : true;
+            return {
+                type: 'Ichimoku Cloud',
+                summaryDesc: `Ichimoku (26, 78, 156) + MA${ma} | ${allowL ? 'Long' : ''} ${allowS ? 'Short' : ''}`.trim(),
+                entryText: `• Long: Giá nằm trên mây Kumo + Tenkan cắt lên Kijun + Giá > MA${ma} ${allowL ? '✅' : '❌'}\n• Short: Giá nằm dưới mây Kumo + Tenkan cắt xuống Kijun + Giá < MA${ma} ${allowS ? '✅' : '❌'}`,
+                slText: `• Đặt Stop Loss tại đáy/đỉnh Kijun-sen hoặc biên Mây Kumo.`,
+                tpText: `• Chốt lời theo tỷ lệ R:R hoặc khi giá chạm mây đối diện.`
             };
         } else {
             const stPeriod = cfg.stPeriod || 10;
@@ -149,8 +203,9 @@ const StrategySummary = ({
 
             return {
                 type: 'Supertrend MA288',
+                summaryDesc: `Supertrend(${stPeriod}, ${stMult}) + MA${ma} | Entry: ${isStRev ? 'ST Reversal' : 'Nến đóng'} | R:R: 1:${rr} | ${allowL ? 'Long' : ''} ${allowS ? 'Short' : ''}`.trim(),
                 entryText: isStRev
-                    ? `• Supertrend Đảo chiều (${stPeriod}, ${stMult}): Long khi ST đổi Uptrend & ST > MA${ma} ${allowL ? '✅' : '❌'}; Short khi ST đổi Downtrend & ST < MA${ma} ${allowS ? '✅' : '❌'}.`
+                    ? `• Supertrend Đảo chiều (${stPeriod}, ${stMult}): Long khi ST đổi Uptrend & ST > MA${ma} ${allowL ? '✅' : '❌'}\n• Short khi ST đổi Downtrend & ST < MA${ma} ${allowS ? '✅' : '❌'}`
                     : `• Long: Nến xanh (Close > Open) & Close > Supertrend (${stPeriod}, ${stMult}) & ST > MA${ma} ${allowL ? '✅' : '❌'}\n• Short: Nến đỏ (Close < Open) & Close < Supertrend (${stPeriod}, ${stMult}) & ST < MA${ma} ${allowS ? '✅' : '❌'}`,
                 slText: `• Đặt Stop Loss cố định tại giá trị đường Supertrend (${stPeriod}, ${stMult}) của nến vào lệnh.`,
                 tpText: `• Chốt lời theo tỷ lệ R:R = 1 : ${rr}${tpRR ? ' (Bật)' : ''}${tpST ? ' | Tự động thoát lệnh khi Supertrend đảo chiều' : ''}.`
@@ -268,7 +323,7 @@ const StrategySummary = ({
         </div>
     );
 
-    if (!activeStrategy) {
+    if (!activeStrategy && !selectedTemplate) {
         return (
             <div className="p-3 space-y-3">
                 <p className="text-gray-500 italic">Chưa có chiến lược (Strategy) nào được kích hoạt cho tài khoản này.</p>
@@ -277,25 +332,28 @@ const StrategySummary = ({
         );
     }
 
+    const currentTitle = selectedTemplate ? selectedTemplate.name : (activeStrategy?.name || 'Chiến lược');
+    const currentDesc = selectedTemplate?.description || activeStrategy?.description || templateInfo?.summaryDesc || '';
+
     return (
         <div className="flex flex-col gap-2.5">
             {/* Top Bar: Name, Template Badge, Description, and Performance */}
             <div className="flex items-center justify-between gap-3 pb-1">
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <span className="text-blue-400 font-bold text-sm truncate">{activeStrategy.name}</span>
+                    <span className="text-blue-400 font-bold text-sm truncate">{currentTitle}</span>
                     {selectedTemplate && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/10 text-purple-300">
-                            {selectedTemplate.name}
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                            Template: {selectedTemplate.name}
                         </span>
                     )}
-                    {activeStrategy.type && (
+                    {activeStrategy?.type && !selectedTemplate && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] text-gray-400 bg-gray-800">
                             {activeStrategy.type}
                         </span>
                     )}
-                    {activeStrategy.description && (
-                        <span className="text-gray-400 text-xs truncate max-w-md italic">
-                            — {activeStrategy.description}
+                    {currentDesc && (
+                        <span className="text-gray-400 text-xs truncate max-w-lg italic" title={currentDesc}>
+                            — {currentDesc}
                         </span>
                     )}
                 </div>
@@ -326,7 +384,11 @@ const StrategySummary = ({
                         <span>VÀO LỆNH (ENTRY)</span>
                     </div>
                     <div className="text-xs text-gray-300 space-y-1">
-                        {entryRulesList.length > 0 ? (
+                        {templateInfo ? (
+                            <p className="text-[11px] text-gray-300 whitespace-pre-line leading-relaxed">
+                                {templateInfo.entryText}
+                            </p>
+                        ) : entryRulesList.length > 0 ? (
                             entryRulesList.map((rule, idx) => (
                                 <div key={rule.documentId || rule.id || idx}>
                                     <div className="font-semibold text-blue-300 text-[11px]">
@@ -340,10 +402,6 @@ const StrategySummary = ({
                                     )}
                                 </div>
                             ))
-                        ) : templateInfo ? (
-                            <p className="text-[11px] text-gray-300 whitespace-pre-line leading-relaxed">
-                                {templateInfo.entryText}
-                            </p>
                         ) : (
                             <p className="text-gray-500 italic text-[11px]">Chưa có quy tắc Entry.</p>
                         )}
@@ -357,7 +415,11 @@ const StrategySummary = ({
                         <span>CẮT LỖ (STOP LOSS)</span>
                     </div>
                     <div className="text-xs text-gray-300 space-y-1">
-                        {slRulesList.length > 0 ? (
+                        {templateInfo ? (
+                            <p className="text-[11px] text-gray-300 leading-relaxed">
+                                {templateInfo.slText}
+                            </p>
+                        ) : slRulesList.length > 0 ? (
                             slRulesList.map((rule, idx) => (
                                 <div key={rule.documentId || rule.id || idx}>
                                     <div className="font-semibold text-red-300 text-[11px]">• {rule.Name || rule.name}</div>
@@ -366,10 +428,6 @@ const StrategySummary = ({
                                     )}
                                 </div>
                             ))
-                        ) : templateInfo ? (
-                            <p className="text-[11px] text-gray-300 leading-relaxed">
-                                {templateInfo.slText}
-                            </p>
                         ) : (
                             <p className="text-gray-500 italic text-[11px]">Chưa có quy tắc Stop Loss.</p>
                         )}
@@ -383,7 +441,11 @@ const StrategySummary = ({
                         <span>CHỐT LỜI (TAKE PROFIT)</span>
                     </div>
                     <div className="text-xs text-gray-300 space-y-1">
-                        {tpRulesList.length > 0 ? (
+                        {templateInfo ? (
+                            <p className="text-[11px] text-gray-300 leading-relaxed">
+                                {templateInfo.tpText}
+                            </p>
+                        ) : tpRulesList.length > 0 ? (
                             tpRulesList.map((rule, idx) => (
                                 <div key={rule.documentId || rule.id || idx}>
                                     <div className="font-semibold text-emerald-300 text-[11px]">
@@ -397,10 +459,6 @@ const StrategySummary = ({
                                     )}
                                 </div>
                             ))
-                        ) : templateInfo ? (
-                            <p className="text-[11px] text-gray-300 leading-relaxed">
-                                {templateInfo.tpText}
-                            </p>
                         ) : (
                             <p className="text-gray-500 italic text-[11px]">Chưa có quy tắc Take Profit.</p>
                         )}
