@@ -1,10 +1,13 @@
 import sys
+import os
 import time
 import re
+import warnings
+warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 if sys.stdout.encoding != 'utf-8':
@@ -266,7 +269,7 @@ def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D
                 candles = []
                 for item in deduped:
                     open_time_ms = item[0]
-                    dt = datetime.utcfromtimestamp(open_time_ms / 1000.0)
+                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
                     if is_daily_or_weekly:
                         date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
                         time_str = dt.strftime("%Y-%m-%d")
@@ -448,7 +451,7 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
                     multiplier = 1
 
                 for i in range(len(data["t"])):
-                    dt = datetime.utcfromtimestamp(data["t"][i])
+                    dt = datetime.fromtimestamp(data["t"][i], tz=timezone.utc)
                     if is_daily_or_weekly:
                         date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
                         time_str = dt.strftime("%Y-%m-%d")
@@ -1019,7 +1022,8 @@ def optimize_strategy_parameters(
     Tự động quét Grid Search tìm bộ tham số MA, VWAP Bands và TP Target
     mang lại Profit Factor cao nhất dựa trên TOÀN BỘ dữ liệu có trong Strapi.
     """
-    req_count = 50000 if not countback or int(countback) < 5000 else int(countback)
+    # Tối ưu hóa số lượng nến mẫu (tối đa 5,000 nến để phản hồi nhanh)
+    req_count = min(int(countback), 5000) if countback else 5000
     df = fetch_market_candles(ticker, countback=req_count, timeframe=timeframe)
     if df.empty or len(df) < 30:
         return {
@@ -1224,25 +1228,41 @@ def scan_symbol_json(
     trades = res.get("trades", [])
     signals = res.get("signals", [])
 
-    # 3. Chuẩn bị dữ liệu nến cho Lightweight Chart
+    # 3. Chuẩn bị dữ liệu nến cho Lightweight Chart (tối đa 3000 nến gần nhất)
+    chart_df = df.tail(3000) if len(df) > 3000 else df
+    dates = chart_df['date'].astype(str).values
+    opens = chart_df['open'].astype(float).values
+    highs = chart_df['high'].astype(float).values
+    lows = chart_df['low'].astype(float).values
+    closes = chart_df['close'].astype(float).values
+    volumes = chart_df['volume'].astype(float).values if 'volume' in chart_df.columns else [0.0]*len(chart_df)
+    ma_vals = chart_df['ma'].values if 'ma' in chart_df.columns else [None]*len(chart_df)
+    vwap_vals = chart_df['vwap'].values if 'vwap' in chart_df.columns else [None]*len(chart_df)
+    up1_vals = chart_df['vwap_upper1'].values if 'vwap_upper1' in chart_df.columns else [None]*len(chart_df)
+    low1_vals = chart_df['vwap_lower1'].values if 'vwap_lower1' in chart_df.columns else [None]*len(chart_df)
+    up2_vals = chart_df['vwap_upper2'].values if 'vwap_upper2' in chart_df.columns else [None]*len(chart_df)
+    low2_vals = chart_df['vwap_lower2'].values if 'vwap_lower2' in chart_df.columns else [None]*len(chart_df)
+    up3_vals = chart_df['vwap_upper3'].values if 'vwap_upper3' in chart_df.columns else [None]*len(chart_df)
+    low3_vals = chart_df['vwap_lower3'].values if 'vwap_lower3' in chart_df.columns else [None]*len(chart_df)
+
     candles_list = []
-    for _, r in df.iterrows():
+    for i in range(len(chart_df)):
         candles_list.append({
-            "date": str(r["date"]),
-            "time": r.get("time", str(r["date"])[:10]),
-            "open": float(r["open"]),
-            "high": float(r["high"]),
-            "low": float(r["low"]),
-            "close": float(r["close"]),
-            "volume": float(r.get("volume", 0)),
-            "ma": round(float(r["ma"]), 2) if pd.notna(r["ma"]) else None,
-            "vwap": round(float(r["vwap"]), 2) if pd.notna(r["vwap"]) else None,
-            "upper1": round(float(r["vwap_upper1"]), 2) if pd.notna(r["vwap_upper1"]) else None,
-            "lower1": round(float(r["vwap_lower1"]), 2) if pd.notna(r["vwap_lower1"]) else None,
-            "upper2": round(float(r["vwap_upper2"]), 2) if pd.notna(r["vwap_upper2"]) else None,
-            "lower2": round(float(r["vwap_lower2"]), 2) if pd.notna(r["vwap_lower2"]) else None,
-            "upper3": round(float(r["vwap_upper3"]), 2) if pd.notna(r["vwap_upper3"]) else None,
-            "lower3": round(float(r["vwap_lower3"]), 2) if pd.notna(r["vwap_lower3"]) else None,
+            "date": str(dates[i]),
+            "time": str(dates[i])[:10],
+            "open": float(opens[i]),
+            "high": float(highs[i]),
+            "low": float(lows[i]),
+            "close": float(closes[i]),
+            "volume": float(volumes[i]),
+            "ma": round(float(ma_vals[i]), 2) if pd.notna(ma_vals[i]) else None,
+            "vwap": round(float(vwap_vals[i]), 2) if pd.notna(vwap_vals[i]) else None,
+            "upper1": round(float(up1_vals[i]), 2) if pd.notna(up1_vals[i]) else None,
+            "lower1": round(float(low1_vals[i]), 2) if pd.notna(low1_vals[i]) else None,
+            "upper2": round(float(up2_vals[i]), 2) if pd.notna(up2_vals[i]) else None,
+            "lower2": round(float(low2_vals[i]), 2) if pd.notna(low2_vals[i]) else None,
+            "upper3": round(float(up3_vals[i]), 2) if pd.notna(up3_vals[i]) else None,
+            "lower3": round(float(low3_vals[i]), 2) if pd.notna(low3_vals[i]) else None,
         })
 
     # 4. Thống kê hiệu suất

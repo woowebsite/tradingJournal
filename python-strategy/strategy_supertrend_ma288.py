@@ -1,10 +1,13 @@
 import sys
+import os
 import time
 import re
+import warnings
+warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 if sys.stdout.encoding != 'utf-8':
@@ -264,7 +267,7 @@ def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D
                 candles = []
                 for item in deduped:
                     open_time_ms = item[0]
-                    dt = datetime.utcfromtimestamp(open_time_ms / 1000.0)
+                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
                     if is_daily_or_weekly:
                         date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
                         time_str = dt.strftime("%Y-%m-%d")
@@ -446,7 +449,7 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
                     multiplier = 1
 
                 for i in range(len(data["t"])):
-                    dt = datetime.utcfromtimestamp(data["t"][i])
+                    dt = datetime.fromtimestamp(data["t"][i], tz=timezone.utc)
                     if is_daily_or_weekly:
                         date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
                         time_str = dt.strftime("%Y-%m-%d")
@@ -1070,20 +1073,31 @@ def scan_symbol_json(
     trades = res.get("trades", [])
     signals = res.get("signals", [])
 
+    # Tối ưu hóa serialization cho UI Lightweight Charts (chỉ lấy tối đa 3000 nến gần nhất)
+    chart_df = df.tail(3000) if len(df) > 3000 else df
+    dates = chart_df['date'].astype(str).values
+    opens = chart_df['open'].astype(float).values
+    highs = chart_df['high'].astype(float).values
+    lows = chart_df['low'].astype(float).values
+    closes = chart_df['close'].astype(float).values
+    volumes = chart_df['volume'].astype(float).values
+    st_vals = chart_df['supertrend'].values if 'supertrend' in chart_df.columns else [None]*len(chart_df)
+    st_dirs = chart_df['st_dir'].values if 'st_dir' in chart_df.columns else [None]*len(chart_df)
+    ma_vals = chart_df['ma288'].values if 'ma288' in chart_df.columns else [None]*len(chart_df)
+
     candles_list = []
-    for _, row in df.iterrows():
-        d_str = str(row['date'])[:10]
+    for i in range(len(chart_df)):
         candles_list.append({
-            "date": str(row['date']),
-            "time": d_str,
-            "open": float(row['open']),
-            "high": float(row['high']),
-            "low": float(row['low']),
-            "close": float(row['close']),
-            "volume": float(row['volume']),
-            "supertrend": round(float(row['supertrend']), 2) if not pd.isna(row.get('supertrend')) else None,
-            "st_direction": int(row['st_dir']) if not pd.isna(row.get('st_dir')) else None,
-            "ma288": round(float(row['ma288']), 2) if not pd.isna(row.get('ma288')) else None
+            "date": str(dates[i]),
+            "time": str(dates[i])[:10],
+            "open": float(opens[i]),
+            "high": float(highs[i]),
+            "low": float(lows[i]),
+            "close": float(closes[i]),
+            "volume": float(volumes[i]),
+            "supertrend": round(float(st_vals[i]), 2) if pd.notna(st_vals[i]) else None,
+            "st_direction": int(st_dirs[i]) if pd.notna(st_dirs[i]) else None,
+            "ma288": round(float(ma_vals[i]), 2) if pd.notna(ma_vals[i]) else None
         })
 
     # Thống kê hiệu suất (Metrics)
@@ -1282,8 +1296,8 @@ def optimize_strategy_parameters(
     Tự động chạy Grid Search tối ưu hóa tất cả các tham số dựa trên TOÀN BỘ dữ liệu lịch sử
     có trong Strapi theo Timeframe đã chọn để đưa ra con số Profit Factor tối ưu thực tế và chuẩn xác nhất.
     """
-    # Lấy toàn bộ nến lịch sử có trong Strapi (tối đa 50,000 nến) cho Timeframe này
-    req_count = 50000 if not countback or int(countback) < 5000 else int(countback)
+    # Tối ưu hóa số lượng nến mẫu (tối đa 5,000 nến để đảm bảo phản hồi nhanh < 10 giây)
+    req_count = min(int(countback), 5000) if countback else 5000
     df = fetch_market_candles(ticker, countback=req_count, timeframe=timeframe)
     if df.empty or len(df) < 50:
         return {
@@ -1300,16 +1314,16 @@ def optimize_strategy_parameters(
     low_arr = df['low'].values
     n = len(df)
 
-    # 1. Grid tham số cần tối ưu
-    st_period_grid = [7, 10, 14, 20]
-    st_multiplier_grid = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    # 1. Grid tham số cần tối ưu (Tinh chỉnh tập giá trị cốt lõi)
+    st_period_grid = [7, 10, 14]
+    st_multiplier_grid = [2.0, 2.5, 3.0, 3.5]
 
-    all_ma_periods = [34, 50, 89, 100, 150, 200, 288]
+    all_ma_periods = [34, 50, 89, 150, 200, 288]
     ma_period_grid = [m for m in all_ma_periods if m <= n - 10]
     if not ma_period_grid:
         ma_period_grid = [min(20, n - 5)]
 
-    rr_ratio_grid = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0]
+    rr_ratio_grid = [1.2, 1.5, 2.0, 2.5]
     entry_type_grid = ["candle_close", "st_reversal"]
     tp_modes = [
         (True, False),  # Chỉ theo Supertrend đảo chiều

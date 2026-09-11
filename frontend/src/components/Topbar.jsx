@@ -1,7 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Bell, Settings, Clock3, NotebookPen, Plus, Workflow } from 'lucide-react';
+import { Search, Bell, Settings, Clock3, NotebookPen, Plus, Workflow, BrainCircuit } from 'lucide-react';
 import GlobalWatchlist from './GlobalWatchlist';
 import { useSidebar } from '../context/SidebarContext';
 
@@ -12,7 +12,8 @@ const Topbar = ({ onNewTrade }) => {
     const topNavItems = [
         { label: 'Today', path: '/today-trades', icon: Clock3 },
         { label: 'Plan', path: '/journal-plan', icon: NotebookPen },
-        { label: 'Workflow', path: '/journal-workflow', icon: Workflow }
+        { label: 'Workflow', path: '/journal-workflow', icon: Workflow },
+        { label: 'Python', path: '/python-strategy', icon: BrainCircuit }
     ];
 
     return (
@@ -61,7 +62,7 @@ const Topbar = ({ onNewTrade }) => {
             </nav>
 
             <div className="flex items-center gap-3">
-                
+
 
                 <GlobalWatchlist />
 

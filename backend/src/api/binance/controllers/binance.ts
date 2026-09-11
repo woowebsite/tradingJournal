@@ -648,7 +648,7 @@ export default {
         return ctx.badRequest(`Strategy file ${strategyFile} not found.`);
       }
 
-      const pythonExe = process.env.PYTHON_PATH || 'python';
+      const pythonExe = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
       const isVWAP = safeFileName.toLowerCase().includes('vwap');
 
       const args = [
@@ -675,6 +675,7 @@ export default {
         timeout: 45000,
         env: {
           ...process.env,
+          PYTHONWARNINGS: 'ignore',
           PYTHONIOENCODING: 'utf-8',
           STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
           STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
