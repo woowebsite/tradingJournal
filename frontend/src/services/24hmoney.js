@@ -1,19 +1,51 @@
 // 24hMoney External API Service
 
+export const normalize24hResolution = (resolution = '1D') => {
+    const r = String(resolution || '1D').trim().toUpperCase();
+    const map = {
+        '1': '1', '1M': '1', 'M1': '1',
+        '5': '5', '5M': '5', 'M5': '5',
+        '15': '15', '15M': '15', 'M15': '15',
+        '30': '30', '30M': '30', 'M30': '30',
+        '60': '60', '1H': '60', 'H1': '60',
+        '240': '240', '4H': '240', 'H4': '240',
+        '1D': '1D', 'D1': '1D', 'D': '1D', '1d': '1D',
+        '1W': '1W', 'W1': '1W', 'W': '1W', '1w': '1W',
+    };
+    return map[r] || '1D';
+};
+
+export const getOptimalFromTimestamp = (resolution, countBack = 1000, to = Math.floor(Date.now() / 1000)) => {
+    const res = normalize24hResolution(resolution);
+    if (res === '1D' || res === '1W') {
+        return to - 15 * 365 * 86400; // 15 năm cho nến ngày/tuần
+    } else if (res === '240' || res === '60') {
+        return to - Math.max(730 * 86400, countBack * 15 * 3600); // 2 năm cho H1 / H4
+    } else if (res === '30') {
+        return to - Math.max(365 * 86400, countBack * 10 * 1800); // 1 năm cho M30
+    } else if (res === '15') {
+        return to - Math.max(240 * 86400, countBack * 8 * 900);   // 8 tháng cho M15
+    } else if (res === '5') {
+        return to - Math.max(150 * 86400, countBack * 6 * 300);   // 5 tháng cho M5 (~5000 nến)
+    } else if (res === '1') {
+        return to - Math.max(45 * 86400, countBack * 4 * 60);     // 45 ngày cho M1 (~9000 nến)
+    }
+    return to - 180 * 86400;
+};
+
 /**
  * Fetch stock history from 24hMoney API.
  * @param {string} ticker - The stock ticker (e.g. VNM)
- * @param {string} resolution - The interval resolution (e.g. 1D)
+ * @param {string} resolution - The interval resolution (e.g. 1D, 5, 15)
  * @param {number} countBack - Number of bars to fetch back
  * @returns {Array} - Array of normalized candle objects
  */
-export const getStockHistory = async (ticker, resolution = '1D', countBack = 351) => {
+export const getStockHistory = async (ticker, resolution = '1D', countBack = 1000) => {
     const to = Math.floor(Date.now() / 1000);
-    // Allocate double the countback in seconds to cover weekends and holidays safely
-    const from = to - countBack * 2 * 24 * 3600;
+    const from = getOptimalFromTimestamp(resolution, countBack, to);
 
     const normalizedTicker = String(ticker || '').trim().toUpperCase();
-    const normalizedResolution = resolution === 'D' ? '1D' : resolution;
+    const normalizedResolution = normalize24hResolution(resolution);
 
     const url = `https://api.24hmoney.vn/tradingview/history?symbol=${normalizedTicker}&resolution=${normalizedResolution}&from=${from}&to=${to}&countback=${countBack}`;
 
@@ -25,28 +57,18 @@ export const getStockHistory = async (ticker, resolution = '1D', countBack = 351
 
         const data = await response.json();
 
-        // 24hMoney UDF Format:
-        // {
-        //   "s": "ok",
-        //   "t": [1744588800, ...], // timestamps
-        //   "o": [50.828, ...],       // Open
-        //   "h": [51.721, ...],       // High
-        //   "l": [50.47, ...],        // Low
-        //   "c": [50.828, ...],       // Close
-        //   "v": [5487359, ...]       // Volume
-        // }
-
-        if (data && data.s === 'ok' && Array.isArray(data.t)) {
+        if (data && data.s === 'ok' && Array.isArray(data.t) && data.t.length > 0) {
             const tickerName = data.symbol || normalizedTicker;
+            const multiplier = normalizedTicker !== 'VNINDEX' && normalizedTicker !== 'VN30' && parseFloat(data.c[0]) < 500 ? 1000 : 1;
             const result = [];
             for (let i = 0; i < data.t.length; i++) {
                 result.push({
                     ticker: tickerName,
-                    open: parseFloat(data.o[i]) * 1000,
-                    high: parseFloat(data.h[i]) * 1000,
-                    low: parseFloat(data.l[i]) * 1000,
-                    close: parseFloat(data.c[i]) * 1000,
-                    volume: parseFloat(data.v[i]),
+                    open: parseFloat(data.o[i]) * multiplier,
+                    high: parseFloat(data.h[i]) * multiplier,
+                    low: parseFloat(data.l[i]) * multiplier,
+                    close: parseFloat(data.c[i]) * multiplier,
+                    volume: parseFloat(data.v ? data.v[i] : 0) || 0,
                     tradingDate: new Date(data.t[i] * 1000).toISOString()
                 });
             }
@@ -62,28 +84,24 @@ export const getStockHistory = async (ticker, resolution = '1D', countBack = 351
 
 /**
  * Fetch derivative (futures) history from 24hMoney API.
- * Endpoint example: https://api.24hmoney.vn/tradingview/history?symbol=VN30F1M&resolution=1&from=1787474444&to=1788536844&countback=350
+ * Endpoint example: https://api.24hmoney.vn/tradingview/history?symbol=VN30F1M&resolution=5&from=1787474444&to=1788536844&countback=2000
  * @param {string} symbol - The derivative symbol (e.g. VN30F1M)
  * @param {string|number} resolution - The interval resolution (e.g. 1, 5, 15, 1D)
- * @param {number} countBack - Number of bars to fetch back (default 350)
+ * @param {number} countBack - Number of bars to fetch back (default 1000)
  * @param {number} [from] - Start timestamp in seconds
  * @param {number} [to] - End timestamp in seconds
  * @returns {Array} - Array of normalized candle objects
  */
-export const getDerivativeHistory = async (symbol = 'VN30F1M', resolution = '1', countBack = 350, from, to) => {
+export const getDerivativeHistory = async (symbol = 'VN30F1M', resolution = '5', countBack = 1500, from, to) => {
     const toTimestamp = to || Math.floor(Date.now() / 1000);
-    const resolutionInSeconds = resolution === '1D' || resolution === 'D'
-        ? 86400
-        : (parseInt(resolution, 10) * 60 || 60);
-    // Allocate 3x countback in seconds to safely cover market pauses/weekends
-    const fromTimestamp = from || (toTimestamp - countBack * 3 * resolutionInSeconds);
+    const normalizedResolution = normalize24hResolution(resolution);
+    const fromTimestamp = from || getOptimalFromTimestamp(normalizedResolution, countBack, toTimestamp);
 
     let normalizedSymbol = String(symbol || 'VN30F1M').trim().toUpperCase();
     if (normalizedSymbol.startsWith('41I') || normalizedSymbol === 'DERIVATIVE' || !normalizedSymbol) {
         normalizedSymbol = 'VN30F1M';
     }
 
-    const normalizedResolution = resolution === 'D' ? '1D' : String(resolution);
     const url = `https://api.24hmoney.vn/tradingview/history?symbol=${normalizedSymbol}&resolution=${normalizedResolution}&from=${fromTimestamp}&to=${toTimestamp}&countback=${countBack}`;
 
     try {
@@ -94,7 +112,7 @@ export const getDerivativeHistory = async (symbol = 'VN30F1M', resolution = '1',
 
         const data = await response.json();
 
-        if (data && data.s === 'ok' && Array.isArray(data.t)) {
+        if (data && data.s === 'ok' && Array.isArray(data.t) && data.t.length > 0) {
             const tickerName = data.symbol || normalizedSymbol;
             const result = [];
             for (let i = 0; i < data.t.length; i++) {
@@ -119,3 +137,4 @@ export const getDerivativeHistory = async (symbol = 'VN30F1M', resolution = '1',
         return [];
     }
 };
+

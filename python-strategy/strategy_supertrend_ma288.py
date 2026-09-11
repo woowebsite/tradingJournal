@@ -69,19 +69,35 @@ def map_timeframe_to_binance(timeframe: str) -> str:
     return mapping.get(tf, "1d")
 
 def map_timeframe_to_24h(timeframe: str) -> str:
-    """Chuyển đổi Timeframe sang định dạng 24hMoney resolution (1, 5, 30, 240, 1D, 1W)"""
+    """Chuyển đổi Timeframe sang định dạng 24hMoney resolution (1, 5, 15, 30, 60, 240, 1D, 1W)"""
     tf = str(timeframe or "D1").strip().upper()
     mapping = {
-        "M1": "1", "1M": "1",
-        "M5": "5", "5M": "5",
-        "M15": "15", "15M": "15",
-        "M30": "30", "30M": "30",
-        "H1": "60", "1H": "60",
-        "H4": "240", "4H": "240",
-        "D1": "1D", "1D": "1D", "D": "1D",
-        "W1": "1W", "1W": "1W", "W": "1W"
+        "M1": "1", "1M": "1", "1": "1",
+        "M5": "5", "5M": "5", "5": "5",
+        "M15": "15", "15M": "15", "15": "15",
+        "M30": "30", "30M": "30", "30": "30",
+        "H1": "60", "1H": "60", "60": "60",
+        "H4": "240", "4H": "240", "240": "240",
+        "D1": "1D", "1D": "1D", "D": "1D", "1d": "1D",
+        "W1": "1W", "1W": "1W", "W": "1W", "1w": "1W"
     }
     return mapping.get(tf, "1D")
+
+def get_24h_from_timestamp(resolution_24h: str, req_count: int, to_ts: int) -> int:
+    res = str(resolution_24h).upper()
+    if res in ["1D", "D", "1W", "W"]:
+        return to_ts - 15 * 365 * 86400
+    elif res in ["240", "60"]:
+        return to_ts - max(730 * 86400, req_count * 15 * 3600)
+    elif res == "30":
+        return to_ts - max(365 * 86400, req_count * 10 * 1800)
+    elif res == "15":
+        return to_ts - max(240 * 86400, req_count * 8 * 900)
+    elif res == "5":
+        return to_ts - max(150 * 86400, req_count * 6 * 300)
+    elif res == "1":
+        return to_ts - max(45 * 86400, req_count * 4 * 60)
+    return to_ts - 180 * 86400
 
 def get_or_create_symbol_in_strapi(ticker: str) -> Optional[str]:
     """Tìm hoặc tự động tạo mới Symbol trong bảng symbols của Strapi, trả về symbolId (hoặc documentId)"""
@@ -420,18 +436,8 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
     # 2. Lấy dữ liệu 24hMoney cho Stock / Index / Derivatives
     df_external = pd.DataFrame()
     resolution_24h = map_timeframe_to_24h(tf)
-    if resolution_24h in ["1D", "D"]:
-        step_sec = 86400
-    elif resolution_24h in ["1W", "W"]:
-        step_sec = 604800
-    else:
-        try:
-            step_sec = int(resolution_24h) * 60
-        except Exception:
-            step_sec = 86400
-
     to_ts = int(time.time())
-    from_ts = to_ts - int(req_count * 3.5 * step_sec)
+    from_ts = get_24h_from_timestamp(resolution_24h, req_count, to_ts)
     url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
 
     is_daily_or_weekly = tf.upper() in ["D1", "1D", "D", "W1", "1W", "W"]

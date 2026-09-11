@@ -265,7 +265,7 @@ export const loadExternalHistory = createAsyncThunk(
                 const interval = intervalMap[resStr] || '1d';
                 externalData = await getCryptoHistory(symbol, interval, 500);
             } else if (String(marketType || '').toLowerCase() === 'derivative') {
-                externalData = await getDerivativeHistory(symbol.split(':')[0], resStr || '1', 350);
+                externalData = await getDerivativeHistory(symbol.split(':')[0], resStr || '5', 2000);
             } else {
                 // Default to TCBS (Stocks)
                 const ticket = symbol.split(':')[0];

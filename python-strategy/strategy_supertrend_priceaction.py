@@ -56,16 +56,32 @@ def map_timeframe_to_binance(timeframe: str) -> str:
 def map_timeframe_to_24h(timeframe: str) -> str:
     tf = str(timeframe or "D1").strip().upper()
     mapping = {
-        "M1": "1", "1M": "1",
-        "M5": "5", "5M": "5",
-        "M15": "15", "15M": "15",
-        "M30": "30", "30M": "30",
-        "H1": "60", "1H": "60",
-        "H4": "240", "4H": "240",
-        "D1": "1D", "1D": "1D", "D": "1D",
-        "W1": "1W", "1W": "1W", "W": "1W"
+        "M1": "1", "1M": "1", "1": "1",
+        "M5": "5", "5M": "5", "5": "5",
+        "M15": "15", "15M": "15", "15": "15",
+        "M30": "30", "30M": "30", "30": "30",
+        "H1": "60", "1H": "60", "60": "60",
+        "H4": "240", "4H": "240", "240": "240",
+        "D1": "1D", "1D": "1D", "D": "1D", "1d": "1D",
+        "W1": "1W", "1W": "1W", "W": "1W", "1w": "1W"
     }
     return mapping.get(tf, "1D")
+
+def get_24h_from_timestamp(resolution_24h: str, req_count: int, to_ts: int) -> int:
+    res = str(resolution_24h).upper()
+    if res in ["1D", "D", "1W", "W"]:
+        return to_ts - 15 * 365 * 86400
+    elif res in ["240", "60"]:
+        return to_ts - max(730 * 86400, req_count * 15 * 3600)
+    elif res == "30":
+        return to_ts - max(365 * 86400, req_count * 10 * 1800)
+    elif res == "15":
+        return to_ts - max(240 * 86400, req_count * 8 * 900)
+    elif res == "5":
+        return to_ts - max(150 * 86400, req_count * 6 * 300)
+    elif res == "1":
+        return to_ts - max(45 * 86400, req_count * 4 * 60)
+    return to_ts - 180 * 86400
 
 def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
     clean = ticker.strip().upper().replace("BINANCE:", "").replace(".P", "").replace("PERP", "")
@@ -141,9 +157,11 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
             return df_binance
 
     resolution_24h = map_timeframe_to_24h(tf)
-    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&countback={req_count}"
+    to_ts = int(time.time())
+    from_ts = get_24h_from_timestamp(resolution_24h, req_count, to_ts)
+    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
     try:
-        res = requests.get(url_24h, timeout=12)
+        res = requests.get(url_24h, timeout=15)
         if res.status_code == 200:
             data = res.json()
             if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
@@ -160,7 +178,7 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
                         "high": round(float(data["h"][i]) * multiplier, 2),
                         "low": round(float(data["l"][i]) * multiplier, 2),
                         "close": round(float(data["c"][i]) * multiplier, 2),
-                        "volume": float(data["v"][i]),
+                        "volume": float(data["v"][i]) if data.get("v") else 0.0,
                     })
                 df_ext = pd.DataFrame(candles)
                 df_ext["dt"] = pd.to_datetime(df_ext["date"])
