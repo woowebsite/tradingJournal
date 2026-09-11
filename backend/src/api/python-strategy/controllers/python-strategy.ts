@@ -5,6 +5,13 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
+const toBool = (val: any, defaultVal: boolean): boolean => {
+  if (val === undefined || val === null) return defaultVal;
+  if (val === false || val === 'false' || val === 0 || val === '0') return false;
+  if (val === true || val === 'true' || val === 1 || val === '1') return true;
+  return defaultVal;
+};
+
 export default {
   async list(ctx) {
     try {
@@ -81,6 +88,24 @@ export default {
         tp_target,
         vwapTpTarget,
         vwap_tp_target,
+        paEngulfing,
+        pa_engulfing,
+        paBd3bu2,
+        pa_bd3bu2,
+        paIncludeOpposite,
+        pa_include_opposite,
+        paPointUp,
+        pa_point_up,
+        paSwingUp,
+        pa_swing_up,
+        tpType,
+        tp_type,
+        slType,
+        sl_type,
+        customTpVal,
+        custom_tp_val,
+        customSlVal,
+        custom_sl_val,
         timeframe = 'D1',
       } = ctx.request.body || {};
       
@@ -96,10 +121,21 @@ export default {
       const cleanMult2 = mult2 !== undefined ? mult2 : 2.0;
       const cleanMult3 = mult3 !== undefined ? mult3 : 3.0;
       const cleanTpTarget = vwapTpTarget || vwap_tp_target || tp_target || tpTarget || 'tp1_vwap';
-      const isTpSupertrend = tpSupertrend !== undefined ? tpSupertrend : (tp_supertrend !== undefined ? tp_supertrend : true);
-      const isTpRR = tpRR !== undefined ? tpRR : (tp_rr !== undefined ? tp_rr : true);
-      const isAllowLong = allowLong !== undefined ? allowLong : (allow_long !== undefined ? allow_long : true);
-      const isAllowShort = allowShort !== undefined ? allowShort : (allow_short !== undefined ? allow_short : true);
+      const isTpSupertrend = toBool(tpSupertrend ?? tp_supertrend, true);
+      const isTpRR = toBool(tpRR ?? tp_rr, true);
+      const isAllowLong = toBool(allowLong ?? allow_long, true);
+      const isAllowShort = toBool(allowShort ?? allow_short, true);
+
+      // Price Action flags
+      const isPaEngulfing = toBool(paEngulfing ?? pa_engulfing, true);
+      const isPaBd3bu2 = toBool(paBd3bu2 ?? pa_bd3bu2, true);
+      const isPaIncludeOpposite = toBool(paIncludeOpposite ?? pa_include_opposite, true);
+      const isPaPointUp = toBool(paPointUp ?? pa_point_up, false);
+      const isPaSwingUp = toBool(paSwingUp ?? pa_swing_up, false);
+      const cleanTpType = tpType || tp_type || 'P50';
+      const cleanSlType = slType || sl_type || 'P75';
+      const cleanCustomTp = customTpVal !== undefined ? customTpVal : (custom_tp_val !== undefined ? custom_tp_val : 0.0);
+      const cleanCustomSl = customSlVal !== undefined ? customSlVal : (custom_sl_val !== undefined ? custom_sl_val : 0.0);
 
       const rootDir = path.resolve(process.cwd(), '..');
       let strategyDir = path.join(rootDir, 'python-strategy');
@@ -116,6 +152,7 @@ export default {
       const pythonExe = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
       const cleanTicker = String(ticker || 'VNINDEX').trim().toUpperCase();
       const isVWAP = safeFileName.toLowerCase().includes('vwap');
+      const isPriceAction = safeFileName.toLowerCase().includes('priceaction') || safeFileName.toLowerCase().includes('price_action');
 
       const args = [
         fullScriptPath,
@@ -134,6 +171,27 @@ export default {
           '--mult3', String(cleanMult3),
           '--tp-target', String(cleanTpTarget)
         );
+      } else if (isPriceAction) {
+        args.push(
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--tp-type', String(cleanTpType),
+          '--sl-type', String(cleanSlType),
+          '--custom-tp-val', String(cleanCustomTp),
+          '--custom-sl-val', String(cleanCustomSl)
+        );
+
+        if (isPaEngulfing) args.push('--pa-engulfing'); else args.push('--no-pa-engulfing');
+        if (isPaBd3bu2) args.push('--pa-bd3bu2'); else args.push('--no-pa-bd3bu2');
+        if (isPaIncludeOpposite) args.push('--pa-include-opposite'); else args.push('--no-pa-include-opposite');
+        if (isPaPointUp) args.push('--pa-point-up'); else args.push('--no-pa-point-up');
+        if (isPaSwingUp) args.push('--pa-swing-up'); else args.push('--no-pa-swing-up');
+
+        if (isTpSupertrend) {
+          args.push('--tp-supertrend');
+        } else {
+          args.push('--no-tp-supertrend');
+        }
       } else {
         args.push(
           '--rr', String(cleanRR),
@@ -144,30 +202,30 @@ export default {
         );
 
         // Thêm flags chốt lời theo lựa chọn từ Frontend
-        if (isTpSupertrend === false || isTpSupertrend === 'false' || isTpSupertrend === 0) {
-          args.push('--no-tp-supertrend');
-        } else {
+        if (isTpSupertrend) {
           args.push('--tp-supertrend');
+        } else {
+          args.push('--no-tp-supertrend');
         }
 
-        if (isTpRR === false || isTpRR === 'false' || isTpRR === 0) {
-          args.push('--no-tp-rr');
-        } else {
+        if (isTpRR) {
           args.push('--tp-rr');
+        } else {
+          args.push('--no-tp-rr');
         }
       }
 
       // Thêm flags loại lệnh (Long / Short)
-      if (isAllowLong === false || isAllowLong === 'false' || isAllowLong === 0) {
-        args.push('--no-long');
-      } else {
+      if (isAllowLong) {
         args.push('--allow-long');
+      } else {
+        args.push('--no-long');
       }
 
-      if (isAllowShort === false || isAllowShort === 'false' || isAllowShort === 0) {
-        args.push('--no-short');
-      } else {
+      if (isAllowShort) {
         args.push('--allow-short');
+      } else {
+        args.push('--no-short');
       }
 
       const { stdout, stderr } = await execFileAsync(pythonExe, args, {
@@ -220,8 +278,8 @@ export default {
       } = ctx.request.body || {};
 
       const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
-      const isAllowLong = allowLong !== undefined ? allowLong : (allow_long !== undefined ? allow_long : true);
-      const isAllowShort = allowShort !== undefined ? allowShort : (allow_short !== undefined ? allow_short : true);
+      const isAllowLong = toBool(allowLong ?? allow_long, true);
+      const isAllowShort = toBool(allowShort ?? allow_short, true);
 
       const rootDir = path.resolve(process.cwd(), '..');
       let strategyDir = path.join(rootDir, 'python-strategy');
@@ -254,16 +312,16 @@ export default {
       }
 
       // Thêm flags loại lệnh (Long / Short)
-      if (isAllowLong === false || isAllowLong === 'false' || isAllowLong === 0) {
-        args.push('--no-long');
-      } else {
+      if (isAllowLong) {
         args.push('--allow-long');
+      } else {
+        args.push('--no-long');
       }
 
-      if (isAllowShort === false || isAllowShort === 'false' || isAllowShort === 0) {
-        args.push('--no-short');
-      } else {
+      if (isAllowShort) {
         args.push('--allow-short');
+      } else {
+        args.push('--no-short');
       }
 
       const { stdout, stderr } = await execFileAsync(pythonExe, args, {

@@ -702,7 +702,7 @@ const StrategyInsight = () => {
 
             const startStr = dayjs(startRaw).format('YYYY-MM-DD');
             const endStr = dayjs(endRaw).format('YYYY-MM-DD');
-            const defaultTitle = `${selectedSymbol} - ${dayjs(startRaw).format('DD/MM/YYYY')} - ${dayjs(endRaw).format('DD/MM/YYYY')}`;
+            const defaultTitle = `${selectedSymbol} (${timeframe || 'D1'}) - ${dayjs(startRaw).format('DD/MM/YYYY')} - ${dayjs(endRaw).format('DD/MM/YYYY')}`;
 
             const payload = {
                 title: defaultTitle,
@@ -2254,7 +2254,7 @@ const StrategyInsight = () => {
                                             </div>
 
                                             {/* Summary metrics card */}
-                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-950/60 p-2.5 rounded-xl border border-gray-800">
+                                            <div id="summary-metrics-card" className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-950/60 p-2.5 rounded-xl border border-gray-800">
                                                 <div>
                                                     <span className="text-gray-500 block text-[10px]">Spread P50 (Trung vị)</span>
                                                     <span className="font-mono text-sky-300 font-bold">

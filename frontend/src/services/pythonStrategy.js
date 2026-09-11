@@ -8,6 +8,10 @@ export const DEFAULT_PYTHON_STRATEGIES = [
     {
         fileName: 'strategy_vwap_ma9.py',
         name: 'VWAP MA9 Strategy'
+    },
+    {
+        fileName: 'strategy_supertrend_priceaction.py',
+        name: 'Supertrend Price Action Strategy'
     }
 ];
 
@@ -38,50 +42,21 @@ export const getPythonStrategies = async () => {
 /**
  * Quét chiến lược Python và trả về danh sách nến và tín hiệu (không lưu vào DB)
  */
-export const scanPythonStrategy = async ({
-    strategyFile = 'strategy_supertrend_ma288.py',
-    ticker = 'VNINDEX',
-    timeframe = 'D1',
-    countback = 500,
-    rr = 1.5,
-    entryType = 'candle_close',
-    stPeriod = 10,
-    stMultiplier = 3.0,
-    maPeriod = 288,
-    tpSupertrend = true,
-    tpRR = true,
-    allowLong = true,
-    allowShort = true,
-    vwapAnchor = 'year',
-    mult1 = 1.0,
-    mult2 = 2.0,
-    mult3 = 3.0,
-    tpTarget = 'tp1_vwap',
-} = {}) => {
+export const scanPythonStrategy = async (params = {}) => {
     try {
-        const response = await api.post('/python-strategies/scan', {
-            strategyFile,
-            ticker: String(ticker).trim().toUpperCase(),
-            timeframe: String(timeframe || 'D1').trim().toUpperCase(),
-            countback,
-            rr,
-            entryType,
-            stPeriod,
-            stMultiplier,
-            maPeriod,
-            tpSupertrend,
-            tpRR,
-            allowLong,
-            allowShort,
-            vwapAnchor,
-            mult1,
-            mult2,
-            mult3,
-            tpTarget,
-        });
+        const payload = {
+            strategyFile: 'strategy_supertrend_ma288.py',
+            ticker: 'VNINDEX',
+            timeframe: 'D1',
+            countback: 500,
+            ...params,
+            ticker: String(params.ticker || 'VNINDEX').trim().toUpperCase(),
+            timeframe: String(params.timeframe || 'D1').trim().toUpperCase(),
+        };
+        const response = await api.post('/python-strategies/scan', payload);
         return response.data?.data || null;
     } catch (error) {
-        console.error(`Failed to scan python strategy for ${ticker}:`, error);
+        console.error(`Failed to scan python strategy for ${params?.ticker}:`, error);
         throw error;
     }
 };
@@ -89,30 +64,24 @@ export const scanPythonStrategy = async ({
 /**
  * Tự động tìm bộ tham số tối ưu mang lại Profit Factor cao nhất
  */
-export const optimizePythonStrategy = async ({
-    strategyFile = 'strategy_supertrend_ma288.py',
-    ticker = 'VNINDEX',
-    timeframe = 'D1',
-    countback = 500,
-    allowLong = true,
-    allowShort = true,
-    vwapAnchor = 'year',
-} = {}) => {
+export const optimizePythonStrategy = async (params = {}) => {
     try {
-        const response = await api.post('/python-strategies/optimize', {
-            strategyFile,
-            ticker: String(ticker).trim().toUpperCase(),
-            timeframe: String(timeframe || 'D1').trim().toUpperCase(),
-            countback,
-            allowLong,
-            allowShort,
-            vwapAnchor,
-        });
+        const payload = {
+            strategyFile: 'strategy_supertrend_ma288.py',
+            ticker: 'VNINDEX',
+            timeframe: 'D1',
+            countback: 500,
+            ...params,
+            ticker: String(params.ticker || 'VNINDEX').trim().toUpperCase(),
+            timeframe: String(params.timeframe || 'D1').trim().toUpperCase(),
+        };
+        const response = await api.post('/python-strategies/optimize', payload);
         return response.data?.data || null;
     } catch (error) {
-        console.error(`Failed to optimize python strategy for ${ticker}:`, error);
+        console.error(`Failed to optimize python strategy for ${params?.ticker}:`, error);
         throw error;
     }
 };
+
 
 
