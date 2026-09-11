@@ -7,29 +7,29 @@ import StrategySummary from '../StrategySummary';
 import AutoTradeLogPanel from '../AutoTradeLogPanel';
 import dayjs from 'dayjs';
 
-const StrategyPanel = ({ 
-    activeStrategy, 
-    trades, 
-    onTradeClick, 
-    signals = [], 
-    recommendations = [], 
-    tcbsSignals = [], 
+const StrategyPanel = ({
+    activeStrategy,
+    trades,
+    onTradeClick,
+    signals = [],
+    recommendations = [],
+    tcbsSignals = [],
     loadingTcbsInsights = false,
     selectedTemplate = null,
     onAutoTrade = null,
     autoTrading = false,
     isAutoTradeEnabled = false,
-    onToggleAutoTrade = () => {},
+    onToggleAutoTrade = () => { },
     autoTradeLogs = [],
     isScanningOnCandleClose = false,
     selectedSymbol = null,
     timeframe = 'D1',
-    onClearLogs = () => {}
+    onClearLogs = () => { }
 }) => {
     const [activeTab, setActiveTab] = useState('summary');
 
     return (
-        <div className="h-72 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col shrink-0">
+        <div className="h-[300px] shrink-0 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
             <div className="flex border-b border-gray-700 bg-gray-900/50">
                 <div className={`flex-1 flex items-center ${activeTab === 'summary' ? 'border-b-2 border-blue-500 bg-gray-800/50' : ''}`}>
                     <button
@@ -120,9 +120,9 @@ const StrategyPanel = ({
                                     const isTP = signal.type === 'takeprofit' || signal.action?.toLowerCase().includes('take');
                                     const isSL = signal.type === 'stoploss' || signal.action?.toLowerCase().includes('stop');
                                     const badgeColor = isTP ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
-                                                       isSL ? 'bg-red-500/20 text-red-300 border-red-500/40' :
-                                                       isBuy ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
-                                                       'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                                        isSL ? 'bg-red-500/20 text-red-300 border-red-500/40' :
+                                            isBuy ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                                                'bg-amber-500/20 text-amber-300 border-amber-500/40';
                                     return (
                                         <li key={signal.id || i} className="border-b border-gray-700/50 pb-2 last:border-0">
                                             <div className="flex items-center justify-between gap-2">
@@ -135,9 +135,8 @@ const StrategyPanel = ({
                                                     </span>
                                                 </div>
                                                 {signal.status && (
-                                                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
-                                                        signal.status === 'Open' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-400'
-                                                    }`}>
+                                                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${signal.status === 'Open' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-400'
+                                                        }`}>
                                                         {signal.status}
                                                     </span>
                                                 )}

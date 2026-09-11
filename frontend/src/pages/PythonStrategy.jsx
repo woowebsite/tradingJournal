@@ -38,6 +38,7 @@ import { useAccount } from '../context/AccountContext';
 import { getPythonStrategies, scanPythonStrategy, optimizePythonStrategy } from '../services/pythonStrategy';
 import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, deleteStrategyTemplate } from '../services/strategyTemplate';
 import TradingViewChart from '../components/TradingViewChart';
+import DeflatedSharpeRatioCard from '../components/DeflatedSharpeRatioCard';
 import { formatNumber } from '../utils/formatNumber';
 import dayjs from 'dayjs';
 
@@ -1919,6 +1920,15 @@ const PythonStrategy = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Deflated Sharpe Ratio (DSR) Card */}
+            {scanResult?.trades && scanResult.trades.length > 0 && (
+                <DeflatedSharpeRatioCard
+                    trades={scanResult.trades}
+                    timeframe={timeframe}
+                    defaultTrials={bestInfo ? 1440 : 1}
+                />
+            )}
 
             {/* Modal Save Strategy Template */}
             {saveModalOpen && (

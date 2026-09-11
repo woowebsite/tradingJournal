@@ -168,8 +168,8 @@ const TradeStation = () => {
                 localStorage.setItem('auto_trade_enabled', String(next));
             } catch { }
             addAutoTradeLog(
-                next 
-                    ? `🟢 Đã BẬT Auto Trade. Hệ thống sẽ tự động quét Python Strategy và gửi Order Binance mỗi lần đóng nến.` 
+                next
+                    ? `🟢 Đã BẬT Auto Trade. Hệ thống sẽ tự động quét Python Strategy và gửi Order Binance mỗi lần đóng nến.`
                     : `🔴 Đã TẮT Auto Trade.`,
                 next ? 'success' : 'warn'
             );
@@ -290,9 +290,9 @@ const TradeStation = () => {
 
             // 1. Send Order directly to Binance via executeBinanceOrder (Client-side signed, zero API Key exposure)
             const symbolUpper = symName.toUpperCase();
-            const isFutures = symbolUpper.endsWith('.P') || 
-                              symbolUpper.includes('PERP') || 
-                              symbolUpper.includes('FUTURES');
+            const isFutures = symbolUpper.endsWith('.P') ||
+                symbolUpper.includes('PERP') ||
+                symbolUpper.includes('FUTURES');
             const side = targetSignal.type.toLowerCase() === 'long' ? 'BUY' : 'SELL';
 
             const binanceOrderResult = await executeBinanceOrder({
@@ -446,12 +446,12 @@ const TradeStation = () => {
                 const symNumId = h.symbol?.id;
                 const target = String(selectedSymbolId);
                 const matchesSym = (symDocId && String(symDocId) === target) ||
-                                   (symNumId && String(symNumId) === target) ||
-                                   (selectedSymbol && (
-                                       (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
-                                       (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
-                                       (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
-                                   ));
+                    (symNumId && String(symNumId) === target) ||
+                    (selectedSymbol && (
+                        (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
+                        (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
+                        (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
+                    ));
                 const hTf = String(h.timeframe || 'D1').toUpperCase();
                 return matchesSym && hTf === curTf;
             });
@@ -741,12 +741,12 @@ const TradeStation = () => {
             const symNumId = h.symbol?.id;
             const target = String(selectedSymbolId);
             const matchesSym = (symDocId && String(symDocId) === target) ||
-                               (symNumId && String(symNumId) === target) ||
-                               (selectedSymbol && (
-                                   (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
-                                   (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
-                                   (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
-                               ));
+                (symNumId && String(symNumId) === target) ||
+                (selectedSymbol && (
+                    (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
+                    (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
+                    (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
+                ));
             if (!matchesSym) return false;
             if (timeframe) {
                 const hTf = String(h.timeframe || 'D1').toUpperCase();
@@ -771,12 +771,12 @@ const TradeStation = () => {
             ticker: selectedSymbol.Name,
             symbolId: selectedSymbolId,
         }))
-        .unwrap()
-        .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
-        .catch(err => {
-            metadataSyncedSymbolRef.current = null;
-            console.error(`Failed to sync metadata and stock ratio: ${err}`);
-        });
+            .unwrap()
+            .then(() => console.log(`Metadata and stock ratio synced for ${selectedSymbol.Name}`))
+            .catch(err => {
+                metadataSyncedSymbolRef.current = null;
+                console.error(`Failed to sync metadata and stock ratio: ${err}`);
+            });
     }, [dispatch, selectedSymbol?.Name, selectedSymbolId, selectedAccount?.market?.Name]);
 
     useEffect(() => {
@@ -1073,7 +1073,7 @@ const TradeStation = () => {
             const tradeSymName = trade.symbol?.Name?.trim().toUpperCase();
 
             const idsMatch = (tradeSymbolDocId && (tradeSymbolDocId === targetId || tradeSymbolDocId === selSymDocId)) ||
-                             (tradeSymbolNumId && (tradeSymbolNumId === targetId || tradeSymbolNumId === selSymNumId));
+                (tradeSymbolNumId && (tradeSymbolNumId === targetId || tradeSymbolNumId === selSymNumId));
             const namesMatch = tradeSymName && selSymName && tradeSymName === selSymName;
 
             return idsMatch || namesMatch;
@@ -1321,7 +1321,7 @@ const TradeStation = () => {
                         setPythonScanResult(res);
                         const activeTrade = res.summary?.activeTrade;
                         const latestTrade = res.summary?.latestTrade;
-                        
+
                         if (activeTrade && activeTrade.entry_price && activeTrade.stop_loss) {
                             entry = activeTrade.entry_price;
                             sl = activeTrade.stop_loss;
@@ -1483,7 +1483,7 @@ const TradeStation = () => {
                 {/* Left Column: Chart & Strategy */}
                 <div className="flex flex-col flex-1 gap-4 min-h-0">
                     {/* Left Panel: Chart */}
-                    <div className="flex-1 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
+                    <div className="flex-1 min-h-[300px] bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
                         <div className="p-2 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center flex-wrap gap-2">
                             <div className="flex items-center gap-3 flex-wrap">
                                 <h2 className="text-xl font-bold text-white">
@@ -1493,13 +1493,12 @@ const TradeStation = () => {
 
                                 {isCryptoSymbol && (
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition ${
-                                            wsStatus === 'connected'
+                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition ${wsStatus === 'connected'
                                                 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                                                 : wsStatus === 'connecting'
-                                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
-                                                : 'bg-gray-700/50 text-gray-400 border border-gray-600'
-                                        }`}>
+                                                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
+                                                    : 'bg-gray-700/50 text-gray-400 border border-gray-600'
+                                            }`}>
                                             <span className={`w-2 h-2 rounded-full ${wsStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-gray-400'}`} />
                                             <span>{wsStatus === 'connected' ? 'Binance Live' : wsStatus === 'connecting' ? 'Connecting...' : 'Offline'}</span>
                                         </span>
@@ -1511,11 +1510,10 @@ const TradeStation = () => {
                                         <button
                                             type="button"
                                             onClick={toggleAutoTrade}
-                                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition cursor-pointer shadow-sm ${
-                                                isAutoTradeEnabled
+                                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition cursor-pointer shadow-sm ${isAutoTradeEnabled
                                                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/60 hover:bg-emerald-500/30'
                                                     : 'bg-gray-800/80 text-gray-400 border border-gray-700 hover:bg-gray-700 hover:text-gray-300'
-                                            }`}
+                                                }`}
                                             title={isAutoTradeEnabled ? 'Auto Trade đang BẬT: Quét nến đóng và gửi Order Binance' : 'Bấm để Bật Auto Trade'}
                                         >
                                             <span className={`w-2 h-2 rounded-full ${isAutoTradeEnabled ? 'bg-emerald-400 animate-ping' : 'bg-gray-500'}`} />
