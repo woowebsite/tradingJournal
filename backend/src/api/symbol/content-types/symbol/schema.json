@@ -100,6 +100,12 @@
       "relation": "oneToMany",
       "target": "api::strategy-template.strategy-template",
       "mappedBy": "symbol"
+    },
+    "symbol_insights": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::symbol-insight.symbol-insight",
+      "mappedBy": "symbol"
     }
   }
 }

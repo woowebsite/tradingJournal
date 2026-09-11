@@ -1246,6 +1246,65 @@ export interface ApiSymbolHistorySymbolHistory
   };
 }
 
+export interface ApiSymbolInsightSymbolInsight
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'symbol_insights';
+  info: {
+    description: 'Historical strategy insight statistics per symbol';
+    displayName: 'SymbolInsight';
+    pluralName: 'symbol-insights';
+    singularName: 'symbol-insight';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    bestBearDay: Schema.Attribute.String;
+    bestBearHour: Schema.Attribute.String;
+    bestBullDay: Schema.Attribute.String;
+    bestBullHour: Schema.Attribute.String;
+    bestMonth: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    details: Schema.Attribute.JSON;
+    endDate: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::symbol-insight.symbol-insight'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    savedAt: Schema.Attribute.DateTime;
+    spreadAvgPercent: Schema.Attribute.Decimal;
+    spreadAvgPrice: Schema.Attribute.Decimal;
+    spreadMaxPercent: Schema.Attribute.Decimal;
+    spreadMaxPrice: Schema.Attribute.Decimal;
+    spreadMedianPercent: Schema.Attribute.Decimal;
+    spreadMedianPrice: Schema.Attribute.Decimal;
+    spreadMinPercent: Schema.Attribute.Decimal;
+    spreadMinPrice: Schema.Attribute.Decimal;
+    spreadP25Percent: Schema.Attribute.Decimal;
+    spreadP25Price: Schema.Attribute.Decimal;
+    spreadP75Percent: Schema.Attribute.Decimal;
+    spreadP75Price: Schema.Attribute.Decimal;
+    spreadP90Percent: Schema.Attribute.Decimal;
+    spreadP90Price: Schema.Attribute.Decimal;
+    spreadP99Percent: Schema.Attribute.Decimal;
+    spreadP99Price: Schema.Attribute.Decimal;
+    startDate: Schema.Attribute.String;
+    symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    timeframe: Schema.Attribute.String & Schema.Attribute.DefaultTo<'D1'>;
+    title: Schema.Attribute.String;
+    totalCandles: Schema.Attribute.Integer;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    worstMonth: Schema.Attribute.String;
+  };
+}
+
 export interface ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis
   extends Struct.CollectionTypeSchema {
   collectionName: 'symbol_technical_analyses';
@@ -1339,6 +1398,10 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
     symbol_histories: Schema.Attribute.Relation<
       'oneToMany',
       'api::symbol-history.symbol-history'
+    >;
+    symbol_insights: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::symbol-insight.symbol-insight'
     >;
     technicalAnalysis: Schema.Attribute.Relation<
       'oneToOne',
@@ -2235,6 +2298,7 @@ declare module '@strapi/strapi' {
       'api::strategy-template.strategy-template': ApiStrategyTemplateStrategyTemplate;
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
+      'api::symbol-insight.symbol-insight': ApiSymbolInsightSymbolInsight;
       'api::symbol-technical-analysis.symbol-technical-analysis': ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis;
       'api::symbol.symbol': ApiSymbolSymbol;
       'api::tcbs-recommen.tcbs-recommen': ApiTcbsRecommenTcbsRecommen;

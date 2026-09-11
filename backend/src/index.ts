@@ -114,6 +114,11 @@ export default {
         'api::symbol-history.symbol-history.update',
         'api::symbol-history.symbol-history.delete',
         'api::symbol-history.symbol-history.clearHistory',
+        'api::symbol-insight.symbol-insight.find',
+        'api::symbol-insight.symbol-insight.findOne',
+        'api::symbol-insight.symbol-insight.create',
+        'api::symbol-insight.symbol-insight.update',
+        'api::symbol-insight.symbol-insight.delete',
     ];
 
     const rolesToGrant = ['public', 'authenticated'];

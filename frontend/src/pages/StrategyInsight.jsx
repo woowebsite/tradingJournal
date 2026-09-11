@@ -25,12 +25,19 @@ import {
     ArrowUpRight,
     ArrowDownRight,
     Flame,
-    BarChart2
+    BarChart2,
+    Save,
+    CheckCircle2,
+    Bookmark,
+    Trash2,
+    History,
+    X
 } from 'lucide-react';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { scanPythonStrategy } from '../services/pythonStrategy';
+import { createSymbolInsight, getSymbolInsightsBySymbol, deleteSymbolInsight } from '../services/symbolInsight';
 import TradingViewChart from '../components/TradingViewChart';
 import { formatNumber } from '../utils/formatNumber';
 import dayjs from 'dayjs';
@@ -108,6 +115,13 @@ const StrategyInsight = () => {
     const [scanning, setScanning] = useState(false);
     const [scanResult, setScanResult] = useState(null);
     const [errorMessage, setErrorMessage] = useState('');
+
+    // Save & History States
+    const [savingInsight, setSavingInsight] = useState(false);
+    const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+    const [savedInsightsList, setSavedInsightsList] = useState([]);
+    const [showSavedModal, setShowSavedModal] = useState(false);
+    const [deletingInsightId, setDeletingInsightId] = useState(null);
 
     // 1. Initial Load: Watchlists, Symbols
     useEffect(() => {
@@ -637,6 +651,175 @@ const StrategyInsight = () => {
     }, [chartCandles]);
 
     // ==========================================
+    // Saved Insights Management (SymbolInsight)
+    // ==========================================
+    const loadSavedInsights = useCallback(async (symId) => {
+        try {
+            if (!symId) return;
+            const list = await getSymbolInsightsBySymbol(symId);
+            setSavedInsightsList(list || []);
+        } catch (e) {
+            console.error('Failed to load saved symbol insights:', e);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (selectedSymbol && symbols.length > 0) {
+            const currentSymbolObj = symbols.find(s => {
+                const name = (s.Name || s.name || s.ticker || '').trim().toUpperCase();
+                return name === selectedSymbol.trim().toUpperCase() ||
+                    name.split(':')[0] === selectedSymbol.trim().toUpperCase();
+            });
+            const symId = currentSymbolObj?.documentId || currentSymbolObj?.id;
+            if (symId) {
+                loadSavedInsights(symId);
+            }
+        } else {
+            setSavedInsightsList([]);
+        }
+    }, [selectedSymbol, symbols, loadSavedInsights]);
+
+    const handleSaveInsight = async () => {
+        if (!selectedSymbol || chartCandles.length === 0) return;
+        try {
+            setSavingInsight(true);
+            setSaveSuccessMsg('');
+            setErrorMessage('');
+
+            const currentSymbolObj = symbols.find(s => {
+                const name = (s.Name || s.name || s.ticker || '').trim().toUpperCase();
+                return name === selectedSymbol.trim().toUpperCase() ||
+                    name.split(':')[0] === selectedSymbol.trim().toUpperCase();
+            });
+
+            const symbolId = currentSymbolObj?.documentId || currentSymbolObj?.id || null;
+
+            const firstItem = chartCandles[0];
+            const lastItem = chartCandles[chartCandles.length - 1];
+
+            const startRaw = firstItem?.date || (firstItem?.time ? (typeof firstItem.time === 'number' ? firstItem.time * 1000 : firstItem.time) : Date.now());
+            const endRaw = lastItem?.date || (lastItem?.time ? (typeof lastItem.time === 'number' ? lastItem.time * 1000 : lastItem.time) : Date.now());
+
+            const startStr = dayjs(startRaw).format('YYYY-MM-DD');
+            const endStr = dayjs(endRaw).format('YYYY-MM-DD');
+            const defaultTitle = `${selectedSymbol} - ${dayjs(startRaw).format('DD/MM/YYYY')} - ${dayjs(endRaw).format('DD/MM/YYYY')}`;
+
+            const payload = {
+                title: defaultTitle,
+                savedAt: new Date().toISOString(),
+                startDate: startStr,
+                endDate: endStr,
+                timeframe: timeframe || 'D1',
+                totalCandles: chartCandles.length,
+
+                // Spread metrics
+                spreadMinPrice: spreadStats?.minPrice ?? 0,
+                spreadMinPercent: spreadStats?.minPercent ?? 0,
+                spreadP25Price: spreadStats?.p25Price ?? 0,
+                spreadP25Percent: spreadStats?.p25Percent ?? 0,
+                spreadMedianPrice: spreadStats?.medianPrice ?? 0,
+                spreadMedianPercent: spreadStats?.medianPercent ?? 0,
+                spreadP75Price: spreadStats?.p75Price ?? 0,
+                spreadP75Percent: spreadStats?.p75Percent ?? 0,
+                spreadP90Price: spreadStats?.p90Price ?? 0,
+                spreadP90Percent: spreadStats?.p90Percent ?? 0,
+                spreadP99Price: spreadStats?.p99Price ?? 0,
+                spreadP99Percent: spreadStats?.p99Percent ?? 0,
+                spreadMaxPrice: spreadStats?.maxPrice ?? 0,
+                spreadMaxPercent: spreadStats?.maxPercent ?? 0,
+                spreadAvgPrice: spreadStats?.avgPrice ?? 0,
+                spreadAvgPercent: spreadStats?.avgPercent ?? 0,
+
+                // Intraday (Giờ Tăng mạnh nhất, Giờ Giảm nhiều nhất)
+                bestBullHour: intradayStats?.bestBullHour
+                    ? `${intradayStats.bestBullHour.label} (Tăng ${intradayStats.bestBullHour.bullRate}% - TB ${intradayStats.bestBullHour.avgRet >= 0 ? '+' : ''}${intradayStats.bestBullHour.avgRet}%)`
+                    : '',
+                bestBearHour: intradayStats?.bestBearHour
+                    ? `${intradayStats.bestBearHour.label} (Giảm ${intradayStats.bestBearHour.bearRate}% - TB ${intradayStats.bestBearHour.avgRet >= 0 ? '+' : ''}${intradayStats.bestBearHour.avgRet}%)`
+                    : '',
+
+                // Week (Ngày Tăng tốt nhất, Ngày Giảm nhiều nhất)
+                bestBullDay: weekStats?.bestBullDay
+                    ? `${weekStats.bestBullDay.dayName} (Tăng ${weekStats.bestBullDay.bullRate}% - TB ${weekStats.bestBullDay.avgRet >= 0 ? '+' : ''}${weekStats.bestBullDay.avgRet}%)`
+                    : '',
+                bestBearDay: weekStats?.bestBearDay
+                    ? `${weekStats.bestBearDay.dayName} (Giảm ${weekStats.bestBearDay.bearRate}% - TB ${weekStats.bestBearDay.avgRet >= 0 ? '+' : ''}${weekStats.bestBearDay.avgRet}%)`
+                    : '',
+
+                // Year (Tháng Tăng mạnh nhất trong năm, Tháng Giảm nhiều nhất)
+                bestMonth: yearStats?.bestMonth
+                    ? `${yearStats.bestMonth.monthName} (Tăng ${yearStats.bestMonth.bullRate}% - TB ${yearStats.bestMonth.avgRet >= 0 ? '+' : ''}${yearStats.bestMonth.avgRet}%)`
+                    : '',
+                worstMonth: yearStats?.worstMonth
+                    ? `${yearStats.worstMonth.monthName} (Giảm ${yearStats.worstMonth.bearRate}% - TB ${yearStats.worstMonth.avgRet >= 0 ? '+' : ''}${yearStats.worstMonth.avgRet}%)`
+                    : '',
+
+                details: {
+                    summary: {
+                        symbol: selectedSymbol,
+                        timeframe,
+                        totalCandles: chartCandles.length,
+                        startDate: startStr,
+                        endDate: endStr
+                    },
+                    spread: spreadStats,
+                    intraday: intradayStats ? {
+                        bestBullHour: intradayStats.bestBullHour,
+                        bestBearHour: intradayStats.bestBearHour,
+                        highestVolHour: intradayStats.highestVolHour,
+                        highestReturnHour: intradayStats.highestReturnHour
+                    } : null,
+                    week: weekStats ? {
+                        bestBullDay: weekStats.bestBullDay,
+                        bestBearDay: weekStats.bestBearDay,
+                        highestReturnDay: weekStats.highestReturnDay,
+                        highestVolDay: weekStats.highestVolDay
+                    } : null,
+                    year: yearStats ? {
+                        bestMonth: yearStats.bestMonth,
+                        worstMonth: yearStats.worstMonth,
+                        highestWinMonth: yearStats.highestWinMonth
+                    } : null
+                }
+            };
+
+            if (symbolId) {
+                payload.symbol = symbolId;
+            }
+
+            const saved = await createSymbolInsight(payload);
+            setSaveSuccessMsg(`Đã lưu thành công vào SymbolInsight: ${saved?.title || defaultTitle}`);
+
+            if (symbolId) {
+                loadSavedInsights(symbolId);
+            }
+
+            setTimeout(() => {
+                setSaveSuccessMsg('');
+            }, 6000);
+        } catch (err) {
+            console.error('Error saving SymbolInsight:', err);
+            const msg = err.response?.data?.error?.message || err.message || 'Lưu SymbolInsight thất bại';
+            setErrorMessage(`Lỗi lưu SymbolInsight: ${msg}`);
+        } finally {
+            setSavingInsight(false);
+        }
+    };
+
+    const handleDeleteInsight = async (insightId) => {
+        if (!insightId) return;
+        try {
+            setDeletingInsightId(insightId);
+            await deleteSymbolInsight(insightId);
+            setSavedInsightsList(prev => prev.filter(item => (item.documentId || item.id) !== insightId));
+        } catch (e) {
+            console.error('Failed to delete insight:', e);
+        } finally {
+            setDeletingInsightId(null);
+        }
+    };
+
+    // ==========================================
     // ECharts Configurations for the 4 Modes
     // ==========================================
     // 1. Spread Histogram Option (Supports Price Range and Percent Range with Gaussian Bell Curve)
@@ -670,10 +853,12 @@ const StrategyInsight = () => {
                 formatter: (params) => {
                     let res = `<b>${isPrice ? 'Khoảng giá' : 'Biên độ %'}: ${params[0].name}</b><br/>`;
                     params.forEach(p => {
-                        const suffix = p.seriesIndex === 1
-                            ? `% (Phân phối chuẩn lý thuyết)`
-                            : ` nến (${((p.value / total) * 100).toFixed(1)}% thực tế)`;
-                        res += `<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${p.value}${suffix}</b><br/>`;
+                        if (p.seriesIndex === 1) {
+                            res += `<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${p.value}% (Phân phối chuẩn lý thuyết)</b><br/>`;
+                        } else {
+                            const pct = ((p.value / total) * 100).toFixed(1);
+                            res += `<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${p.value} nến (${pct}% thực tế)</b><br/>`;
+                        }
                     });
                     return res;
                 }
@@ -683,9 +868,13 @@ const StrategyInsight = () => {
                 textStyle: { color: '#9ca3af', fontSize: 12 },
                 top: 0
             },
-            grid: { left: '3%', right: '4%', bottom: '8%', top: '15%', containLabel: true },
+            grid: { left: '3%', right: '4%', bottom: '8%', top: '16%', containLabel: true },
             xAxis: {
                 type: 'category',
+                name: isPrice ? 'Khoảng giá' : 'Biên độ (%)',
+                nameLocation: 'middle',
+                nameGap: 28,
+                nameTextStyle: { color: '#9ca3af', fontSize: 11, fontWeight: 'normal' },
                 data: categories,
                 axisLabel: { color: '#d1d5db', fontSize: 11, fontWeight: 'bold' },
                 axisLine: { lineStyle: { color: '#4b5563' } }
@@ -694,14 +883,14 @@ const StrategyInsight = () => {
                 {
                     type: 'value',
                     name: 'Số nến (Thực tế)',
-                    nameTextStyle: { color: '#9ca3af' },
+                    nameTextStyle: { color: '#9ca3af', fontSize: 11 },
                     axisLabel: { color: '#9ca3af' },
                     splitLine: { lineStyle: { color: '#1f2937' } }
                 },
                 {
                     type: 'value',
                     name: 'Tỷ lệ Chuông (%)',
-                    nameTextStyle: { color: '#9ca3af' },
+                    nameTextStyle: { color: '#9ca3af', fontSize: 11 },
                     axisLabel: { color: '#9ca3af', formatter: '{value}%' },
                     splitLine: { show: false }
                 }
@@ -710,6 +899,7 @@ const StrategyInsight = () => {
                 {
                     name: 'Số nến thực tế',
                     type: 'bar',
+                    yAxisIndex: 0,
                     data: data,
                     barWidth: '38%',
                     label: {
@@ -717,8 +907,8 @@ const StrategyInsight = () => {
                         position: 'top',
                         color: isPrice ? '#38bdf8' : '#fbbf24',
                         fontWeight: 'bold',
-                        fontSize: 12,
-                        formatter: '{c}'
+                        fontSize: 11,
+                        formatter: (p) => `${p.value}\n(${((p.value / total) * 100).toFixed(1)}%)`
                     },
                     itemStyle: {
                         borderRadius: [6, 6, 0, 0],
@@ -1374,28 +1564,82 @@ const StrategyInsight = () => {
                             </div>
                         </div>
 
-                        {/* Quick switch tabs */}
-                        <div className="flex items-center bg-gray-900 p-1 rounded-xl border border-gray-700 gap-1">
-                            {INSIGHT_MODES.map(mode => {
-                                const Icon = mode.icon;
-                                const isActive = insightMode === mode.id;
-                                return (
-                                    <button
-                                        key={mode.id}
-                                        type="button"
-                                        onClick={() => setInsightMode(mode.id)}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isActive
-                                            ? 'bg-blue-600 text-white shadow-md'
-                                            : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-                                            }`}
-                                    >
-                                        <Icon size={14} className={isActive ? 'text-white' : mode.color} />
-                                        <span>{mode.label}</span>
-                                    </button>
-                                );
-                            })}
+                        {/* Quick switch tabs + Save Button */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* Quick switch tabs */}
+                            <div className="flex items-center bg-gray-900 p-1 rounded-xl border border-gray-700 gap-1">
+                                {INSIGHT_MODES.map(mode => {
+                                    const Icon = mode.icon;
+                                    const isActive = insightMode === mode.id;
+                                    return (
+                                        <button
+                                            key={mode.id}
+                                            type="button"
+                                            onClick={() => setInsightMode(mode.id)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isActive
+                                                ? 'bg-blue-600 text-white shadow-md'
+                                                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                                                }`}
+                                        >
+                                            <Icon size={14} className={isActive ? 'text-white' : mode.color} />
+                                            <span>{mode.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Save Insight Button */}
+                            <button
+                                type="button"
+                                onClick={handleSaveInsight}
+                                disabled={savingInsight || chartCandles.length === 0}
+                                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl border border-emerald-500/50 shadow-md shadow-emerald-950/40 transition flex items-center gap-1.5 cursor-pointer"
+                                title="Lưu toàn bộ kết quả phân tích Insight vào bảng SymbolInsight"
+                            >
+                                {savingInsight ? (
+                                    <>
+                                        <RefreshCw size={14} className="animate-spin" />
+                                        <span>Đang lưu...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save size={14} />
+                                        <span>Save</span>
+                                    </>
+                                )}
+                            </button>
+
+                            {/* Saved History Button */}
+                            {savedInsightsList.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSavedModal(true)}
+                                    className="px-2.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-amber-300 hover:text-amber-200 font-semibold text-xs rounded-xl border border-amber-500/30 transition flex items-center gap-1.5 cursor-pointer"
+                                    title={`Xem danh sách ${savedInsightsList.length} bản ghi Insight đã lưu`}
+                                >
+                                    <Bookmark size={13} className="text-amber-400" />
+                                    <span>Lịch sử ({savedInsightsList.length})</span>
+                                </button>
+                            )}
                         </div>
                     </div>
+
+                    {/* Save Success Alert Banner */}
+                    {saveSuccessMsg && (
+                        <div className="bg-emerald-500/15 border border-emerald-500/40 rounded-xl p-3 text-xs text-emerald-300 flex items-center justify-between gap-2 shadow-lg shadow-emerald-950/20">
+                            <div className="flex items-center gap-2">
+                                <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                <span className="font-semibold">{saveSuccessMsg}</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSaveSuccessMsg('')}
+                                className="text-gray-400 hover:text-white text-xs p-1 cursor-pointer"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    )}
 
                     {/* ========================================== */}
                     {/* 1. SPREAD INSIGHT VIEW                     */}
@@ -1591,7 +1835,7 @@ const StrategyInsight = () => {
                                             <span>💡 Mẹo ứng dụng thực chiến:</span>
                                         </div>
                                         <p className="text-[11px] text-gray-400 leading-relaxed">
-                                            Biên độ nến trung vị (P50) là <b>{formatNumber(spreadStats.medianPrice)}</b> ({spreadStats.medianPercent.toFixed(2)}%). Khi đặt Stop Loss, hãy đặt cách điểm Entry tối thiểu bằng mức P50 ({formatNumber(spreadStats.medianPrice)}) để tránh bị quét lệnh do độ nhiễu dao động tự nhiên của nến.
+                                            Biên độ nến trung vị (P50) là <b className='text-sky-300 '>{formatNumber(spreadStats.medianPrice)}</b> ({spreadStats.medianPercent.toFixed(2)}%). Khi đặt Stop Loss, hãy đặt cách điểm Entry tối thiểu bằng mức P50 ({formatNumber(spreadStats.medianPrice)}) để tránh bị quét lệnh do độ nhiễu dao động tự nhiên của nến.
                                         </p>
                                     </div>
                                 </div>
@@ -1945,6 +2189,114 @@ const StrategyInsight = () => {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Saved Insights History Modal */}
+            {showSavedModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between p-4 border-b border-gray-800 bg-gray-900/90">
+                            <div className="flex items-center gap-2">
+                                <Bookmark size={18} className="text-amber-400" />
+                                <h3 className="text-sm font-bold text-gray-100">
+                                    Lịch sử Insight đã lưu ({selectedSymbol})
+                                </h3>
+                                <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
+                                    {savedInsightsList.length} bản ghi
+                                </span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowSavedModal(false)}
+                                className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition cursor-pointer"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-4 overflow-y-auto space-y-3 divide-y divide-gray-800/80">
+                            {savedInsightsList.length === 0 ? (
+                                <div className="py-8 text-center text-gray-500 text-xs">
+                                    Chưa có bản ghi Insight nào được lưu cho mã này.
+                                </div>
+                            ) : (
+                                savedInsightsList.map((item) => {
+                                    const itemId = item.documentId || item.id;
+                                    const isDeleting = deletingInsightId === itemId;
+                                    return (
+                                        <div key={itemId} className="pt-3 first:pt-0 flex flex-col gap-2">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <div className="text-xs font-bold text-sky-300">
+                                                        {item.title || `${selectedSymbol} - ${item.startDate} ~ ${item.endDate}`}
+                                                    </div>
+                                                    <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5 font-mono">
+                                                        <span>Lưu lúc: {dayjs(item.savedAt || item.createdAt).format('DD/MM/YYYY HH:mm')}</span>
+                                                        <span>•</span>
+                                                        <span className="text-amber-400 font-bold">{item.timeframe || 'D1'}</span>
+                                                        <span>•</span>
+                                                        <span>{item.totalCandles || 0} nến</span>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteInsight(itemId)}
+                                                    disabled={isDeleting}
+                                                    className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition border border-red-500/20 cursor-pointer text-xs flex items-center gap-1 shrink-0"
+                                                    title="Xóa bản ghi này"
+                                                >
+                                                    {isDeleting ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                                    <span>Xóa</span>
+                                                </button>
+                                            </div>
+
+                                            {/* Summary metrics card */}
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-950/60 p-2.5 rounded-xl border border-gray-800">
+                                                <div>
+                                                    <span className="text-gray-500 block text-[10px]">Spread P50 (Trung vị)</span>
+                                                    <span className="font-mono text-sky-300 font-bold">
+                                                        {formatNumber(item.spreadMedianPrice)} ({Number(item.spreadMedianPercent || 0).toFixed(2)}%)
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500 block text-[10px]">Spread Rộng (P75)</span>
+                                                    <span className="font-mono text-cyan-300 font-bold">
+                                                        {formatNumber(item.spreadP75Price)} ({Number(item.spreadP75Percent || 0).toFixed(2)}%)
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500 block text-[10px]">Giờ Tăng mạnh</span>
+                                                    <span className="text-emerald-400 font-semibold truncate block">
+                                                        {item.bestBullHour || 'N/A'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500 block text-[10px]">Ngày Tăng tốt</span>
+                                                    <span className="text-emerald-400 font-semibold truncate block">
+                                                        {item.bestBullDay || 'N/A'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-3 bg-gray-900 border-t border-gray-800 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setShowSavedModal(false)}
+                                className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-semibold rounded-xl border border-gray-700 transition cursor-pointer"
+                            >
+                                Đóng
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
