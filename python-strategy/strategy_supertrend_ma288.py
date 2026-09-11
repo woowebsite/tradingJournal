@@ -88,15 +88,20 @@ def get_24h_from_timestamp(resolution_24h: str, req_count: int, to_ts: int) -> i
     if res in ["1D", "D", "1W", "W"]:
         return to_ts - 15 * 365 * 86400
     elif res in ["240", "60"]:
-        return to_ts - max(730 * 86400, req_count * 15 * 3600)
+        seconds = min(730 * 86400, max(60 * 86400, req_count * 3600))
+        return to_ts - seconds
     elif res == "30":
-        return to_ts - max(365 * 86400, req_count * 10 * 1800)
+        seconds = min(365 * 86400, max(45 * 86400, req_count * 1800))
+        return to_ts - seconds
     elif res == "15":
-        return to_ts - max(240 * 86400, req_count * 8 * 900)
+        seconds = min(240 * 86400, max(30 * 86400, req_count * 900))
+        return to_ts - seconds
     elif res == "5":
-        return to_ts - max(150 * 86400, req_count * 6 * 300)
+        seconds = min(240 * 86400, max(20 * 86400, req_count * 300))
+        return to_ts - seconds
     elif res == "1":
-        return to_ts - max(45 * 86400, req_count * 4 * 60)
+        seconds = min(45 * 86400, max(10 * 86400, req_count * 60))
+        return to_ts - seconds
     return to_ts - 180 * 86400
 
 def get_or_create_symbol_in_strapi(ticker: str) -> Optional[str]:
@@ -438,7 +443,7 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
     resolution_24h = map_timeframe_to_24h(tf)
     to_ts = int(time.time())
     from_ts = get_24h_from_timestamp(resolution_24h, req_count, to_ts)
-    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
+    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={min(req_count, 10000)}"
 
     is_daily_or_weekly = tf.upper() in ["D1", "1D", "D", "W1", "1W", "W"]
     try:
@@ -1358,6 +1363,7 @@ def optimize_strategy_parameters(
 
     best_score = None
     best_combo = None
+    all_candidates = []
 
     for m in ma_period_grid:
         ma_arr = ma_cache[m]
@@ -1408,7 +1414,6 @@ def optimize_strategy_parameters(
                                 tier = 0  # Mẫu quá ít (< 3 lệnh)
 
                             # 3. Điểm đánh giá tổng hợp (Composite Fitness Score):
-                            # Thưởng điểm cho số lượng lệnh mẫu sqrt(closed), PF thực tế và PnL
                             trade_weight = np.sqrt(closed)
                             wr_factor = 1.0 if wr >= 40.0 else max(0.2, wr / 40.0)
                             pnl_weight = max(0.1, pnl) if pnl > 0 else (pnl / 10.0)
@@ -1416,6 +1421,28 @@ def optimize_strategy_parameters(
                             fitness = capped_pf * trade_weight * pnl_weight * wr_factor
 
                             score = (tier, round(fitness, 4), pnl, capped_pf, closed)
+
+                            candidate_data = {
+                                "score": score,
+                                "profitFactor": pf,
+                                "winRate": wr,
+                                "totalTrades": closed,
+                                "winTrades": res.get('win_trades', 0),
+                                "lossTrades": res.get('loss_trades', 0),
+                                "totalPnlPercent": round(pnl, 2),
+                                "grossProfit": round(res.get('gross_profit', 0.0), 2),
+                                "grossLoss": round(res.get('gross_loss', 0.0), 2),
+                                "stPeriod": p,
+                                "stMultiplier": mult,
+                                "maPeriod": m,
+                                "riskReward": rr,
+                                "entryType": entry_t,
+                                "tpSupertrend": tp_st,
+                                "tpRR": tp_rr,
+                                "allowLong": allow_long,
+                                "allowShort": allow_short
+                            }
+                            all_candidates.append(candidate_data)
 
                             if best_score is None or score > best_score:
                                 best_score = score
@@ -1428,6 +1455,20 @@ def optimize_strategy_parameters(
                                     "tp_supertrend": tp_st,
                                     "tp_rr": tp_rr
                                 }
+
+    top_configs = []
+    if all_candidates:
+        all_candidates.sort(key=lambda x: x["score"], reverse=True)
+        seen = set()
+        for c in all_candidates:
+            key = (c["stPeriod"], c["stMultiplier"], c["maPeriod"], c["riskReward"], c["entryType"], c["tpSupertrend"], c["tpRR"])
+            if key not in seen:
+                seen.add(key)
+                item = {k: v for k, v in c.items() if k != "score"}
+                item["rank"] = len(top_configs) + 1
+                top_configs.append(item)
+                if len(top_configs) >= 25:
+                    break
 
     if not best_combo:
         best_combo = {
@@ -1472,6 +1513,7 @@ def optimize_strategy_parameters(
         "totalPnlPercent": full_result.get("summary", {}).get("totalPnlPercent", 0.0),
         "closedTrades": full_result.get("summary", {}).get("closedTrades", 0)
     }
+    full_result["topConfigs"] = top_configs
 
     return full_result
 

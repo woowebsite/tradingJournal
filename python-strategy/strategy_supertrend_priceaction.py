@@ -72,15 +72,20 @@ def get_24h_from_timestamp(resolution_24h: str, req_count: int, to_ts: int) -> i
     if res in ["1D", "D", "1W", "W"]:
         return to_ts - 15 * 365 * 86400
     elif res in ["240", "60"]:
-        return to_ts - max(730 * 86400, req_count * 15 * 3600)
+        seconds = min(730 * 86400, max(60 * 86400, req_count * 3600))
+        return to_ts - seconds
     elif res == "30":
-        return to_ts - max(365 * 86400, req_count * 10 * 1800)
+        seconds = min(365 * 86400, max(45 * 86400, req_count * 1800))
+        return to_ts - seconds
     elif res == "15":
-        return to_ts - max(240 * 86400, req_count * 8 * 900)
+        seconds = min(240 * 86400, max(30 * 86400, req_count * 900))
+        return to_ts - seconds
     elif res == "5":
-        return to_ts - max(150 * 86400, req_count * 6 * 300)
+        seconds = min(240 * 86400, max(20 * 86400, req_count * 300))
+        return to_ts - seconds
     elif res == "1":
-        return to_ts - max(45 * 86400, req_count * 4 * 60)
+        seconds = min(45 * 86400, max(10 * 86400, req_count * 60))
+        return to_ts - seconds
     return to_ts - 180 * 86400
 
 def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
@@ -159,7 +164,7 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
     resolution_24h = map_timeframe_to_24h(tf)
     to_ts = int(time.time())
     from_ts = get_24h_from_timestamp(resolution_24h, req_count, to_ts)
-    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={req_count}"
+    url_24h = f"https://api.24hmoney.vn/tradingview/history?symbol={ticker_clean}&resolution={resolution_24h}&from={from_ts}&to={to_ts}&countback={min(req_count, 10000)}"
     try:
         res = requests.get(url_24h, timeout=15)
         if res.status_code == 200:
@@ -892,6 +897,7 @@ def optimize_price_action_strategy(
 
     best_score = None
     best_combo = None
+    all_candidates = []
 
     for p in st_period_grid:
         for m in st_multiplier_grid:
@@ -1037,6 +1043,32 @@ def optimize_price_action_strategy(
 
                             score = (tier, round(fitness, 4), total_pnl, capped_pf, trades_count)
 
+                            candidate_data = {
+                                "score": score,
+                                "profitFactor": pf,
+                                "winRate": wr,
+                                "totalTrades": trades_count,
+                                "winTrades": win_count,
+                                "lossTrades": loss_count,
+                                "totalPnlPercent": round(total_pnl, 2),
+                                "grossProfit": round(gross_profit, 2),
+                                "grossLoss": round(gross_loss, 2),
+                                "stPeriod": p,
+                                "stMultiplier": m,
+                                "paEngulfing": pa_eng,
+                                "paBd3bu2": pa_bd,
+                                "paIncludeOpposite": pa_inc,
+                                "paPointUp": pa_pt,
+                                "paSwingUp": pa_sw,
+                                "paSummary": pa["name"],
+                                "tpType": tp_t,
+                                "slType": sl_t,
+                                "tpSupertrend": tp_st,
+                                "allowLong": allow_long,
+                                "allowShort": allow_short
+                            }
+                            all_candidates.append(candidate_data)
+
                             if best_score is None or score > best_score:
                                 best_score = score
                                 best_combo = {
@@ -1051,6 +1083,21 @@ def optimize_price_action_strategy(
                                     "sl_type": sl_t,
                                     "tp_supertrend": tp_st,
                                 }
+
+    # Sắp xếp và chọn Top các cấu hình tối ưu tốt nhất
+    top_configs = []
+    if all_candidates:
+        all_candidates.sort(key=lambda x: x["score"], reverse=True)
+        seen = set()
+        for c in all_candidates:
+            key = (c["stPeriod"], c["stMultiplier"], c["paEngulfing"], c["paBd3bu2"], c["paIncludeOpposite"], c["paPointUp"], c["paSwingUp"], c["tpType"], c["slType"], c["tpSupertrend"])
+            if key not in seen:
+                seen.add(key)
+                item = {k: v for k, v in c.items() if k != "score"}
+                item["rank"] = len(top_configs) + 1
+                top_configs.append(item)
+                if len(top_configs) >= 25:
+                    break
 
     if not best_combo:
         best_combo = {
@@ -1103,6 +1150,7 @@ def optimize_price_action_strategy(
         "totalPnlPercent": full_result.get("summary", {}).get("totalPnlPercent", 0.0),
         "closedTrades": full_result.get("summary", {}).get("closedTrades", 0)
     }
+    full_result["topConfigs"] = top_configs
 
     return full_result
 

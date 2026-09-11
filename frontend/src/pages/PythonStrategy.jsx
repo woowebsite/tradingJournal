@@ -30,7 +30,12 @@ import {
     Trash2,
     Save,
     X,
-    Check
+    Check,
+    Trophy,
+    SlidersHorizontal,
+    ArrowUpDown,
+    ChevronUp,
+    ChevronDown
 } from 'lucide-react';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
@@ -102,6 +107,14 @@ const PythonStrategy = () => {
     const [errorMessage, setErrorMessage] = useState('');
     const [activeTab, setActiveTab] = useState('all'); // 'all', 'Open', 'Closed', 'Long', 'Short'
     const [focusDate, setFocusDate] = useState(null);
+
+    // Optimization Leaderboard States
+    const [optimizationModalOpen, setOptimizationModalOpen] = useState(false);
+    const [optimizationConfigs, setOptimizationConfigs] = useState([]);
+    const [activeAppliedConfigRank, setActiveAppliedConfigRank] = useState(null);
+    const [optimizationSortBy, setOptimizationSortBy] = useState('rank'); // 'rank', 'profitFactor', 'winRate', 'totalTrades', 'totalPnlPercent'
+    const [optimizationSortDir, setOptimizationSortDir] = useState('asc'); // 'asc' for rank, 'desc' for metrics
+    const [optimizationSearch, setOptimizationSearch] = useState('');
 
     // Strategy Template States
     const [templates, setTemplates] = useState([]);
@@ -520,7 +533,6 @@ const PythonStrategy = () => {
 
         setOptimizing(true);
         setErrorMessage('');
-        setBestInfo(null);
         try {
             const result = await optimizePythonStrategy({
                 strategyFile: selectedStrategyFile,
@@ -535,40 +547,18 @@ const PythonStrategy = () => {
             if (result?.error) {
                 setErrorMessage(result.error);
             } else {
-                if (result?.bestParams) {
-                    const bp = result.bestParams;
-                    if (isVWAP) {
-                        if (bp.maPeriod !== undefined) setVwapMaPeriod(bp.maPeriod);
-                        if (bp.tpTarget !== undefined) setVwapTpTarget(bp.tpTarget);
-                        if (bp.mult2 !== undefined) setMult2(bp.mult2);
-                        if (bp.mult3 !== undefined) setMult3(bp.mult3);
-                        if (bp.vwapAnchor !== undefined) setVwapAnchor(bp.vwapAnchor);
-                    } else if (isPriceAction) {
-                        if (bp.stPeriod !== undefined) setStPeriod(bp.stPeriod);
-                        if (bp.stMultiplier !== undefined) setStMultiplier(bp.stMultiplier);
-                        if (bp.paEngulfing !== undefined) setPaEngulfing(bp.paEngulfing);
-                        if (bp.paBd3bu2 !== undefined) setPaBd3bu2(bp.paBd3bu2);
-                        if (bp.paIncludeOpposite !== undefined) setPaIncludeOpposite(bp.paIncludeOpposite);
-                        if (bp.paPointUp !== undefined) setPaPointUp(bp.paPointUp);
-                        if (bp.paSwingUp !== undefined) setPaSwingUp(bp.paSwingUp);
-                        if (bp.tpType !== undefined) setTpType(bp.tpType);
-                        if (bp.slType !== undefined) setSlType(bp.slType);
-                        if (bp.tpSupertrend !== undefined) setTpSupertrend(bp.tpSupertrend);
-                    } else {
-                        if (bp.stPeriod !== undefined) setStPeriod(bp.stPeriod);
-                        if (bp.stMultiplier !== undefined) setStMultiplier(bp.stMultiplier);
-                        if (bp.maPeriod !== undefined) setMaPeriod(bp.maPeriod);
-                        if (bp.riskReward !== undefined) setRiskReward(bp.riskReward);
-                        if (bp.entryType !== undefined) setEntryType(bp.entryType);
-                        if (bp.tpSupertrend !== undefined) setTpSupertrend(bp.tpSupertrend);
-                        if (bp.tpRR !== undefined) setTpRR(bp.tpRR);
-                    }
-                    setBestInfo(bp);
+                const topConfigs = result?.topConfigs || (result?.bestParams ? [{ ...result.bestParams, rank: 1 }] : []);
+                setOptimizationConfigs(topConfigs);
+                
+                if (topConfigs.length > 0) {
+                    setOptimizationModalOpen(true);
+                } else {
+                    setErrorMessage('Không tìm thấy cấu hình tối ưu phù hợp với dữ liệu hiện tại.');
                 }
+
                 if (result?.candles?.length) {
                     setCountback(result.candles.length);
                 }
-                setScanResult(result);
                 if (ticker !== selectedSymbol) {
                     setSelectedSymbol(ticker);
                 }
@@ -580,7 +570,170 @@ const PythonStrategy = () => {
         } finally {
             setOptimizing(false);
         }
-    }, [selectedStrategyFile, selectedSymbol, allowLong, allowShort, isVWAP, isPriceAction, timeframe, vwapAnchor]);
+    }, [selectedStrategyFile, selectedSymbol, allowLong, allowShort, timeframe, vwapAnchor]);
+
+    // 4.3 Hàm áp dụng cấu hình được chọn từ Bảng Tối Ưu (Optimization Leaderboard)
+    const handleApplyOptimizeConfig = useCallback(async (config) => {
+        if (!config) return;
+        const ticker = String(selectedSymbol || '').trim().toUpperCase();
+        if (!ticker) return;
+
+        // Cập nhật các trường state tương ứng
+        if (isVWAP) {
+            if (config.maPeriod !== undefined) setVwapMaPeriod(config.maPeriod);
+            if (config.tpTarget !== undefined) setVwapTpTarget(config.tpTarget);
+            if (config.mult2 !== undefined) setMult2(config.mult2);
+            if (config.mult3 !== undefined) setMult3(config.mult3);
+            if (config.vwapAnchor !== undefined) setVwapAnchor(config.vwapAnchor);
+            if (config.allowLong !== undefined) setAllowLong(config.allowLong);
+            if (config.allowShort !== undefined) setAllowShort(config.allowShort);
+        } else if (isPriceAction) {
+            if (config.stPeriod !== undefined) setStPeriod(config.stPeriod);
+            if (config.stMultiplier !== undefined) setStMultiplier(config.stMultiplier);
+            if (config.paEngulfing !== undefined) setPaEngulfing(Boolean(config.paEngulfing));
+            if (config.paBd3bu2 !== undefined) setPaBd3bu2(Boolean(config.paBd3bu2));
+            if (config.paIncludeOpposite !== undefined) setPaIncludeOpposite(Boolean(config.paIncludeOpposite));
+            if (config.paPointUp !== undefined) setPaPointUp(Boolean(config.paPointUp));
+            if (config.paSwingUp !== undefined) setPaSwingUp(Boolean(config.paSwingUp));
+            if (config.tpType !== undefined) setTpType(config.tpType);
+            if (config.slType !== undefined) setSlType(config.slType);
+            if (config.tpSupertrend !== undefined) setTpSupertrend(Boolean(config.tpSupertrend));
+            if (config.allowLong !== undefined) setAllowLong(config.allowLong);
+            if (config.allowShort !== undefined) setAllowShort(config.allowShort);
+        } else {
+            if (config.stPeriod !== undefined) setStPeriod(config.stPeriod);
+            if (config.stMultiplier !== undefined) setStMultiplier(config.stMultiplier);
+            if (config.maPeriod !== undefined) setMaPeriod(config.maPeriod);
+            if (config.riskReward !== undefined) setRiskReward(config.riskReward);
+            if (config.entryType !== undefined) setEntryType(config.entryType);
+            if (config.tpSupertrend !== undefined) setTpSupertrend(Boolean(config.tpSupertrend));
+            if (config.tpRR !== undefined) setTpRR(Boolean(config.tpRR));
+            if (config.allowLong !== undefined) setAllowLong(config.allowLong);
+            if (config.allowShort !== undefined) setAllowShort(config.allowShort);
+        }
+
+        setActiveAppliedConfigRank(config.rank);
+        setBestInfo(config);
+        setOptimizationModalOpen(false);
+
+        // Chạy ngay scan với thông số vừa áp dụng để hiển thị kết quả và vẽ chart
+        let payload;
+        if (isVWAP) {
+            payload = {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe,
+                countback,
+                maPeriod: parseInt(config.maPeriod ?? vwapMaPeriod) || 9,
+                vwapAnchor: config.vwapAnchor ?? vwapAnchor,
+                mult1: parseFloat(mult1) || 1.0,
+                mult2: parseFloat(config.mult2 ?? mult2) || 2.0,
+                mult3: parseFloat(config.mult3 ?? mult3) || 3.0,
+                tpTarget: config.tpTarget ?? vwapTpTarget,
+                allowLong: config.allowLong ?? allowLong,
+                allowShort: config.allowShort ?? allowShort,
+            };
+        } else if (isPriceAction) {
+            payload = {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe,
+                countback,
+                stPeriod: parseInt(config.stPeriod ?? stPeriod) || 10,
+                stMultiplier: parseFloat(config.stMultiplier ?? stMultiplier) || 3.0,
+                allowLong: config.allowLong ?? allowLong,
+                allowShort: config.allowShort ?? allowShort,
+                tpSupertrend: Boolean(config.tpSupertrend ?? tpSupertrend),
+                paEngulfing: Boolean(config.paEngulfing ?? paEngulfing),
+                paBd3bu2: Boolean(config.paBd3bu2 ?? paBd3bu2),
+                paIncludeOpposite: Boolean(config.paIncludeOpposite ?? paIncludeOpposite),
+                paPointUp: Boolean(config.paPointUp ?? paPointUp),
+                paSwingUp: Boolean(config.paSwingUp ?? paSwingUp),
+                tpType: config.tpType ?? tpType,
+                slType: config.slType ?? slType,
+                customTpVal: parseFloat(customTpVal) || 0,
+                customSlVal: parseFloat(customSlVal) || 0,
+            };
+        } else {
+            payload = {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe,
+                countback,
+                rr: parseFloat(config.riskReward ?? riskReward) || 1.5,
+                entryType: config.entryType ?? entryType,
+                stPeriod: parseInt(config.stPeriod ?? stPeriod) || 10,
+                stMultiplier: parseFloat(config.stMultiplier ?? stMultiplier) || 3.0,
+                maPeriod: parseInt(config.maPeriod ?? maPeriod) || 288,
+                allowLong: config.allowLong ?? allowLong,
+                allowShort: config.allowShort ?? allowShort,
+                tpSupertrend: Boolean(config.tpSupertrend ?? tpSupertrend),
+                tpRR: Boolean(config.tpRR ?? tpRR),
+            };
+        }
+
+        setScanning(true);
+        setErrorMessage('');
+        try {
+            const scanRes = await scanPythonStrategy(payload);
+            if (scanRes?.error) {
+                setErrorMessage(scanRes.error);
+            } else {
+                setScanResult(scanRes);
+            }
+        } catch (err) {
+            console.error('Failed to run scan with applied config:', err);
+        } finally {
+            setScanning(false);
+        }
+    }, [selectedSymbol, isVWAP, isPriceAction, selectedStrategyFile, timeframe, countback, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, allowLong, allowShort, stPeriod, stMultiplier, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, tpType, slType, customTpVal, customSlVal, riskReward, entryType, maPeriod, tpSupertrend, tpRR]);
+
+    // 4.4 Danh sách cấu hình tối ưu đã qua bộ lọc & sắp xếp
+    const filteredOptimizationConfigs = useMemo(() => {
+        if (!optimizationConfigs || optimizationConfigs.length === 0) return [];
+        let list = [...optimizationConfigs];
+
+        if (optimizationSearch.trim()) {
+            const q = optimizationSearch.trim().toLowerCase();
+            list = list.filter(item => {
+                const paText = String(item.paSummary || '').toLowerCase();
+                const tpText = String(item.tpType || '').toLowerCase();
+                const slText = String(item.slType || '').toLowerCase();
+                const entryText = String(item.entryType || '').toLowerCase();
+                const anchorText = String(item.vwapAnchor || '').toLowerCase();
+                const rankText = `#${item.rank}`;
+                return paText.includes(q) || tpText.includes(q) || slText.includes(q) || entryText.includes(q) || anchorText.includes(q) || rankText.includes(q);
+            });
+        }
+
+        list.sort((a, b) => {
+            let valA, valB;
+            if (optimizationSortBy === 'profitFactor') {
+                valA = Number(a.profitFactor || 0);
+                valB = Number(b.profitFactor || 0);
+            } else if (optimizationSortBy === 'winRate') {
+                valA = Number(a.winRate || 0);
+                valB = Number(b.winRate || 0);
+            } else if (optimizationSortBy === 'totalTrades') {
+                valA = Number(a.totalTrades || 0);
+                valB = Number(b.totalTrades || 0);
+            } else if (optimizationSortBy === 'totalPnlPercent') {
+                valA = Number(a.totalPnlPercent || 0);
+                valB = Number(b.totalPnlPercent || 0);
+            } else {
+                valA = Number(a.rank || 0);
+                valB = Number(b.rank || 0);
+            }
+
+            if (optimizationSortDir === 'asc') {
+                return valA > valB ? 1 : (valA < valB ? -1 : 0);
+            } else {
+                return valA < valB ? 1 : (valA > valB ? -1 : 0);
+            }
+        });
+
+        return list;
+    }, [optimizationConfigs, optimizationSearch, optimizationSortBy, optimizationSortDir]);
 
     // 4.2 Hàm reset các thông số về mặc định (Default)
     const handleResetDefault = useCallback(() => {
@@ -2145,11 +2298,23 @@ const PythonStrategy = () => {
                             <span>Save Config</span>
                         </button>
 
+                        {/* Button BXH Tối Ưu - Hiển thị lại bảng leaderboard nếu đã có kết quả optimize */}
+                        {optimizationConfigs.length > 0 && (
+                            <button
+                                onClick={() => setOptimizationModalOpen(true)}
+                                title="Xem lại bảng danh sách các cấu hình tối ưu đã tìm được"
+                                className="h-[42px] bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border border-amber-500/40 hover:border-amber-500/60 active:scale-[0.98] font-semibold rounded-xl px-3.5 sm:px-4 flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer flex-1 sm:flex-none"
+                            >
+                                <Trophy size={16} className="text-amber-400" />
+                                <span>BXH Tối Ưu ({optimizationConfigs.length})</span>
+                            </button>
+                        )}
+
                         {/* Button Optimize - Tìm tham số có Profit Factor cao nhất */}
                         <button
                             onClick={() => handleOptimize(selectedSymbol)}
                             disabled={scanning || optimizing || !selectedSymbol}
-                            title="Tự động tìm bộ tham số mang lại Profit Factor cao nhất"
+                            title="Tự động tìm và liệt kê các bộ tham số tối ưu nhất"
                             className="h-[42px] bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-white font-bold rounded-xl px-4 sm:px-5 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
                         >
                             {optimizing ? (
@@ -2195,10 +2360,13 @@ const PythonStrategy = () => {
                             <Sparkles size={18} />
                         </div>
                         <div className="text-xs leading-relaxed">
-                            <span className="font-bold text-amber-300">Đã tìm thấy & áp dụng bộ tham số tối ưu nhất:</span>
+                            <span className="font-bold text-amber-300">
+                                {bestInfo.rank ? `Đang áp dụng cấu hình Top #${bestInfo.rank}:` : 'Đang áp dụng cấu hình tối ưu:'}
+                            </span>
                             <span className="ml-1.5 inline-block text-gray-300">
                                 Profit Factor: <strong className="text-emerald-400 text-sm font-bold">{bestInfo.profitFactor}</strong>
-                                {' '}| Win Rate: <strong className="text-sky-300 font-bold">{bestInfo.winRate}%</strong> ({bestInfo.closedTrades} lệnh đóng)
+                                {' '}| Win Rate: <strong className="text-sky-300 font-bold">{bestInfo.winRate}%</strong> ({bestInfo.totalTrades || bestInfo.closedTrades} lệnh)
+                                {' '}| PnL: <strong className={Number(bestInfo.totalPnlPercent || 0) >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{bestInfo.totalPnlPercent > 0 ? '+' : ''}{bestInfo.totalPnlPercent}%</strong>
                                 {isVWAP ? (
                                     <>
                                         {' '}| <span className="font-mono text-cyan-300">VWAP + MA({bestInfo.maPeriod}) | Band 2 ({bestInfo.mult2}σ) | Band 3 ({bestInfo.mult3}σ)</span>
@@ -2207,6 +2375,7 @@ const PythonStrategy = () => {
                                 ) : isPriceAction ? (
                                     <>
                                         {' '}| <span className="font-mono text-cyan-300">ST({bestInfo.stPeriod}, {bestInfo.stMultiplier})</span>
+                                        {' '}| <span className="text-purple-300 font-medium">PA: {bestInfo.paSummary || 'Active'}</span>
                                         {' '}| TP: <span className="text-emerald-300 font-semibold">{bestInfo.tpType || 'P50'}</span>
                                         {' '}| SL: <span className="text-rose-300 font-semibold">{bestInfo.slType || 'P75'}</span>
                                     </>
@@ -2220,13 +2389,25 @@ const PythonStrategy = () => {
                             </span>
                         </div>
                     </div>
-                    <button
-                        onClick={() => setBestInfo(null)}
-                        className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition cursor-pointer shrink-0 text-xs"
-                        title="Đóng thông báo"
-                    >
-                        ✕
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                        {optimizationConfigs.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setOptimizationModalOpen(true)}
+                                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                            >
+                                <Trophy size={13} />
+                                <span>Xem BXH ({optimizationConfigs.length})</span>
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setBestInfo(null)}
+                            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition cursor-pointer text-xs"
+                            title="Đóng thông báo"
+                        >
+                            ✕
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -2861,6 +3042,325 @@ const PythonStrategy = () => {
                                 type="button"
                                 onClick={() => setInsightModalOpen(false)}
                                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-xl transition cursor-pointer"
+                            >
+                                Đóng
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Bảng Xếp Hạng Cấu Hình Tối Ưu (Optimization Leaderboard Modal) */}
+            {optimizationModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-6 animate-in fade-in duration-200">
+                    <div className="bg-gray-900 border border-gray-700/80 rounded-2xl w-full max-w-6xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden ring-1 ring-white/10">
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-800 bg-gray-950/80">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 shrink-0">
+                                    <Trophy size={22} />
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="text-base sm:text-lg font-bold text-gray-100 flex items-center gap-2">
+                                            <span>Bảng Xếp Hạng Cấu Hình Tối Ưu</span>
+                                            <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-semibold">
+                                                {filteredOptimizationConfigs.length} cấu hình
+                                            </span>
+                                        </h3>
+                                    </div>
+                                    <p className="text-xs text-gray-400 flex flex-wrap items-center gap-2 mt-0.5 font-mono">
+                                        <span className="text-emerald-400 font-bold">{selectedSymbol}</span>
+                                        <span>•</span>
+                                        <span className="text-amber-400 font-bold">{timeframe}</span>
+                                        <span>•</span>
+                                        <span className="text-gray-300">{selectedStrategyFile}</span>
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setOptimizationModalOpen(false)}
+                                className="p-2 text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition cursor-pointer"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Filter & Search Bar */}
+                        <div className="p-3 sm:p-4 border-b border-gray-800/80 bg-gray-950/40 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                            {/* Search Input */}
+                            <div className="relative flex-1 max-w-md">
+                                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Tìm kiếm theo PA (Engulfing, BD3BU2), TP (P50), SL (P75)..."
+                                    value={optimizationSearch}
+                                    onChange={(e) => setOptimizationSearch(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-700/80 hover:border-gray-600 rounded-xl pl-9 pr-3 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition font-medium"
+                                />
+                                {optimizationSearch && (
+                                    <button
+                                        onClick={() => setOptimizationSearch('')}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-0.5 rounded cursor-pointer"
+                                    >
+                                        <X size={13} />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Sort Filter Tabs */}
+                            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                                <span className="text-xs text-gray-400 shrink-0 mr-1 hidden sm:inline">Sắp xếp:</span>
+                                {[
+                                    { key: 'rank', label: 'Hạng (Rank)' },
+                                    { key: 'profitFactor', label: 'Profit Factor' },
+                                    { key: 'winRate', label: 'Win Rate' },
+                                    { key: 'totalTrades', label: 'Tổng lệnh' },
+                                    { key: 'totalPnlPercent', label: 'Tổng % PnL' }
+                                ].map(sortItem => {
+                                    const isActive = optimizationSortBy === sortItem.key;
+                                    return (
+                                        <button
+                                            key={sortItem.key}
+                                            type="button"
+                                            onClick={() => {
+                                                if (isActive) {
+                                                    setOptimizationSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+                                                } else {
+                                                    setOptimizationSortBy(sortItem.key);
+                                                    setOptimizationSortDir(sortItem.key === 'rank' ? 'asc' : 'desc');
+                                                }
+                                            }}
+                                            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition cursor-pointer whitespace-nowrap ${
+                                                isActive
+                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
+                                                    : 'bg-gray-800/80 text-gray-400 hover:text-gray-200 border border-gray-700/60 hover:border-gray-600'
+                                            }`}
+                                        >
+                                            <span>{sortItem.label}</span>
+                                            {isActive && (
+                                                optimizationSortDir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Modal Body: Table */}
+                        <div className="p-3 sm:p-4 overflow-y-auto flex-1 custom-scrollbar">
+                            {filteredOptimizationConfigs.length === 0 ? (
+                                <div className="py-16 text-center text-gray-400 space-y-2">
+                                    <AlertTriangle size={32} className="mx-auto text-amber-400/80" />
+                                    <p className="text-sm font-semibold text-gray-300">Không tìm thấy cấu hình nào khớp với bộ lọc.</p>
+                                    <p className="text-xs text-gray-500">Vui lòng thử thay đổi từ khóa tìm kiếm hoặc bấm chạy lại Optimize.</p>
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto rounded-xl border border-gray-800">
+                                    <table className="w-full text-left border-collapse text-xs">
+                                        <thead>
+                                            <tr className="bg-gray-950/80 text-gray-400 border-b border-gray-800 font-semibold uppercase tracking-wider text-[10px]">
+                                                <th className="py-3 px-3.5 text-center w-14"># Hạng</th>
+                                                <th className="py-3 px-3.5 min-w-[240px]">Thông số Cấu hình</th>
+                                                <th className="py-3 px-3 text-center">Profit Factor</th>
+                                                <th className="py-3 px-3 text-center min-w-[120px]">Tỷ Lệ Thắng (Win Rate)</th>
+                                                <th className="py-3 px-3 text-center">Tổng Số Lệnh</th>
+                                                <th className="py-3 px-3 text-right">Tổng PnL (%)</th>
+                                                <th className="py-3 px-3 text-right">Gross Profit / Loss</th>
+                                                <th className="py-3 px-3.5 text-center w-28">Hành động</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-800/60 bg-gray-900/40">
+                                            {filteredOptimizationConfigs.map((item, index) => {
+                                                const isApplied = activeAppliedConfigRank === item.rank;
+                                                const pfNum = Number(item.profitFactor || 0);
+                                                const wrNum = Number(item.winRate || 0);
+                                                const pnlNum = Number(item.totalPnlPercent || 0);
+
+                                                return (
+                                                    <tr
+                                                        key={item.rank || index}
+                                                        className={`transition hover:bg-gray-800/50 ${
+                                                            isApplied ? 'bg-amber-500/10 hover:bg-amber-500/15' : ''
+                                                        }`}
+                                                    >
+                                                        {/* # Rank */}
+                                                        <td className="py-3 px-3.5 text-center font-mono">
+                                                            {item.rank === 1 ? (
+                                                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold shadow-sm shadow-amber-500/20">
+                                                                    🥇 #1
+                                                                </span>
+                                                            ) : item.rank === 2 ? (
+                                                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-slate-400/20 text-slate-200 border border-slate-400/50 font-bold">
+                                                                    🥈 #2
+                                                                </span>
+                                                            ) : item.rank === 3 ? (
+                                                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-amber-700/20 text-amber-400 border border-amber-700/50 font-bold">
+                                                                    🥉 #3
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-gray-400 font-semibold">
+                                                                    #{item.rank}
+                                                                </span>
+                                                            )}
+                                                        </td>
+
+                                                        {/* Parameters */}
+                                                        <td className="py-3 px-3.5">
+                                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                                {isVWAP ? (
+                                                                    <>
+                                                                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
+                                                                            MA({item.maPeriod})
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[11px]">
+                                                                            {item.vwapAnchor?.toUpperCase()}
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px]">
+                                                                            TP: {item.tpTarget === 'tp1_vwap' ? 'VWAP' : (item.tpTarget === 'tp2_upper2' ? 'Upper 2' : 'Upper 3')}
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono text-[11px]">
+                                                                            ({item.mult2}σ, {item.mult3}σ)
+                                                                        </span>
+                                                                    </>
+                                                                ) : isPriceAction ? (
+                                                                    <>
+                                                                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
+                                                                            ST({item.stPeriod}, {item.stMultiplier})
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium text-[11px]" title="Price Action Combo">
+                                                                            {item.paSummary || 'Top PA'}
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-medium text-[11px]">
+                                                                            TP: {item.tpType}
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium text-[11px]">
+                                                                            SL: {item.slType}
+                                                                        </span>
+                                                                        {item.tpSupertrend && (
+                                                                            <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px]">
+                                                                                TP ST
+                                                                            </span>
+                                                                        )}
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
+                                                                            ST({item.stPeriod}, {item.stMultiplier}) + MA({item.maPeriod})
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px]">
+                                                                            {item.riskReward}R
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px]">
+                                                                            {item.entryType === 'st_reversal' ? 'ST Đảo chiều' : 'Nến đóng'}
+                                                                        </span>
+                                                                        {item.tpSupertrend && (
+                                                                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">
+                                                                                TP ST
+                                                                            </span>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </td>
+
+                                                        {/* Profit Factor */}
+                                                        <td className="py-3 px-3 text-center">
+                                                            <span
+                                                                className={`inline-block px-2.5 py-1 rounded-lg font-mono font-bold text-xs border ${
+                                                                    pfNum >= 2.0
+                                                                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                                                                        : pfNum >= 1.3
+                                                                        ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                                                        : pfNum >= 1.0
+                                                                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                                                        : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                                                }`}
+                                                            >
+                                                                {pfNum.toFixed(2)}
+                                                            </span>
+                                                        </td>
+
+                                                        {/* Win Rate */}
+                                                        <td className="py-3 px-3">
+                                                            <div className="flex flex-col items-center gap-1">
+                                                                <span className="font-mono font-bold text-gray-200">
+                                                                    {wrNum.toFixed(1)}%
+                                                                </span>
+                                                                <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden flex">
+                                                                    <div
+                                                                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                                                                        style={{ width: `${Math.min(wrNum, 100)}%` }}
+                                                                    />
+                                                                </div>
+                                                                <span className="text-[10px] text-gray-400 font-mono">
+                                                                    {item.winTrades}W / {item.lossTrades}L
+                                                                </span>
+                                                            </div>
+                                                        </td>
+
+                                                        {/* Total Trades */}
+                                                        <td className="py-3 px-3 text-center font-mono font-semibold text-gray-200">
+                                                            {item.totalTrades}
+                                                        </td>
+
+                                                        {/* Total PnL (%) */}
+                                                        <td className="py-3 px-3 text-right font-mono font-bold">
+                                                            <span className={pnlNum >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                                                {pnlNum > 0 ? '+' : ''}{pnlNum.toFixed(2)}%
+                                                            </span>
+                                                        </td>
+
+                                                        {/* Gross Profit / Loss */}
+                                                        <td className="py-3 px-3 text-right font-mono text-[11px] text-gray-400">
+                                                            <div className="text-emerald-400">+{Number(item.grossProfit || 0).toFixed(2)}%</div>
+                                                            <div className="text-rose-400">-{Number(item.grossLoss || 0).toFixed(2)}%</div>
+                                                        </td>
+
+                                                        {/* Action Button */}
+                                                        <td className="py-3 px-3.5 text-center">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleApplyOptimizeConfig(item)}
+                                                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 w-full cursor-pointer shadow-sm ${
+                                                                    isApplied
+                                                                        ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
+                                                                        : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-amber-500/25 active:scale-95'
+                                                                }`}
+                                                            >
+                                                                {isApplied ? (
+                                                                    <>
+                                                                        <Check size={13} className="text-emerald-400" />
+                                                                        <span>Đang dùng</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <Sparkles size={13} />
+                                                                        <span>Áp dụng</span>
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-3.5 sm:p-4 bg-gray-950/80 border-t border-gray-800 flex items-center justify-between text-xs text-gray-400">
+                            <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                                <span>Bấm <b>"Áp dụng"</b> để nạp bộ tham số vào form chiến lược & chạy quét kiểm tra trên biểu đồ.</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setOptimizationModalOpen(false)}
+                                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-xl text-xs font-semibold transition cursor-pointer"
                             >
                                 Đóng
                             </button>
