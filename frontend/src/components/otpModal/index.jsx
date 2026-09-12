@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { Key } from 'lucide-react';
 import { getTCBSToken } from '../../services/tcbsJournal';
+import useEscapeKey from '../../hooks/useEscapeKey';
 
 const OtpModal = ({ isOpen, onClose, onSuccess, allowClose }) => {
     const [otp, setOtp] = useState('');
     const [otpLoading, setOtpLoading] = useState(false);
     const [otpError, setOtpError] = useState(null);
+
+    useEscapeKey(allowClose ? onClose : null, isOpen);
+
+    if (!isOpen) return null;
 
     const handleOtpSubmit = async (e) => {
         e.preventDefault();
@@ -13,7 +18,6 @@ const OtpModal = ({ isOpen, onClose, onSuccess, allowClose }) => {
             setOtpLoading(true);
             setOtpError(null);
             const tokenResponse = await getTCBSToken(otp);
-            // Handling based on user's manual change: tokenResponse.token vs access_token
             const tokenStr = typeof tokenResponse === 'object' ? (tokenResponse.token || tokenResponse.access_token) : tokenResponse;
             
             if (!tokenStr) throw new Error("Could not retrieve access token");
@@ -28,10 +32,13 @@ const OtpModal = ({ isOpen, onClose, onSuccess, allowClose }) => {
         }
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={(e) => {
+                if (allowClose && e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 w-full max-w-sm shadow-xl">
                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                     <Key className="text-blue-400" /> TCBS Authentication
@@ -54,17 +61,17 @@ const OtpModal = ({ isOpen, onClose, onSuccess, allowClose }) => {
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="px-4 py-2 text-gray-400 hover:text-white"
+                                className="px-4 py-2 text-gray-400 hover:text-white cursor-pointer"
                             >
                                 Cancel
                             </button>
                         )}
                         <button
                             type="submit"
-                            disabled={otpLoading || !otp}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition"
+                            disabled={otpLoading}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer"
                         >
-                            {otpLoading ? 'Verifying...' : 'Submit OTP'}
+                            {otpLoading ? 'Submitting...' : 'Submit OTP'}
                         </button>
                     </div>
                 </form>

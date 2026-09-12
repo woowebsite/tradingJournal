@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import useEscapeKey from '../hooks/useEscapeKey';
 import { Save, X, Tag, Edit2, Plus, BrainCircuit, AlertCircle } from 'lucide-react';
 
 const DEFAULT_FORM = {
@@ -73,6 +74,8 @@ const SymbolModal = ({
         }
     }, [isOpen, symbol, defaultMarketId]);
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     const handleChange = (e) => {
@@ -117,7 +120,12 @@ const SymbolModal = ({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl flex flex-col max-h-[90vh]">
                 {/* Modal Header */}
                 <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900/60 px-6 py-4">

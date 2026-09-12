@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X, Save } from 'lucide-react';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const getRelationId = (relation) => relation?.documentId || relation?.id || '';
 
@@ -39,10 +40,17 @@ const ScoredModal = ({ isOpen, onClose, onSubmit, initialData, markets, defaultM
         onSubmit(formData);
     };
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/40">
                 <div className="flex items-start justify-between border-b border-gray-800 bg-gray-800/40 p-5">
                     <div>

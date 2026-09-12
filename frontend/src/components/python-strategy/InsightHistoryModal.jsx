@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Bookmark, X, RefreshCw, ExternalLink, Check } from 'lucide-react';
 import { formatNumber } from '../../utils/formatNumber';
 import dayjs from 'dayjs';
+import useEscapeKey from '../../hooks/useEscapeKey';
 
 const InsightHistoryModal = ({
     isOpen,
@@ -13,10 +14,17 @@ const InsightHistoryModal = ({
     symbolInsightStats,
     onSelectInsightItem
 }) => {
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-2xl max-h-[85vh] shadow-2xl flex flex-col overflow-hidden">
                 {/* Modal Header */}
                 <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-gray-900/90">

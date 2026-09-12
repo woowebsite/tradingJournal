@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import useEscapeKey from '../../hooks/useEscapeKey';
 import {
     BookmarkCheck,
     X,
@@ -158,10 +159,17 @@ const StrategyTemplatesListModal = ({
         return list;
     }, [symbolTemplates, search, sortBy, sortDir]);
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-3 sm:p-5 animate-in fade-in duration-200">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-3 sm:p-5 animate-in fade-in duration-200"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 border border-gray-700/80 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
                 {/* 1. Header */}
                 <div className="p-4 sm:p-5 border-b border-gray-700/80 flex items-center justify-between bg-gray-900/60 shrink-0">

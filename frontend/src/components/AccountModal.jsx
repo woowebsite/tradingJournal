@@ -81,6 +81,10 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
         }
     }, [account, isOpen]);
 
+    useEscapeKey(onClose, isOpen);
+
+    if (!isOpen) return null;
+
     const handleSubmit = (e) => {
         e.preventDefault();
         const normalizeRelation = (value) => (value === '' || value === undefined ? null : value);
@@ -94,18 +98,19 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
         });
     };
 
-    useEscapeKey(onClose, isOpen);
-
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 rounded-2xl w-full max-w-md border border-gray-700 shadow-xl">
                 <div className="flex justify-between items-center p-6 border-b border-gray-700">
                     <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
                         {account ? 'Edit Account' : 'New Account'}
                     </h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition">
+                    <button onClick={onClose} className="text-gray-400 hover:text-white transition cursor-pointer">
                         <X size={24} />
                     </button>
                 </div>
@@ -226,7 +231,7 @@ const AccountModal = ({ isOpen, onClose, onSubmit, account }) => {
 
                     <button
                         type="submit"
-                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-500/20 mt-6"
+                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-500/20 mt-6 cursor-pointer"
                     >
                         {account ? 'Save Changes' : 'Create Account'}
                     </button>
