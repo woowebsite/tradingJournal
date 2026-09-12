@@ -90,10 +90,17 @@ export const AccountProvider = ({ children }) => {
 
         return symbols.filter(s => {
             if (selectedAccount?.market) {
-                const accountMarketId = selectedAccount.market.id || selectedAccount.market.documentId;
-                if (s.market && (s.market.id === accountMarketId || s.market.documentId === accountMarketId)) return true;
+                const accountMarketId = String(selectedAccount.market.documentId || selectedAccount.market.id || '');
+                if (!accountMarketId) return true;
+
+                const symMarketId = String(s.market?.documentId || s.market?.id || (typeof s.market === 'string' || typeof s.market === 'number' ? s.market : '') || '');
+                if (symMarketId && symMarketId === accountMarketId) return true;
+
                 if (s.markets && Array.isArray(s.markets)) {
-                    return s.markets.some(m => m.id === accountMarketId || m.documentId === accountMarketId);
+                    return s.markets.some(m => {
+                        const mId = String(m?.documentId || m?.id || (typeof m === 'string' || typeof m === 'number' ? m : '') || '');
+                        return mId && mId === accountMarketId;
+                    });
                 }
                 return false;
             }
@@ -104,19 +111,19 @@ export const AccountProvider = ({ children }) => {
     const defaultWatchlist = useMemo(() => {
         if (!watchlists || watchlists.length === 0 || !selectedAccount) return null;
         return watchlists.find(wl => {
-            const accId = wl.account?.documentId || wl.account?.id;
-            const currentAccId = selectedAccount.documentId || selectedAccount.id;
-            // Match account ID and checks isDefault
+            const accId = String(wl.account?.documentId || wl.account?.id || '');
+            const currentAccId = String(selectedAccount.documentId || selectedAccount.id || '');
             return (accId === currentAccId) && wl.isDefault === true;
         });
     }, [watchlists, selectedAccount]);
 
     const accountWatchlists = useMemo(() => {
         if (!watchlists || !selectedAccount) return [];
-        const currentAccountId = selectedAccount.documentId || selectedAccount.id;
-        return watchlists.filter(watchlist =>
-            (watchlist.account?.documentId || watchlist.account?.id) === currentAccountId
-        );
+        const currentAccountId = String(selectedAccount.documentId || selectedAccount.id || '');
+        return watchlists.filter(watchlist => {
+            const accId = String(watchlist.account?.documentId || watchlist.account?.id || '');
+            return accId === currentAccountId;
+        });
     }, [watchlists, selectedAccount]);
 
     useEffect(() => {

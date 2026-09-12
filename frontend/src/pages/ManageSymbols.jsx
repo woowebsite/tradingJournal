@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, createSymbol, updateSymbol, deleteSymbol } from '../features/symbolSlice';
-import { Edit2, Trash2, Tag, History, BrainCircuit, Plus, Search } from 'lucide-react';
+import { Edit2, Trash2, Tag, History, BrainCircuit, Plus, Search, Filter } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { deleteAllHistories } from '../features/marketSlice';
 import { getStrategyTemplates } from '../services/strategyTemplate';
+import api from '../services/api';
 import SymbolModal from '../components/SymbolModal';
 
 const ManageSymbols = () => {
@@ -13,16 +14,41 @@ const ManageSymbols = () => {
     const { selectedAccount } = useAccount();
 
     const [templates, setTemplates] = useState([]);
+    const [markets, setMarkets] = useState([]);
+    const [selectedMarketId, setSelectedMarketId] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSymbol, setEditingSymbol] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const initializedMarketRef = useRef(false);
 
+    // Fetch list of all markets
     useEffect(() => {
-        const marketId = selectedAccount?.market?.documentId || selectedAccount?.market?.id;
-        dispatch(fetchSymbols(marketId));
-    }, [dispatch, selectedAccount?.market]);
+        api.get('/markets?sort=Name:asc&pagination[pageSize]=1000')
+            .then(res => {
+                const list = res?.data?.data || [];
+                setMarkets(list);
+            })
+            .catch(err => console.error('Failed to load markets:', err));
+    }, []);
 
+    // Initialize market filter based on current account's market on first load
+    useEffect(() => {
+        if (!initializedMarketRef.current && selectedAccount?.market) {
+            const accMarketId = selectedAccount.market.documentId || selectedAccount.market.id || '';
+            if (accMarketId) {
+                setSelectedMarketId(String(accMarketId));
+                initializedMarketRef.current = true;
+            }
+        }
+    }, [selectedAccount?.market]);
+
+    // Fetch symbols based on selected market filter
+    useEffect(() => {
+        dispatch(fetchSymbols(selectedMarketId || null));
+    }, [dispatch, selectedMarketId]);
+
+    // Fetch strategy templates
     useEffect(() => {
         getStrategyTemplates()
             .then(data => setTemplates(data || []))
@@ -47,8 +73,12 @@ const ManageSymbols = () => {
     const handleModalSubmit = async (payload, editingId) => {
         setIsSubmitting(true);
         try {
-            if (selectedAccount?.market) {
-                payload.market = selectedAccount.market.documentId || selectedAccount.market.id;
+            if (!payload.market) {
+                if (selectedMarketId) {
+                    payload.market = selectedMarketId;
+                } else if (selectedAccount?.market) {
+                    payload.market = selectedAccount.market.documentId || selectedAccount.market.id;
+                }
             }
 
             if (editingId) {
@@ -57,8 +87,7 @@ const ManageSymbols = () => {
                 await dispatch(createSymbol(payload)).unwrap();
             }
 
-            const marketId = selectedAccount?.market?.documentId || selectedAccount?.market?.id;
-            dispatch(fetchSymbols(marketId));
+            dispatch(fetchSymbols(selectedMarketId || null));
             handleCloseModal();
         } catch (err) {
             const errorMsg = err?.error?.message || err?.message || 'Unknown error';
@@ -107,15 +136,26 @@ const ManageSymbols = () => {
     };
 
     const filteredSymbols = useMemo(() => {
-        if (!searchTerm.trim()) return symbols;
-        const q = searchTerm.trim().toLowerCase();
-        return symbols.filter(s =>
-            (s.Name && s.Name.toLowerCase().includes(q)) ||
-            (s.exchange && s.exchange.toLowerCase().includes(q)) ||
-            (s.sector && s.sector.toLowerCase().includes(q)) ||
-            (s.Description && s.Description.toLowerCase().includes(q))
-        );
-    }, [symbols, searchTerm]);
+        return symbols.filter(s => {
+            if (selectedMarketId) {
+                const sMarketId = s.market?.documentId || s.market?.id || (typeof s.market === 'string' || typeof s.market === 'number' ? s.market : '');
+                if (sMarketId && String(sMarketId) !== String(selectedMarketId)) {
+                    return false;
+                }
+            }
+
+            if (!searchTerm.trim()) return true;
+            const q = searchTerm.trim().toLowerCase();
+            const marketName = s.market?.Name || s.market?.name || '';
+            return (
+                (s.Name && s.Name.toLowerCase().includes(q)) ||
+                (s.exchange && s.exchange.toLowerCase().includes(q)) ||
+                (s.sector && s.sector.toLowerCase().includes(q)) ||
+                (s.Description && s.Description.toLowerCase().includes(q)) ||
+                (marketName && marketName.toLowerCase().includes(q))
+            );
+        });
+    }, [symbols, searchTerm, selectedMarketId]);
 
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -141,23 +181,47 @@ const ManageSymbols = () => {
 
             {/* Table Section */}
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg">
-                <div className="p-4 sm:p-6 border-b border-gray-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="p-4 sm:p-6 border-b border-gray-700 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                         <h2 className="text-xl font-bold text-white">Symbol List</h2>
                         <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-700 text-gray-300 font-semibold">
                             {filteredSymbols.length} {filteredSymbols.length === symbols.length ? 'symbols' : `of ${symbols.length}`}
                         </span>
                     </div>
-                    {/* Search Bar */}
-                    <div className="relative w-full sm:w-72">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Tìm kiếm symbol, sàn, ngành..."
-                            className="w-full bg-gray-900/70 border border-gray-600 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition"
-                        />
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        {/* Market Filter */}
+                        <div className="flex items-center gap-2 bg-gray-900/70 border border-gray-600 rounded-lg px-3 py-1.5 focus-within:border-purple-500 transition">
+                            <Filter size={15} className="text-purple-400 shrink-0" />
+                            <select
+                                value={selectedMarketId}
+                                onChange={(e) => setSelectedMarketId(e.target.value)}
+                                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer pr-2"
+                            >
+                                <option value="" className="bg-gray-800 text-white">-- Tất cả Market --</option>
+                                {markets.map(m => {
+                                    const mId = m.documentId || m.id;
+                                    const mName = m.Name || m.name || 'Unknown Market';
+                                    return (
+                                        <option key={mId} value={mId} className="bg-gray-800 text-white">
+                                            {mName}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+
+                        {/* Search Bar */}
+                        <div className="relative w-full sm:w-64">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <input
+                                type="text"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                placeholder="Tìm kiếm symbol, sàn, ngành..."
+                                className="w-full bg-gray-900/70 border border-gray-600 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition"
+                            />
+                        </div>
                     </div>
                 </div>
 
@@ -166,6 +230,7 @@ const ManageSymbols = () => {
                         <thead className="bg-gray-900/60 text-gray-400 text-xs uppercase tracking-wider sticky top-0 backdrop-blur-sm z-10">
                             <tr>
                                 <th className="px-6 py-3.5 font-medium">Name</th>
+                                <th className="px-6 py-3.5 font-medium">Market</th>
                                 <th className="px-6 py-3.5 font-medium">Exchange</th>
                                 <th className="px-6 py-3.5 font-medium">Sector</th>
                                 <th className="px-6 py-3.5 font-medium">Strategy Template</th>
@@ -176,11 +241,11 @@ const ManageSymbols = () => {
                         <tbody className="divide-y divide-gray-700">
                             {loading && symbols.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="px-6 py-12 text-center text-gray-500">Đang tải danh sách symbols...</td>
+                                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">Đang tải danh sách symbols...</td>
                                 </tr>
                             ) : filteredSymbols.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
+                                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
                                         {searchTerm ? 'Không tìm thấy symbol nào khớp với từ khóa tìm kiếm.' : 'Chưa có symbol nào trong thị trường này.'}
                                     </td>
                                 </tr>
@@ -188,8 +253,17 @@ const ManageSymbols = () => {
                                 filteredSymbols.map(symbol => {
                                     const assignedTpl = getAssignedTemplate(symbol);
                                     return (
-                                        <tr key={symbol.id} className="hover:bg-gray-700/50 transition">
+                                        <tr key={symbol.id || symbol.documentId} className="hover:bg-gray-700/50 transition">
                                             <td className="px-6 py-4 text-white font-medium">{symbol.Name}</td>
+                                            <td className="px-6 py-4 text-sm whitespace-nowrap">
+                                                {symbol.market?.Name || symbol.market?.name ? (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900/40 text-blue-300 border border-blue-700/40">
+                                                        {symbol.market?.Name || symbol.market?.name}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-500 text-xs italic">-</span>
+                                                )}
+                                            </td>
                                             <td className="px-6 py-4 text-gray-300 text-sm whitespace-nowrap">{symbol.exchange || '-'}</td>
                                             <td className="px-6 py-4 text-gray-300 text-sm">{symbol.sector || '-'}</td>
                                             <td className="px-6 py-4 text-sm">
@@ -245,6 +319,8 @@ const ManageSymbols = () => {
                 onSubmit={handleModalSubmit}
                 symbol={editingSymbol}
                 templates={templates}
+                markets={markets}
+                defaultMarketId={selectedMarketId}
                 existingSymbols={symbols}
                 isSubmitting={isSubmitting}
             />

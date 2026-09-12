@@ -80,7 +80,7 @@ const Sidebar = () => {
                 {
                     icon: Activity,
                     label: 'Signals',
-                    path: '/signals',
+                    path: '/python-signals',
                     subItems: [
                         { label: 'Strategy Signals', path: '/signals' },
                         { label: 'Python Signals', path: '/python-signals' },

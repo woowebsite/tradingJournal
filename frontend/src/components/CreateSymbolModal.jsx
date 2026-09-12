@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Save, X } from 'lucide-react';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const DEFAULT_FORM = {
     Name: '',
@@ -35,10 +36,17 @@ const CreateSymbolModal = ({
         });
     };
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="w-full max-w-xl overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-2xl">
                 <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900/50 p-4">
                     <h3 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">

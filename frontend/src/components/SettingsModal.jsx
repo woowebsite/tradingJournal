@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
     const [formData, setFormData] = useState({
@@ -27,6 +28,8 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
         }
     }, [setting, isOpen]);
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     const handleChange = (e) => {
@@ -45,13 +48,18 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-md shadow-2xl overflow-hidden">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <h3 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
                         {setting ? 'Edit Setting' : 'New Setting'}
                     </h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition">
+                    <button onClick={onClose} className="text-gray-400 hover:text-white transition cursor-pointer">
                         <X size={24} />
                     </button>
                 </div>
@@ -74,11 +82,11 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Risk % / Trade</label>
                             <input
-                            type="number"
-                            step="any"
-                            name="riskPerTrade"
-                            required
-                            value={formData.riskPerTrade ?? ''}
+                                type="number"
+                                step="any"
+                                name="riskPerTrade"
+                                required
+                                value={formData.riskPerTrade ?? ''}
                                 onChange={handleChange}
                                 className="w-full bg-gray-700 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-white"
                                 placeholder="2"
@@ -88,11 +96,11 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Max Drawdown %</label>
                             <input
-                            type="number"
-                            step="any"
-                            name="maxDrawDown"
-                            required
-                            value={formData.maxDrawDown ?? ''}
+                                type="number"
+                                step="any"
+                                name="maxDrawDown"
+                                required
+                                value={formData.maxDrawDown ?? ''}
                                 onChange={handleChange}
                                 className="w-full bg-gray-700 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-white"
                                 placeholder="20"
@@ -118,13 +126,13 @@ const SettingsModal = ({ isOpen, onClose, onSubmit, setting }) => {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition"
+                            className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition cursor-pointer"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20"
+                            className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 cursor-pointer"
                         >
                             Save
                         </button>

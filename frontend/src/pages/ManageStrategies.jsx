@@ -6,6 +6,7 @@ import { fetchRules, updateRule } from '../features/ruleSlice';
 import { fetchWebhooks } from '../features/webhookSlice';
 import { getPythonStrategies, DEFAULT_PYTHON_STRATEGIES } from '../services/pythonStrategy';
 import RuleModal from '../components/RuleModal';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
@@ -458,10 +459,17 @@ export const StrategyModal = ({ isOpen, onClose, onSubmit, initialData, availabl
         });
     };
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <h3 className="text-xl font-bold text-white">

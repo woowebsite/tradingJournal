@@ -1335,6 +1335,16 @@ const StrategyInsight = () => {
                             <span className="font-semibold text-gray-200">{selectedAccount.Name || selectedAccount.name}</span>
                         </div>
                     )}
+                    {selectedSymbol && (
+                        <Link
+                            to={`/trade-station?symbol=${encodeURIComponent(selectedSymbol)}${lastCandle?.close ? `&price=${lastCandle.close}` : ''}`}
+                            className="px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                            title="Mở trên Trade Station"
+                        >
+                            <ExternalLink size={14} />
+                            <span>Mở giao dịch {selectedSymbol}</span>
+                        </Link>
+                    )}
                     <Link
                         to={selectedSymbol ? `/python-strategy?symbol=${encodeURIComponent(selectedSymbol)}` : "/python-strategy"}
                         className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition"
@@ -1418,7 +1428,7 @@ const StrategyInsight = () => {
                     </div>
 
                     {/* 3. Timeframe Selector */}
-                    <div className="lg:col-span-3 space-y-1.5">
+                    <div className="lg:col-span-4 space-y-1.5">
                         <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
                             <Clock size={14} className="text-amber-400" />
                             Timeframe
@@ -1447,6 +1457,24 @@ const StrategyInsight = () => {
                             ))}
                         </div>
                     </div>
+
+                    {/* 4. Saved History Button */}
+                    <div className="lg:col-span-2 space-y-1.5">
+                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                            <Bookmark size={14} className="text-amber-400" />
+                            Lịch sử Insight
+                        </label>
+                        <button
+                            type="button"
+                            onClick={() => setShowSavedModal(true)}
+                            disabled={savedInsightsList.length === 0}
+                            className="w-full bg-gray-900 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed border border-amber-500/30 hover:border-amber-500/50 rounded-xl px-3 py-2.5 text-sm text-amber-300 hover:text-amber-200 font-semibold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
+                            title={savedInsightsList.length > 0 ? `Xem danh sách ${savedInsightsList.length} bản ghi Insight đã lưu` : "Chưa có bản ghi Insight đã lưu"}
+                        >
+                            <Bookmark size={14} className="text-amber-400" />
+                            <span>Lịch sử ({savedInsightsList.length})</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1460,7 +1488,7 @@ const StrategyInsight = () => {
 
             {/* Quick Metrics Bar (when symbol data exists) */}
             {lastCandle && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                     <div className="bg-gray-800/80 border border-gray-700/60 rounded-xl p-3 shadow-sm">
                         <span className="text-xs text-gray-400 block mb-1">Giá hiện tại</span>
                         <div className="flex items-baseline gap-1.5">
@@ -1497,20 +1525,6 @@ const StrategyInsight = () => {
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-md border inline-block ${activeInsightObj.badgeBg}`}>
                             {activeInsightObj.label} Mode
                         </span>
-                    </div>
-
-                    <div className="bg-gray-800/80 border border-gray-700/60 rounded-xl p-3 shadow-sm flex items-center justify-between">
-                        <div>
-                            <span className="text-xs text-gray-400 block mb-0.5">Mở giao dịch</span>
-                            <span className="text-xs text-gray-300 font-semibold">{selectedSymbol}</span>
-                        </div>
-                        <Link
-                            to={`/trade-station?symbol=${encodeURIComponent(selectedSymbol)}&price=${lastCandle.close}`}
-                            className="p-2 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white rounded-xl transition border border-blue-500/30"
-                            title="Mở trên Trade Station"
-                        >
-                            <ExternalLink size={16} />
-                        </Link>
                     </div>
                 </div>
             )}
@@ -1640,19 +1654,6 @@ const StrategyInsight = () => {
                                     </>
                                 )}
                             </button>
-
-                            {/* Saved History Button */}
-                            {savedInsightsList.length > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowSavedModal(true)}
-                                    className="px-2.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-amber-300 hover:text-amber-200 font-semibold text-xs rounded-xl border border-amber-500/30 transition flex items-center gap-1.5 cursor-pointer"
-                                    title={`Xem danh sách ${savedInsightsList.length} bản ghi Insight đã lưu`}
-                                >
-                                    <Bookmark size={13} className="text-amber-400" />
-                                    <span>Lịch sử ({savedInsightsList.length})</span>
-                                </button>
-                            )}
                         </div>
                     </div>
 

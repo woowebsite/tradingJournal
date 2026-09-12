@@ -70,7 +70,12 @@ const RuleModal = ({ isOpen, onClose, onSubmit, initialData, zIndex = 'z-50' }) 
     if (!isOpen) return null;
 
     return (
-        <div className={`fixed inset-0 ${zIndex} flex items-center justify-center bg-black/50 backdrop-blur-sm p-4`}>
+        <div
+            className={`fixed inset-0 ${zIndex} flex items-center justify-center bg-black/50 backdrop-blur-sm p-4`}
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <h3 className="text-xl font-bold text-white">

@@ -57,7 +57,12 @@ const PatternDetailModal = ({ isOpen, onClose, pattern, histories, symbol }) => 
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
                 <div className="flex items-start justify-between gap-4 border-b border-gray-700 bg-gray-800/60 px-5 py-4">
                     <div>

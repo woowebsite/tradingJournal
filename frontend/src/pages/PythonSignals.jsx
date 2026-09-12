@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols } from '../features/symbolSlice';
 import { useAccount } from '../context/AccountContext';
-import { getStrategyTemplates } from '../services/strategyTemplate';
+import { getStrategyTemplates, deleteStrategyTemplate } from '../services/strategyTemplate';
 import { scanPythonStrategy, buildPythonScanParams } from '../services/pythonStrategy';
+import StrategyTemplatesListModal from '../components/python-strategy/StrategyTemplatesListModal';
 import {
     Activity,
     BrainCircuit,
@@ -25,14 +26,15 @@ import {
     Layers,
     ArrowUpRight,
     ArrowDownRight,
-    Sparkles
+    Sparkles,
+    BookmarkCheck
 } from 'lucide-react';
 
 const PythonSignals = () => {
     const navigate = useNavigate();
     const dispatch = useDispatch();
     const { items: symbols, loading: symbolsLoading } = useSelector(state => state.symbols);
-    const { selectedAccount } = useAccount();
+    const { selectedAccount, accountSymbols = [], loading: accountLoading } = useAccount();
 
     const [templates, setTemplates] = useState([]);
     const [scanResults, setScanResults] = useState({});
@@ -43,10 +45,41 @@ const PythonSignals = () => {
     const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
     const [scanningSingleMap, setScanningSingleMap] = useState({});
 
-    // 1. Fetch symbols for selected market
+    const [selectedTemplateModalSymbol, setSelectedTemplateModalSymbol] = useState('');
+    const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
+    const [selectedTemplateIdForModal, setSelectedTemplateIdForModal] = useState(null);
+
+    const handleOpenTemplateModal = (symName, templateId) => {
+        setSelectedTemplateModalSymbol(symName);
+        setSelectedTemplateIdForModal(templateId || null);
+        setIsTemplatesModalOpen(true);
+    };
+
+    const handleApplyTemplateFromModal = (template) => {
+        const sym = template?.symbolName || template?.symbol?.Name || template?.symbol?.name || selectedTemplateModalSymbol;
+        setIsTemplatesModalOpen(false);
+        navigate(`/python-strategy?symbol=${sym}&templateId=${template.documentId || template.id}`);
+    };
+
+    const handleDeleteTemplate = async (templateId) => {
+        try {
+            await deleteStrategyTemplate(templateId);
+            setTemplates(prev => prev.filter(t => (t.documentId || t.id) !== templateId));
+        } catch (err) {
+            alert(`Không thể xóa template: ${err.message || err}`);
+        }
+    };
+
+    const currentAccountId = selectedAccount?.documentId || selectedAccount?.id || null;
+    const prevAccountIdRef = useRef(null);
+    const autoScannedAccountIdRef = useRef(null);
+
+    // 1. Fetch symbols for selected market when selectedAccount changes
     useEffect(() => {
-        const marketId = selectedAccount?.market?.documentId || selectedAccount?.market?.id;
-        dispatch(fetchSymbols(marketId));
+        if (selectedAccount?.market) {
+            const marketId = selectedAccount.market.documentId || selectedAccount.market.id;
+            dispatch(fetchSymbols(marketId));
+        }
     }, [dispatch, selectedAccount?.market]);
 
     // 2. Fetch all strategy templates
@@ -56,11 +89,21 @@ const PythonSignals = () => {
             .catch(err => console.error('Failed to load strategy templates:', err));
     }, []);
 
-    // 3. Map symbols that have assigned Strategy Template or template matching symbol name
-    const configuredSymbols = useMemo(() => {
-        if (!symbols || symbols.length === 0) return [];
+    // 3. Reset scan results when account changes
+    useEffect(() => {
+        if (prevAccountIdRef.current && prevAccountIdRef.current !== currentAccountId) {
+            setScanResults({});
+            setScanningSingleMap({});
+            autoScannedAccountIdRef.current = null;
+        }
+        prevAccountIdRef.current = currentAccountId;
+    }, [currentAccountId]);
 
-        return symbols.map(sym => {
+    // 4. Map only symbols belonging to current selected account that have assigned Strategy Template
+    const configuredSymbols = useMemo(() => {
+        if (!selectedAccount || !accountSymbols || accountSymbols.length === 0) return [];
+
+        return accountSymbols.map(sym => {
             const symName = String(sym.Name || sym.name || '').trim().toUpperCase();
             const assigned = sym.strategy_template;
             const assignedId = assigned?.documentId || assigned?.id || (typeof assigned === 'string' || typeof assigned === 'number' ? String(assigned) : null);
@@ -86,9 +129,9 @@ const PythonSignals = () => {
                 template
             };
         }).filter(item => Boolean(item.template));
-    }, [symbols, templates]);
+    }, [accountSymbols, templates, selectedAccount]);
 
-    // 4. Scan a single symbol
+    // 5. Scan a single symbol
     const scanSingleSymbol = useCallback(async (symObj) => {
         const symName = String(symObj.Name || symObj.name || '').trim().toUpperCase();
         const tpl = symObj.template;
@@ -144,7 +187,7 @@ const PythonSignals = () => {
         }
     }, []);
 
-    // 5. Scan all configured symbols
+    // 6. Scan all configured symbols
     const handleScanAll = useCallback(async () => {
         if (configuredSymbols.length === 0 || isScanningAll) return;
 
@@ -163,12 +206,21 @@ const PythonSignals = () => {
         setScanProgress({ current: 0, total: 0, currentSymbol: '' });
     }, [configuredSymbols, isScanningAll, scanSingleSymbol]);
 
-    // Auto-scan on initial load when configuredSymbols are ready and no scan results yet
+    // 7. Auto-scan on initial load or account switch once symbols of the selected account are ready
     useEffect(() => {
-        if (configuredSymbols.length > 0 && Object.keys(scanResults).length === 0 && !isScanningAll) {
+        if (
+            !accountLoading &&
+            !symbolsLoading &&
+            selectedAccount &&
+            configuredSymbols.length > 0 &&
+            templates.length > 0 &&
+            !isScanningAll &&
+            autoScannedAccountIdRef.current !== currentAccountId
+        ) {
+            autoScannedAccountIdRef.current = currentAccountId;
             handleScanAll();
         }
-    }, [configuredSymbols.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [accountLoading, symbolsLoading, selectedAccount, configuredSymbols, templates.length, isScanningAll, currentAccountId, handleScanAll]);
 
     // 6. Process items list for UI display
     const processedItems = useMemo(() => {
@@ -278,7 +330,7 @@ const PythonSignals = () => {
     }, [configuredSymbols.length, processedItems]);
 
     return (
-        <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
+        <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
             {/* Header & Main Actions */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 p-6 rounded-2xl border border-gray-700 shadow-xl">
                 <div>
@@ -294,7 +346,13 @@ const PythonSignals = () => {
                                 </span>
                             </h1>
                             <p className="text-gray-400 text-sm mt-1">
-                                Quét lệnh giao dịch đang mở và giám sát tín hiệu của các symbol theo Strategy Template được cấu hình.
+                                Quét lệnh giao dịch đang mở và giám sát tín hiệu cho tài khoản{' '}
+                                <span className="text-purple-300 font-semibold">{selectedAccount?.name || 'Tài khoản'}</span>
+                                {selectedAccount?.market?.Name && (
+                                    <span className="ml-2 text-xs px-2.5 py-0.5 rounded-full bg-blue-900/50 text-blue-300 border border-blue-700/50 font-medium">
+                                        {selectedAccount.market.Name}
+                                    </span>
+                                )}.
                             </p>
                         </div>
                     </div>
@@ -481,14 +539,20 @@ const PythonSignals = () => {
             </div>
 
             {/* Results Section */}
-            {configuredSymbols.length === 0 ? (
+            {accountLoading || (symbolsLoading && symbols.length === 0) ? (
+                <div className="bg-gray-800 rounded-2xl border border-gray-700 p-12 text-center space-y-4">
+                    <RefreshCw size={36} className="animate-spin text-purple-400 mx-auto" />
+                    <h3 className="text-lg font-bold text-white">Đang tải danh sách symbol của tài khoản...</h3>
+                    <p className="text-gray-400 text-sm">Vui lòng đợi hệ thống đồng bộ các cấu hình chiến lược.</p>
+                </div>
+            ) : configuredSymbols.length === 0 ? (
                 <div className="bg-gray-800 rounded-2xl border border-gray-700 p-12 text-center space-y-4">
                     <div className="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto border border-purple-500/20">
                         <BrainCircuit size={32} />
                     </div>
-                    <h3 className="text-xl font-bold text-white">Chưa có Symbol nào được gán Python Strategy Template</h3>
+                    <h3 className="text-xl font-bold text-white">Chưa có Symbol nào trong tài khoản được gán Strategy Template</h3>
                     <p className="text-gray-400 max-w-md mx-auto text-sm">
-                        Hãy truy cập trang <strong>Manage Symbols</strong> và chọn Python Strategy Template cho các symbol bạn muốn theo dõi.
+                        Tài khoản <strong>{selectedAccount?.name || 'hiện tại'}</strong> {selectedAccount?.market?.Name ? `(Thị trường ${selectedAccount.market.Name})` : ''} chưa có mã symbol nào được cấu hình Strategy Template.
                     </p>
                     <Link
                         to="/manage-symbols"
@@ -516,13 +580,12 @@ const PythonSignals = () => {
                         return (
                             <div
                                 key={item.symbol.id || symName}
-                                className={`rounded-xl border transition-all duration-200 flex flex-col justify-between overflow-hidden bg-gray-800/80 hover:bg-gray-800 backdrop-blur-sm shadow-md hover:shadow-xl ${
-                                    isOpen
-                                        ? (isProfit
-                                            ? 'border-emerald-500/40 hover:border-emerald-500/70'
-                                            : 'border-rose-500/40 hover:border-rose-500/70')
-                                        : 'border-gray-700/70 hover:border-gray-600'
-                                }`}
+                                className={`rounded-xl border transition-all duration-200 flex flex-col justify-between overflow-hidden bg-gray-800/80 hover:bg-gray-800 backdrop-blur-sm shadow-md hover:shadow-xl ${isOpen
+                                    ? (isProfit
+                                        ? 'border-emerald-500/40 hover:border-emerald-500/70'
+                                        : 'border-rose-500/40 hover:border-rose-500/70')
+                                    : 'border-gray-700/70 hover:border-gray-600'
+                                    }`}
                             >
                                 {/* Top Card Header */}
                                 <div className="p-4 border-b border-gray-700/50 flex items-start justify-between gap-2">
@@ -547,11 +610,10 @@ const PythonSignals = () => {
                                     {/* Status Badge */}
                                     <div className="shrink-0">
                                         {isOpen ? (
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-                                                isLong
-                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                                            }`}>
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${isLong
+                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                                                }`}>
                                                 <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isLong ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                                                 {isLong ? 'OPEN LONG' : 'OPEN SHORT'}
                                             </span>
@@ -698,7 +760,16 @@ const PythonSignals = () => {
                                         <RefreshCw size={13} className={item.isScanning ? 'animate-spin text-purple-400' : ''} />
                                     </button>
 
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <button
+                                            onClick={() => handleOpenTemplateModal(symName, item.template?.documentId || item.template?.id)}
+                                            className="px-2.5 py-1 rounded-lg bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 hover:text-white border border-purple-700/60 text-xs font-medium transition flex items-center gap-1 cursor-pointer"
+                                            title="Xem chi tiết Strategy Template của symbol này"
+                                        >
+                                            <BookmarkCheck size={12} className="text-purple-400" />
+                                            Template
+                                        </button>
+
                                         <Link
                                             to={`/python-strategy?symbol=${symName}`}
                                             className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700/80 text-xs font-medium transition flex items-center gap-1 cursor-pointer"
@@ -778,11 +849,10 @@ const PythonSignals = () => {
                                             {/* Status */}
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {isOpen ? (
-                                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
-                                                        isLong
-                                                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
-                                                            : 'bg-red-500/15 text-red-300 border border-red-500/40'
-                                                    }`}>
+                                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${isLong
+                                                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
+                                                        : 'bg-red-500/15 text-red-300 border border-red-500/40'
+                                                        }`}>
                                                         {isLong ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
                                                         {isLong ? 'OPEN LONG' : 'OPEN SHORT'}
                                                     </span>
@@ -829,6 +899,22 @@ const PythonSignals = () => {
                                             <td className="px-6 py-4 text-right whitespace-nowrap">
                                                 <div className="flex justify-end items-center gap-2">
                                                     <button
+                                                        onClick={() => handleOpenTemplateModal(symName, item.template?.documentId || item.template?.id)}
+                                                        className="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 hover:text-white rounded-lg border border-purple-700/50 text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                                                        title="Xem chi tiết Strategy Template của symbol này"
+                                                    >
+                                                        <BookmarkCheck size={13} className="text-purple-400" />
+                                                        Template
+                                                    </button>
+                                                    <Link
+                                                        to={`/python-strategy?symbol=${symName}`}
+                                                        className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                                                        title="Chi tiết chiến lược Python"
+                                                    >
+                                                        <BrainCircuit size={13} className="text-purple-400" />
+                                                        Chi Tiết
+                                                    </Link>
+                                                    <button
                                                         onClick={() => scanSingleSymbol(item.symbol)}
                                                         disabled={item.isScanning || isScanningAll}
                                                         className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition cursor-pointer disabled:opacity-50"
@@ -853,6 +939,17 @@ const PythonSignals = () => {
                     </div>
                 </div>
             )}
+
+            {/* Strategy Templates List Modal */}
+            <StrategyTemplatesListModal
+                isOpen={isTemplatesModalOpen}
+                onClose={() => setIsTemplatesModalOpen(false)}
+                templates={templates}
+                selectedTemplateId={selectedTemplateIdForModal}
+                selectedSymbol={selectedTemplateModalSymbol}
+                onApplyTemplate={handleApplyTemplateFromModal}
+                onDeleteTemplate={handleDeleteTemplate}
+            />
         </div>
     );
 };

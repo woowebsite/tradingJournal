@@ -7,6 +7,7 @@ import { useDispatch } from 'react-redux';
 import { fetchLatestHistory, fetchPagedSymbolHistories } from '../features/marketSlice';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
+import { buildTradeDetailChartSignals } from '../utils/chartSignals';
 import useEscapeKey from '../hooks/useEscapeKey';
 import TradingViewChart from './TradingViewChart';
 
@@ -94,25 +95,9 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     const chartData = chartState.symbolId === activeSymbolId ? chartState.data : [];
     const chartError = chartState.symbolId === activeSymbolId ? chartState.error : '';
 
-    const chartSignals = useMemo(() => (trade?.trade_details || [])
-        .filter(detail => detail.date && detail.signal)
-        .map(detail => {
-            const normalizedSignal = String(detail.signal).toLowerCase().replace(/[\s_-]/g, '');
-            let type = 'unknown';
-            if (normalizedSignal.includes('entry') || normalizedSignal.includes('buy')) type = 'entry';
-            else if (normalizedSignal.includes('takeprofit') || normalizedSignal === 'tp') type = 'takeprofit';
-            else if (normalizedSignal.includes('stoploss') || normalizedSignal === 'sl') type = 'stoploss';
-            else if (normalizedSignal.includes('exit') || normalizedSignal.includes('sell')) type = 'exit';
-
-            return {
-                date: detail.date,
-                rules: [{
-                    documentId: `trade-detail-${detail.documentId || detail.id || detail.date}`,
-                    Name: detail.signal,
-                    Type: type
-                }]
-            };
-        }), [trade?.trade_details]);
+    const chartSignals = useMemo(() => {
+        return buildTradeDetailChartSignals(trade, selectedAccount);
+    }, [trade, selectedAccount]);
 
     useEscapeKey(onClose, isOpen);
 
@@ -174,7 +159,12 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-6xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="p-6 border-b border-gray-800 flex justify-between items-start bg-gray-800/50">
