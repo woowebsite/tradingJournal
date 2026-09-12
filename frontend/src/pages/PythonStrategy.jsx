@@ -1,52 +1,39 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Link, useSearchParams } from 'react-router-dom';
-import {
-    BrainCircuit,
-    Play,
-    RefreshCw,
-    TrendingUp,
-    TrendingDown,
-    ShieldAlert,
-    Target,
-    Activity,
-    Sliders,
-    ExternalLink,
-    Search,
-    ListFilter,
-    Layers,
-    Clock,
-    AlertTriangle,
-    CheckCircle2,
-    XCircle,
-    BarChart3,
-    DollarSign,
-    Award,
-    Eye,
-    Sparkles,
-    RotateCcw,
-    BookmarkPlus,
-    Bookmark,
-    Trash2,
-    Save,
-    X,
-    Check,
-    Trophy,
-    SlidersHorizontal,
-    ArrowUpDown,
-    ChevronUp,
-    ChevronDown
-} from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { AlertTriangle } from 'lucide-react';
+
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { getPythonStrategies, scanPythonStrategy, optimizePythonStrategy } from '../services/pythonStrategy';
 import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, deleteStrategyTemplate } from '../services/strategyTemplate';
 import { getSymbolInsights, getSymbolInsightsBySymbol } from '../services/symbolInsight';
-import TradingViewChart from '../components/TradingViewChart';
 import DeflatedSharpeRatioCard from '../components/DeflatedSharpeRatioCard';
 import { formatNumber } from '../utils/formatNumber';
-import dayjs from 'dayjs';
+
+// Strategy Registry
+import {
+    getStrategyConfig,
+    getDefaultParams,
+    getDefaultOptFlags,
+    buildStrategyScanPayload,
+    buildStrategyOptimizePayload,
+    applyStrategyOptimizeConfig
+} from '../strategies';
+
+// Modular Sub-components
+import StrategyHeader from '../components/python-strategy/StrategyHeader';
+import WatchlistSymbolBar from '../components/python-strategy/WatchlistSymbolBar';
+import DynamicStrategyForm from '../components/python-strategy/DynamicStrategyForm';
+import SummaryMetricsBar from '../components/python-strategy/SummaryMetricsBar';
+import ActiveTradeBanner from '../components/python-strategy/ActiveTradeBanner';
+import OptimalConfigBanner from '../components/python-strategy/OptimalConfigBanner';
+import TradingChartSection from '../components/python-strategy/TradingChartSection';
+import TradesHistoryTable from '../components/python-strategy/TradesHistoryTable';
+import SaveTemplateModal from '../components/python-strategy/SaveTemplateModal';
+import InsightHistoryModal from '../components/python-strategy/InsightHistoryModal';
+import OptimizationLeaderboardModal from '../components/python-strategy/OptimizationLeaderboardModal';
 
 const PythonStrategy = () => {
     const dispatch = useDispatch();
@@ -56,95 +43,51 @@ const PythonStrategy = () => {
         return s ? s.trim().toUpperCase() : '';
     }, [searchParams]);
 
-    const { selectedAccount, defaultWatchlist } = useAccount();
+    const { selectedAccount } = useAccount();
     const { items: watchlists = [] } = useSelector(state => state.watchlists);
     const { symbols = [] } = useSelector(state => state.market);
     const chartCardRef = useRef(null);
 
-    // States
+    // 1. Core Selection States
     const [strategyFiles, setStrategyFiles] = useState([]);
     const [selectedStrategyFile, setSelectedStrategyFile] = useState('strategy_supertrend_ma288.py');
     const [selectedWatchlistId, setSelectedWatchlistId] = useState('');
     const [selectedSymbol, setSelectedSymbol] = useState(querySymbol || '');
 
-    // Supertrend Strategy States
-    const [riskReward, setRiskReward] = useState(1.5);
-    const [entryType, setEntryType] = useState('candle_close'); // 'candle_close' | 'st_reversal'
-    const [stPeriod, setStPeriod] = useState(10);
-    const [stMultiplier, setStMultiplier] = useState(3.0);
-    const [maPeriod, setMaPeriod] = useState(288);
-    const [tpSupertrend, setTpSupertrend] = useState(true);
-    const [tpRR, setTpRR] = useState(true);
+    // 2. Current Strategy Schema Definition
+    const currentStrategy = useMemo(() => {
+        return getStrategyConfig(selectedStrategyFile);
+    }, [selectedStrategyFile]);
 
-    // VWAP + MA9 Strategy States
-    const [vwapMaPeriod, setVwapMaPeriod] = useState(9);
-    const [vwapAnchor, setVwapAnchor] = useState('year');
-    const [vwapTpTarget, setVwapTpTarget] = useState('tp1_vwap'); // 'tp1_vwap' | 'tp2_upper2' | 'tp3_upper3'
-    const [mult1, setMult1] = useState(1.0);
-    const [mult2, setMult2] = useState(2.0);
-    const [mult3, setMult3] = useState(3.0);
+    // 3. Dynamic Strategy Parameters & Optimization Flags States
+    const [params, setParams] = useState(() => getDefaultParams('strategy_supertrend_ma288.py'));
+    const [optFlags, setOptFlags] = useState(() => getDefaultOptFlags('strategy_supertrend_ma288.py'));
 
-    // Supertrend + Price Action Strategy States
-    const [paEngulfing, setPaEngulfing] = useState(true);
-    const [paBd3bu2, setPaBd3bu2] = useState(true);
-    const [paIncludeOpposite, setPaIncludeOpposite] = useState(true);
-    const [paPointUp, setPaPointUp] = useState(false);
-    const [paSwingUp, setPaSwingUp] = useState(false);
-    const [tpType, setTpType] = useState('P50'); // 'P25' | 'P50' | 'P75' | 'P90' | 'P99'
-    const [slType, setSlType] = useState('P75'); // 'P25' | 'P50' | 'P75' | 'P90' | 'supertrend'
-    const [customTpVal, setCustomTpVal] = useState(0);
-    const [customSlVal, setCustomSlVal] = useState(0);
-    const [symbolInsightStats, setSymbolInsightStats] = useState(null);
-    const [loadingInsightStats, setLoadingInsightStats] = useState(false);
-    const [insightModalOpen, setInsightModalOpen] = useState(false);
-    const [savedInsightsList, setSavedInsightsList] = useState([]);
-
-    // Common States
+    // 4. Execution & Market Data States
     const [timeframe, setTimeframe] = useState('D1');
     const [countback, setCountback] = useState(1000);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
-    const [allowLong, setAllowLong] = useState(true);
-    const [allowShort, setAllowShort] = useState(true);
     const [scanning, setScanning] = useState(false);
     const [optimizing, setOptimizing] = useState(false);
     const [bestInfo, setBestInfo] = useState(null);
     const [scanResult, setScanResult] = useState(null);
     const [errorMessage, setErrorMessage] = useState('');
-    const [activeTab, setActiveTab] = useState('all'); // 'all', 'Open', 'Closed', 'Long', 'Short'
+    const [activeTab, setActiveTab] = useState('all');
     const [focusDate, setFocusDate] = useState(null);
 
-    // Selective Optimization Checkboxes States
-    // 1. Supertrend + MA
-    const [optStPeriod, setOptStPeriod] = useState(true);
-    const [optStMultiplier, setOptStMultiplier] = useState(true);
-    const [optMaPeriod, setOptMaPeriod] = useState(true);
-    const [optRiskReward, setOptRiskReward] = useState(true);
-    const [optEntryType, setOptEntryType] = useState(true);
-    const [optTpMode, setOptTpMode] = useState(true);
+    // 5. Symbol Insight States
+    const [symbolInsightStats, setSymbolInsightStats] = useState(null);
+    const [loadingInsightStats, setLoadingInsightStats] = useState(false);
+    const [insightModalOpen, setInsightModalOpen] = useState(false);
+    const [savedInsightsList, setSavedInsightsList] = useState([]);
 
-    // 2. VWAP + MA9
-    const [optVwapMaPeriod, setOptVwapMaPeriod] = useState(true);
-    const [optVwapAnchor, setOptVwapAnchor] = useState(false);
-    const [optMult2, setOptMult2] = useState(true);
-    const [optMult3, setOptMult3] = useState(true);
-    const [optVwapTpTarget, setOptVwapTpTarget] = useState(true);
-
-    // 3. Supertrend + Price Action
-    const [optPaPatterns, setOptPaPatterns] = useState(true);
-    const [optTpType, setOptTpType] = useState(true);
-    const [optSlType, setOptSlType] = useState(true);
-    const [optPaTpSupertrend, setOptPaTpSupertrend] = useState(true);
-
-    // Optimization Leaderboard States
+    // 6. Optimization Leaderboard States
     const [optimizationModalOpen, setOptimizationModalOpen] = useState(false);
     const [optimizationConfigs, setOptimizationConfigs] = useState([]);
     const [activeAppliedConfigRank, setActiveAppliedConfigRank] = useState(null);
-    const [optimizationSortBy, setOptimizationSortBy] = useState('rank'); // 'rank', 'profitFactor', 'winRate', 'totalTrades', 'totalPnlPercent'
-    const [optimizationSortDir, setOptimizationSortDir] = useState('asc'); // 'asc' for rank, 'desc' for metrics
-    const [optimizationSearch, setOptimizationSearch] = useState('');
 
-    // Strategy Template States
+    // 7. Strategy Template States
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -153,36 +96,7 @@ const PythonStrategy = () => {
     const [templateDescInput, setTemplateDescInput] = useState('');
     const [savingTemplate, setSavingTemplate] = useState(false);
 
-    // Lọc Strategy Templates chỉ thuộc về Symbol đang chọn
-    const symbolTemplates = useMemo(() => {
-        if (!selectedSymbol) return [];
-        const cleanSym = String(selectedSymbol).trim().toUpperCase();
-        return templates.filter(t => {
-            const tSymName = String(t.symbolName || t.symbol?.Name || t.symbol?.name || '').trim().toUpperCase();
-            return tSymName === cleanSym;
-        });
-    }, [templates, selectedSymbol]);
-
-    // Reset selectedTemplateId khi đổi symbol nếu template đang chọn không thuộc symbol mới
-    useEffect(() => {
-        if (selectedTemplateId) {
-            const exists = symbolTemplates.some(t => String(t.id || t.documentId) === String(selectedTemplateId));
-            if (!exists) {
-                setSelectedTemplateId('');
-            }
-        }
-    }, [selectedSymbol, symbolTemplates, selectedTemplateId]);
-
-    const isVWAP = useMemo(() => {
-        return String(selectedStrategyFile || '').toLowerCase().includes('vwap');
-    }, [selectedStrategyFile]);
-
-    const isPriceAction = useMemo(() => {
-        const fn = String(selectedStrategyFile || '').toLowerCase();
-        return fn.includes('priceaction') || fn.includes('price_action');
-    }, [selectedStrategyFile]);
-
-    // 1. Tải danh sách Watchlists, Symbols, Python Strategies và Strategy Templates
+    // Load initial Watchlists, Symbols, Strategies, and Templates
     useEffect(() => {
         dispatch(fetchWatchlists());
         dispatch(fetchSymbols());
@@ -208,7 +122,7 @@ const PythonStrategy = () => {
         loadTemplates();
     }, [dispatch]);
 
-    // 2. Lọc Watchlists theo Account hiện tại
+    // Lọc Watchlists theo Account hiện tại
     const accountWatchlists = useMemo(() => {
         if (!selectedAccount) return watchlists;
         return watchlists.filter(w => {
@@ -218,7 +132,7 @@ const PythonStrategy = () => {
         });
     }, [watchlists, selectedAccount]);
 
-    // Lấy symbols của watchlist đang chọn (chuẩn hóa thành danh sách tên symbol dạng string)
+    // Symbols trong Watchlist đang chọn
     const watchlistSymbols = useMemo(() => {
         let rawList = [];
         if (selectedWatchlistId) {
@@ -243,7 +157,7 @@ const PythonStrategy = () => {
         return [...new Set(normalized)];
     }, [selectedWatchlistId, accountWatchlists, symbols, querySymbol]);
 
-    // 3. Tự động chọn Watchlist đầu tiên khi load xong (hoặc watchlist chứa querySymbol nếu có)
+    // Tự động chọn Watchlist đầu tiên
     useEffect(() => {
         if (accountWatchlists.length > 0 && !selectedWatchlistId) {
             if (querySymbol) {
@@ -263,7 +177,7 @@ const PythonStrategy = () => {
         }
     }, [accountWatchlists, selectedWatchlistId, querySymbol]);
 
-    // Khi đổi Watchlist -> nếu selectedSymbol không nằm trong Watchlist mới thì reset (trừ khi là querySymbol)
+    // Reset selectedSymbol khi đổi Watchlist
     useEffect(() => {
         if (watchlistSymbols.length > 0 && selectedSymbol) {
             const currentSelectedInList = watchlistSymbols.includes(selectedSymbol);
@@ -274,29 +188,70 @@ const PythonStrategy = () => {
         }
     }, [watchlistSymbols, selectedSymbol, querySymbol]);
 
-    // Helper: Kiểm tra bản ghi Insight có khớp chính xác với symbol hay không
+    // Lọc Strategy Templates của Symbol đang chọn
+    const symbolTemplates = useMemo(() => {
+        if (!selectedSymbol) return [];
+        const cleanSym = String(selectedSymbol).trim().toUpperCase();
+        return templates.filter(t => {
+            const tSymName = String(t.symbolName || t.symbol?.Name || t.symbol?.name || '').trim().toUpperCase();
+            return tSymName === cleanSym;
+        });
+    }, [templates, selectedSymbol]);
+
+    useEffect(() => {
+        if (selectedTemplateId) {
+            const exists = symbolTemplates.some(t => String(t.id || t.documentId) === String(selectedTemplateId));
+            if (!exists) {
+                setSelectedTemplateId('');
+            }
+        }
+    }, [selectedSymbol, symbolTemplates, selectedTemplateId]);
+
+    // Parameter & Optimization Flag Change Handlers
+    const handleParamChange = useCallback((key, value) => {
+        setParams(prev => ({ ...prev, [key]: value }));
+    }, []);
+
+    const handleOptFlagChange = useCallback((key, value) => {
+        setOptFlags(prev => ({ ...prev, [key]: value }));
+    }, []);
+
+    // Số lượng tham số đang được chọn tối ưu
+    const { optCount, totalOptCount } = useMemo(() => {
+        const optimizableFields = (currentStrategy?.fields || []).filter(f => f.optimizable);
+        const keys = optimizableFields.map(f => f.optKey || f.name);
+        const uniqueKeys = [...new Set(keys)];
+        return {
+            optCount: uniqueKeys.filter(k => Boolean(optFlags[k])).length,
+            totalOptCount: uniqueKeys.length,
+        };
+    }, [currentStrategy, optFlags]);
+
+    const handleToggleAllOpt = useCallback((enableAll = true) => {
+        const optimizableFields = (currentStrategy?.fields || []).filter(f => f.optimizable);
+        const updated = {};
+        optimizableFields.forEach(f => {
+            const key = f.optKey || f.name;
+            updated[key] = enableAll;
+        });
+        setOptFlags(prev => ({ ...prev, ...updated }));
+    }, [currentStrategy]);
+
+    // Helper: Kiểm tra bản ghi Insight khớp symbol
     const isInsightMatchSymbol = useCallback((item, targetSym) => {
         if (!item || !targetSym) return false;
         const cleanSym = String(targetSym).trim().toUpperCase();
-
-        // 1. Kiểm tra đối tượng relation symbol
         const symObjName = String(item.symbol?.Name || item.symbol?.name || item.symbol?.ticker || '').trim().toUpperCase();
         if (symObjName && symObjName === cleanSym) return true;
-
-        // 2. Kiểm tra details.summary.symbol
         const detailSym = String(item.details?.summary?.symbol || '').trim().toUpperCase();
         if (detailSym && detailSym === cleanSym) return true;
-
-        // 3. Kiểm tra tiêu đề Insight
         const title = String(item.title || '').toUpperCase();
-        if (title === cleanSym) return true;
-        if (title.startsWith(`${cleanSym} `) || title.startsWith(`${cleanSym}-`) || title.startsWith(`${cleanSym}:`) || title.startsWith(`${cleanSym}_`)) return true;
+        if (title === cleanSym || title.startsWith(`${cleanSym} `) || title.startsWith(`${cleanSym}-`) || title.startsWith(`${cleanSym}:`) || title.startsWith(`${cleanSym}_`)) return true;
         if (title.includes(` ${cleanSym} `) || title.includes(`(${cleanSym})`) || title.includes(`[${cleanSym}]`)) return true;
-
         return false;
     }, []);
 
-    // 3.1 Tải thông tin Spread Percentile từ SymbolInsight
+    // Tải thông tin Spread từ SymbolInsight
     const loadSymbolInsight = useCallback(async (targetSymbol) => {
         const sym = String(targetSymbol || selectedSymbol || '').trim().toUpperCase();
         if (!sym) {
@@ -316,13 +271,8 @@ const PythonStrategy = () => {
                     'pagination[pageSize]': 20
                 });
             }
-
             const matched = (insights || []).filter(item => isInsightMatchSymbol(item, sym));
-            if (matched.length > 0) {
-                setSymbolInsightStats(matched[0]);
-            } else {
-                setSymbolInsightStats(null);
-            }
+            setSymbolInsightStats(matched.length > 0 ? matched[0] : null);
         } catch (err) {
             console.warn('Could not load SymbolInsight for symbol:', sym, err);
             setSymbolInsightStats(null);
@@ -331,7 +281,6 @@ const PythonStrategy = () => {
         }
     }, [selectedSymbol, symbols, isInsightMatchSymbol]);
 
-    // Mở Modal xem danh sách Insight đã lưu từ Strapi
     const handleOpenInsightModal = useCallback(async () => {
         const sym = String(selectedSymbol || '').trim().toUpperCase();
         if (!sym) {
@@ -363,13 +312,11 @@ const PythonStrategy = () => {
         }
     }, [selectedSymbol, symbols, isInsightMatchSymbol]);
 
-    // Chọn 1 bản ghi Insight từ modal
     const handleSelectInsightItem = useCallback((item) => {
         setSymbolInsightStats(item);
         setInsightModalOpen(false);
     }, []);
 
-    // Tự động load SymbolInsight khi chọn Symbol
     useEffect(() => {
         if (selectedSymbol) {
             loadSymbolInsight(selectedSymbol);
@@ -378,7 +325,7 @@ const PythonStrategy = () => {
         }
     }, [selectedSymbol, loadSymbolInsight]);
 
-    // Lấy giá trị Spread các mốc (P25, P50, P75, P90, P99) từ SymbolInsight (hoặc fallback live từ scanResult)
+    // Giá trị Spread (P25, P50, P75, P90, P99)
     const spreadValues = useMemo(() => {
         if (symbolInsightStats) {
             return {
@@ -408,22 +355,19 @@ const PythonStrategy = () => {
         return null;
     }, [symbolInsightStats, scanResult]);
 
-    // 4. Hàm thực hiện Scan Signal qua Python Backend
-    const handleScan = useCallback(async (tickerToScan = null, customCountback = null, customTimeframe = null) => {
+    // 4. SCAN STRATEGY
+    const handleScan = useCallback(async (tickerToScan = null, customCountback = null, customTimeframe = null, customParams = null) => {
         const ticker = String(tickerToScan || selectedSymbol || '').trim().toUpperCase();
         const currentTf = String(customTimeframe || timeframe || 'D1').trim().toUpperCase();
+        const activeParams = customParams || params;
+
         if (!ticker) {
             setErrorMessage('Vui lòng chọn Symbol trước khi chạy Scan.');
             return;
         }
 
-        if (!allowLong && !allowShort) {
+        if (!activeParams.allowLong && !activeParams.allowShort) {
             setErrorMessage('Vui lòng chọn ít nhất 1 loại lệnh (Long Trade hoặc Short Trade).');
-            return;
-        }
-
-        if (!isVWAP && !isPriceAction && !tpSupertrend && !tpRR) {
-            setErrorMessage('Vui lòng chọn ít nhất 1 phương thức chốt lời (Supertrend đảo chiều hoặc Tỷ lệ R:R).');
             return;
         }
 
@@ -431,61 +375,14 @@ const PythonStrategy = () => {
         setErrorMessage('');
         const reqCountback = customCountback || countback || 1000;
         try {
-            let payload;
-            if (isVWAP) {
-                payload = {
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    timeframe: currentTf,
-                    countback: reqCountback,
-                    maPeriod: parseInt(vwapMaPeriod) || 9,
-                    vwapAnchor,
-                    mult1: parseFloat(mult1) || 1.0,
-                    mult2: parseFloat(mult2) || 2.0,
-                    mult3: parseFloat(mult3) || 3.0,
-                    tpTarget: vwapTpTarget,
-                    allowLong,
-                    allowShort,
-                };
-            } else if (isPriceAction) {
-                payload = {
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    timeframe: currentTf,
-                    countback: reqCountback,
-                    stPeriod: parseInt(stPeriod) || 10,
-                    stMultiplier: parseFloat(stMultiplier) || 3.0,
-                    allowLong,
-                    allowShort,
-                    tpSupertrend,
-                    paEngulfing,
-                    paBd3bu2,
-                    paIncludeOpposite,
-                    paPointUp,
-                    paSwingUp,
-                    tpType,
-                    slType,
-                    customTpVal: parseFloat(customTpVal) || 0,
-                    customSlVal: parseFloat(customSlVal) || 0,
-                };
-            } else {
-                payload = {
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    timeframe: currentTf,
-                    countback: reqCountback,
-                    rr: parseFloat(riskReward) || 1.5,
-                    entryType,
-                    stPeriod: parseInt(stPeriod) || 10,
-                    stMultiplier: parseFloat(stMultiplier) || 3.0,
-                    maPeriod: parseInt(maPeriod) || 288,
-                    allowLong,
-                    allowShort,
-                    tpSupertrend,
-                    tpRR,
-                };
-            }
+            const basePayload = {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe: currentTf,
+                countback: reqCountback,
+            };
 
+            const payload = buildStrategyScanPayload(selectedStrategyFile, activeParams, basePayload);
             const result = await scanPythonStrategy(payload);
 
             if (result?.error) {
@@ -506,9 +403,9 @@ const PythonStrategy = () => {
         } finally {
             setScanning(false);
         }
-    }, [selectedSymbol, allowLong, allowShort, isVWAP, isPriceAction, tpSupertrend, tpRR, countback, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, riskReward, entryType, stPeriod, stMultiplier, maPeriod, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, tpType, slType, customTpVal, customSlVal]);
+    }, [selectedSymbol, params, countback, selectedStrategyFile, timeframe]);
 
-    // Auto load scan if querySymbol is provided in URL
+    // Tự động scan querySymbol trong URL
     const queryLoadedRef = useRef(false);
     useEffect(() => {
         if (querySymbol && !queryLoadedRef.current) {
@@ -518,7 +415,7 @@ const PythonStrategy = () => {
         }
     }, [querySymbol, timeframe, handleScan]);
 
-    // 4.1 Hàm cuộn sang trái tải thêm nến lịch sử (Infinite Scroll)
+    // Infinite Scroll tải thêm nến
     const handleLoadMore = useCallback(async () => {
         if (scanning || optimizing || loadingMore || !hasMore) return;
         const currentLen = scanResult?.candles?.length || 0;
@@ -534,62 +431,17 @@ const PythonStrategy = () => {
         try {
             const ticker = String(selectedSymbol || '').trim().toUpperCase();
             if (!ticker) return;
-            let payload;
-            if (isVWAP) {
-                payload = {
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    timeframe,
-                    countback: nextCount,
-                    maPeriod: parseInt(vwapMaPeriod) || 9,
-                    vwapAnchor,
-                    mult1: parseFloat(mult1) || 1.0,
-                    mult2: parseFloat(mult2) || 2.0,
-                    mult3: parseFloat(mult3) || 3.0,
-                    tpTarget: vwapTpTarget,
-                    allowLong,
-                    allowShort,
-                };
-            } else if (isPriceAction) {
-                payload = {
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    timeframe,
-                    countback: nextCount,
-                    stPeriod: parseInt(stPeriod) || 10,
-                    stMultiplier: parseFloat(stMultiplier) || 3.0,
-                    allowLong,
-                    allowShort,
-                    tpSupertrend,
-                    paEngulfing,
-                    paBd3bu2,
-                    paIncludeOpposite,
-                    paPointUp,
-                    paSwingUp,
-                    tpType,
-                    slType,
-                    customTpVal: parseFloat(customTpVal) || 0,
-                    customSlVal: parseFloat(customSlVal) || 0,
-                };
-            } else {
-                payload = {
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    timeframe,
-                    countback: nextCount,
-                    rr: parseFloat(riskReward) || 1.5,
-                    entryType,
-                    stPeriod: parseInt(stPeriod) || 10,
-                    stMultiplier: parseFloat(stMultiplier) || 3.0,
-                    maPeriod: parseInt(maPeriod) || 288,
-                    allowLong,
-                    allowShort,
-                    tpSupertrend,
-                    tpRR,
-                };
-            }
 
+            const basePayload = {
+                strategyFile: selectedStrategyFile,
+                ticker,
+                timeframe,
+                countback: nextCount,
+            };
+
+            const payload = buildStrategyScanPayload(selectedStrategyFile, params, basePayload);
             const result = await scanPythonStrategy(payload);
+
             if (result && !result.error && result.candles?.length > currentLen) {
                 setCountback(nextCount);
                 setScanResult(result);
@@ -601,57 +453,9 @@ const PythonStrategy = () => {
         } finally {
             setLoadingMore(false);
         }
-    }, [scanning, optimizing, loadingMore, hasMore, countback, scanResult, selectedSymbol, isVWAP, isPriceAction, selectedStrategyFile, timeframe, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, allowLong, allowShort, riskReward, entryType, stPeriod, stMultiplier, maPeriod, tpSupertrend, tpRR, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, tpType, slType, customTpVal, customSlVal]);
+    }, [scanning, optimizing, loadingMore, hasMore, countback, scanResult, selectedSymbol, selectedStrategyFile, timeframe, params]);
 
-    // Tính số lượng tham số đang được chọn để tối ưu
-    const { optCount, totalOptCount } = useMemo(() => {
-        if (isVWAP) {
-            const flags = [optVwapMaPeriod, optVwapAnchor, optMult2, optMult3, optVwapTpTarget];
-            return {
-                optCount: flags.filter(Boolean).length,
-                totalOptCount: flags.length,
-            };
-        } else if (isPriceAction) {
-            const flags = [optStPeriod, optStMultiplier, optPaPatterns, optTpType, optSlType, optPaTpSupertrend];
-            return {
-                optCount: flags.filter(Boolean).length,
-                totalOptCount: flags.length,
-            };
-        } else {
-            const flags = [optStPeriod, optStMultiplier, optMaPeriod, optRiskReward, optEntryType, optTpMode];
-            return {
-                optCount: flags.filter(Boolean).length,
-                totalOptCount: flags.length,
-            };
-        }
-    }, [isVWAP, isPriceAction, optVwapMaPeriod, optVwapAnchor, optMult2, optMult3, optVwapTpTarget, optStPeriod, optStMultiplier, optPaPatterns, optTpType, optSlType, optPaTpSupertrend, optMaPeriod, optRiskReward, optEntryType, optTpMode]);
-
-    // Bật / tắt tất cả các tham số tối ưu
-    const handleToggleAllOpt = useCallback((enableAll = true) => {
-        if (isVWAP) {
-            setOptVwapMaPeriod(enableAll);
-            setOptVwapAnchor(enableAll);
-            setOptMult2(enableAll);
-            setOptMult3(enableAll);
-            setOptVwapTpTarget(enableAll);
-        } else if (isPriceAction) {
-            setOptStPeriod(enableAll);
-            setOptStMultiplier(enableAll);
-            setOptPaPatterns(enableAll);
-            setOptTpType(enableAll);
-            setOptSlType(enableAll);
-            setOptPaTpSupertrend(enableAll);
-        } else {
-            setOptStPeriod(enableAll);
-            setOptStMultiplier(enableAll);
-            setOptMaPeriod(enableAll);
-            setOptRiskReward(enableAll);
-            setOptEntryType(enableAll);
-            setOptTpMode(enableAll);
-        }
-    }, [isVWAP, isPriceAction]);
-
-    // 4.2 Hàm tối ưu hóa tham số (Best Params Optimizer)
+    // 5. OPTIMIZE STRATEGY
     const handleOptimize = useCallback(async (tickerToOptimize) => {
         const ticker = String(tickerToOptimize || selectedSymbol || '').trim().toUpperCase();
         if (!ticker) {
@@ -659,7 +463,7 @@ const PythonStrategy = () => {
             return;
         }
 
-        if (!allowLong && !allowShort) {
+        if (!params.allowLong && !params.allowShort) {
             setErrorMessage('Vui lòng chọn ít nhất 1 loại lệnh (Long Trade hoặc Short Trade).');
             return;
         }
@@ -667,79 +471,16 @@ const PythonStrategy = () => {
         setOptimizing(true);
         setErrorMessage('');
         try {
-            let optConfig = {};
-            let payload = {
+            const basePayload = {
                 strategyFile: selectedStrategyFile,
                 ticker,
                 timeframe,
                 countback: 50000,
-                allowLong,
-                allowShort,
+                allowLong: params.allowLong,
+                allowShort: params.allowShort,
             };
 
-            if (isVWAP) {
-                optConfig = {
-                    maPeriod: optVwapMaPeriod,
-                    mult2: optMult2,
-                    mult3: optMult3,
-                    tpTarget: optVwapTpTarget,
-                    vwapAnchor: optVwapAnchor,
-                };
-                payload = {
-                    ...payload,
-                    vwapAnchor,
-                    vwapMaPeriod,
-                    mult1,
-                    mult2,
-                    mult3,
-                    vwapTpTarget,
-                    optConfig,
-                };
-            } else if (isPriceAction) {
-                optConfig = {
-                    stPeriod: optStPeriod,
-                    stMultiplier: optStMultiplier,
-                    paPatterns: optPaPatterns,
-                    tpType: optTpType,
-                    slType: optSlType,
-                    tpSupertrend: optPaTpSupertrend,
-                };
-                payload = {
-                    ...payload,
-                    stPeriod,
-                    stMultiplier,
-                    paEngulfing,
-                    paBd3bu2,
-                    paIncludeOpposite,
-                    paPointUp,
-                    paSwingUp,
-                    tpType,
-                    slType,
-                    tpSupertrend,
-                    optConfig,
-                };
-            } else {
-                optConfig = {
-                    stPeriod: optStPeriod,
-                    stMultiplier: optStMultiplier,
-                    maPeriod: optMaPeriod,
-                    riskReward: optRiskReward,
-                    entryType: optEntryType,
-                    tpMode: optTpMode,
-                };
-                payload = {
-                    ...payload,
-                    stPeriod,
-                    stMultiplier,
-                    maPeriod,
-                    riskReward,
-                    entryType,
-                    tpSupertrend,
-                    tpRR,
-                    optConfig,
-                };
-            }
-
+            const payload = buildStrategyOptimizePayload(selectedStrategyFile, params, optFlags, basePayload);
             const result = await optimizePythonStrategy(payload);
 
             if (result?.error) {
@@ -747,7 +488,7 @@ const PythonStrategy = () => {
             } else {
                 const topConfigs = result?.topConfigs || (result?.bestParams ? [{ ...result.bestParams, rank: 1 }] : []);
                 setOptimizationConfigs(topConfigs);
-                
+
                 if (topConfigs.length > 0) {
                     setOptimizationModalOpen(true);
                 } else {
@@ -768,331 +509,38 @@ const PythonStrategy = () => {
         } finally {
             setOptimizing(false);
         }
-    }, [selectedStrategyFile, selectedSymbol, allowLong, allowShort, timeframe, isVWAP, isPriceAction, vwapAnchor, vwapMaPeriod, mult1, mult2, mult3, vwapTpTarget, optVwapMaPeriod, optVwapAnchor, optMult2, optMult3, optVwapTpTarget, stPeriod, stMultiplier, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, tpType, slType, tpSupertrend, optPaPatterns, optTpType, optSlType, optPaTpSupertrend, maPeriod, riskReward, entryType, tpRR, optStPeriod, optStMultiplier, optMaPeriod, optRiskReward, optEntryType, optTpMode]);
+    }, [selectedStrategyFile, selectedSymbol, timeframe, params, optFlags]);
 
-    // 4.3 Hàm áp dụng cấu hình được chọn từ Bảng Tối Ưu (Optimization Leaderboard)
+    // Áp dụng cấu hình được chọn từ BXH Leaderboard
     const handleApplyOptimizeConfig = useCallback(async (config) => {
         if (!config) return;
         const ticker = String(selectedSymbol || '').trim().toUpperCase();
         if (!ticker) return;
 
-        // Cập nhật các trường state tương ứng
-        if (isVWAP) {
-            if (config.maPeriod !== undefined) setVwapMaPeriod(config.maPeriod);
-            if (config.tpTarget !== undefined) setVwapTpTarget(config.tpTarget);
-            if (config.mult2 !== undefined) setMult2(config.mult2);
-            if (config.mult3 !== undefined) setMult3(config.mult3);
-            if (config.vwapAnchor !== undefined) setVwapAnchor(config.vwapAnchor);
-            if (config.allowLong !== undefined) setAllowLong(config.allowLong);
-            if (config.allowShort !== undefined) setAllowShort(config.allowShort);
-        } else if (isPriceAction) {
-            if (config.stPeriod !== undefined) setStPeriod(config.stPeriod);
-            if (config.stMultiplier !== undefined) setStMultiplier(config.stMultiplier);
-            if (config.paEngulfing !== undefined) setPaEngulfing(Boolean(config.paEngulfing));
-            if (config.paBd3bu2 !== undefined) setPaBd3bu2(Boolean(config.paBd3bu2));
-            if (config.paIncludeOpposite !== undefined) setPaIncludeOpposite(Boolean(config.paIncludeOpposite));
-            if (config.paPointUp !== undefined) setPaPointUp(Boolean(config.paPointUp));
-            if (config.paSwingUp !== undefined) setPaSwingUp(Boolean(config.paSwingUp));
-            if (config.tpType !== undefined) setTpType(config.tpType);
-            if (config.slType !== undefined) setSlType(config.slType);
-            if (config.tpSupertrend !== undefined) setTpSupertrend(Boolean(config.tpSupertrend));
-            if (config.allowLong !== undefined) setAllowLong(config.allowLong);
-            if (config.allowShort !== undefined) setAllowShort(config.allowShort);
-        } else {
-            if (config.stPeriod !== undefined) setStPeriod(config.stPeriod);
-            if (config.stMultiplier !== undefined) setStMultiplier(config.stMultiplier);
-            if (config.maPeriod !== undefined) setMaPeriod(config.maPeriod);
-            if (config.riskReward !== undefined) setRiskReward(config.riskReward);
-            if (config.entryType !== undefined) setEntryType(config.entryType);
-            if (config.tpSupertrend !== undefined) setTpSupertrend(Boolean(config.tpSupertrend));
-            if (config.tpRR !== undefined) setTpRR(Boolean(config.tpRR));
-            if (config.allowLong !== undefined) setAllowLong(config.allowLong);
-            if (config.allowShort !== undefined) setAllowShort(config.allowShort);
-        }
-
+        const updatedParams = applyStrategyOptimizeConfig(selectedStrategyFile, config, params);
+        setParams(updatedParams);
         setActiveAppliedConfigRank(config.rank);
         setBestInfo(config);
         setOptimizationModalOpen(false);
 
-        // Chạy ngay scan với thông số vừa áp dụng để hiển thị kết quả và vẽ chart
-        let payload;
-        if (isVWAP) {
-            payload = {
-                strategyFile: selectedStrategyFile,
-                ticker,
-                timeframe,
-                countback,
-                maPeriod: parseInt(config.maPeriod ?? vwapMaPeriod) || 9,
-                vwapAnchor: config.vwapAnchor ?? vwapAnchor,
-                mult1: parseFloat(mult1) || 1.0,
-                mult2: parseFloat(config.mult2 ?? mult2) || 2.0,
-                mult3: parseFloat(config.mult3 ?? mult3) || 3.0,
-                tpTarget: config.tpTarget ?? vwapTpTarget,
-                allowLong: config.allowLong ?? allowLong,
-                allowShort: config.allowShort ?? allowShort,
-            };
-        } else if (isPriceAction) {
-            payload = {
-                strategyFile: selectedStrategyFile,
-                ticker,
-                timeframe,
-                countback,
-                stPeriod: parseInt(config.stPeriod ?? stPeriod) || 10,
-                stMultiplier: parseFloat(config.stMultiplier ?? stMultiplier) || 3.0,
-                allowLong: config.allowLong ?? allowLong,
-                allowShort: config.allowShort ?? allowShort,
-                tpSupertrend: Boolean(config.tpSupertrend ?? tpSupertrend),
-                paEngulfing: Boolean(config.paEngulfing ?? paEngulfing),
-                paBd3bu2: Boolean(config.paBd3bu2 ?? paBd3bu2),
-                paIncludeOpposite: Boolean(config.paIncludeOpposite ?? paIncludeOpposite),
-                paPointUp: Boolean(config.paPointUp ?? paPointUp),
-                paSwingUp: Boolean(config.paSwingUp ?? paSwingUp),
-                tpType: config.tpType ?? tpType,
-                slType: config.slType ?? slType,
-                customTpVal: parseFloat(customTpVal) || 0,
-                customSlVal: parseFloat(customSlVal) || 0,
-            };
-        } else {
-            payload = {
-                strategyFile: selectedStrategyFile,
-                ticker,
-                timeframe,
-                countback,
-                rr: parseFloat(config.riskReward ?? riskReward) || 1.5,
-                entryType: config.entryType ?? entryType,
-                stPeriod: parseInt(config.stPeriod ?? stPeriod) || 10,
-                stMultiplier: parseFloat(config.stMultiplier ?? stMultiplier) || 3.0,
-                maPeriod: parseInt(config.maPeriod ?? maPeriod) || 288,
-                allowLong: config.allowLong ?? allowLong,
-                allowShort: config.allowShort ?? allowShort,
-                tpSupertrend: Boolean(config.tpSupertrend ?? tpSupertrend),
-                tpRR: Boolean(config.tpRR ?? tpRR),
-            };
-        }
+        // Chạy scan ngay với cấu hình mới
+        handleScan(ticker, countback, timeframe, updatedParams);
+    }, [selectedSymbol, selectedStrategyFile, params, countback, timeframe, handleScan]);
 
-        setScanning(true);
-        setErrorMessage('');
-        try {
-            const scanRes = await scanPythonStrategy(payload);
-            if (scanRes?.error) {
-                setErrorMessage(scanRes.error);
-            } else {
-                setScanResult(scanRes);
-            }
-        } catch (err) {
-            console.error('Failed to run scan with applied config:', err);
-        } finally {
-            setScanning(false);
-        }
-    }, [selectedSymbol, isVWAP, isPriceAction, selectedStrategyFile, timeframe, countback, vwapMaPeriod, vwapAnchor, mult1, mult2, mult3, vwapTpTarget, allowLong, allowShort, stPeriod, stMultiplier, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, tpType, slType, customTpVal, customSlVal, riskReward, entryType, maPeriod, tpSupertrend, tpRR]);
-
-    // 4.4 Danh sách cấu hình tối ưu đã qua bộ lọc & sắp xếp
-    const filteredOptimizationConfigs = useMemo(() => {
-        if (!optimizationConfigs || optimizationConfigs.length === 0) return [];
-        let list = [...optimizationConfigs];
-
-        if (optimizationSearch.trim()) {
-            const q = optimizationSearch.trim().toLowerCase();
-            list = list.filter(item => {
-                const paText = String(item.paSummary || '').toLowerCase();
-                const tpText = String(item.tpType || '').toLowerCase();
-                const slText = String(item.slType || '').toLowerCase();
-                const entryText = String(item.entryType || '').toLowerCase();
-                const anchorText = String(item.vwapAnchor || '').toLowerCase();
-                const rankText = `#${item.rank}`;
-                return paText.includes(q) || tpText.includes(q) || slText.includes(q) || entryText.includes(q) || anchorText.includes(q) || rankText.includes(q);
-            });
-        }
-
-        list.sort((a, b) => {
-            let valA, valB;
-            if (optimizationSortBy === 'profitFactor') {
-                valA = Number(a.profitFactor || 0);
-                valB = Number(b.profitFactor || 0);
-            } else if (optimizationSortBy === 'winRate') {
-                valA = Number(a.winRate || 0);
-                valB = Number(b.winRate || 0);
-            } else if (optimizationSortBy === 'totalTrades') {
-                valA = Number(a.totalTrades || 0);
-                valB = Number(b.totalTrades || 0);
-            } else if (optimizationSortBy === 'totalPnlPercent') {
-                valA = Number(a.totalPnlPercent || 0);
-                valB = Number(b.totalPnlPercent || 0);
-            } else {
-                valA = Number(a.rank || 0);
-                valB = Number(b.rank || 0);
-            }
-
-            if (optimizationSortDir === 'asc') {
-                return valA > valB ? 1 : (valA < valB ? -1 : 0);
-            } else {
-                return valA < valB ? 1 : (valA > valB ? -1 : 0);
-            }
-        });
-
-        return list;
-    }, [optimizationConfigs, optimizationSearch, optimizationSortBy, optimizationSortDir]);
-
-    // 4.2 Hàm reset các thông số về mặc định (Default)
+    // Reset về giá trị mặc định
     const handleResetDefault = useCallback(() => {
         setBestInfo(null);
         setErrorMessage('');
         const ticker = String(selectedSymbol || '').trim().toUpperCase();
+        const defaultVals = getDefaultParams(selectedStrategyFile);
+        setParams(defaultVals);
 
-        if (isVWAP) {
-            const defaultVWAP = {
-                maPeriod: 9,
-                vwapAnchor: 'year',
-                mult1: 1.0,
-                mult2: 2.0,
-                mult3: 3.0,
-                tpTarget: 'tp1_vwap',
-                allowLong: true,
-                allowShort: true,
-            };
-
-            setVwapMaPeriod(defaultVWAP.maPeriod);
-            setVwapAnchor(defaultVWAP.vwapAnchor);
-            setMult1(defaultVWAP.mult1);
-            setMult2(defaultVWAP.mult2);
-            setMult3(defaultVWAP.mult3);
-            setVwapTpTarget(defaultVWAP.tpTarget);
-            setAllowLong(defaultVWAP.allowLong);
-            setAllowShort(defaultVWAP.allowShort);
-
-            if (ticker) {
-                setScanning(true);
-                scanPythonStrategy({
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    countback: 500,
-                    maPeriod: defaultVWAP.maPeriod,
-                    vwapAnchor: defaultVWAP.vwapAnchor,
-                    mult1: defaultVWAP.mult1,
-                    mult2: defaultVWAP.mult2,
-                    mult3: defaultVWAP.mult3,
-                    tpTarget: defaultVWAP.tpTarget,
-                    allowLong: defaultVWAP.allowLong,
-                    allowShort: defaultVWAP.allowShort,
-                })
-                    .then((result) => {
-                        if (result?.error) setErrorMessage(result.error);
-                        else setScanResult(result);
-                    })
-                    .catch((err) => console.error(err))
-                    .finally(() => setScanning(false));
-            }
-        } else if (isPriceAction) {
-            const defaultPA = {
-                stPeriod: 10,
-                stMultiplier: 3.0,
-                paEngulfing: true,
-                paBd3bu2: true,
-                paIncludeOpposite: true,
-                paPointUp: false,
-                paSwingUp: false,
-                tpType: 'P50',
-                slType: 'P75',
-                customTpVal: 0,
-                customSlVal: 0,
-                tpSupertrend: false,
-                allowLong: true,
-                allowShort: true,
-            };
-
-            setStPeriod(defaultPA.stPeriod);
-            setStMultiplier(defaultPA.stMultiplier);
-            setPaEngulfing(defaultPA.paEngulfing);
-            setPaBd3bu2(defaultPA.paBd3bu2);
-            setPaIncludeOpposite(defaultPA.paIncludeOpposite);
-            setPaPointUp(defaultPA.paPointUp);
-            setPaSwingUp(defaultPA.paSwingUp);
-            setTpType(defaultPA.tpType);
-            setSlType(defaultPA.slType);
-            setCustomTpVal(defaultPA.customTpVal);
-            setCustomSlVal(defaultPA.customSlVal);
-            setTpSupertrend(defaultPA.tpSupertrend);
-            setAllowLong(defaultPA.allowLong);
-            setAllowShort(defaultPA.allowShort);
-
-            if (ticker) {
-                setScanning(true);
-                scanPythonStrategy({
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    countback: 500,
-                    stPeriod: defaultPA.stPeriod,
-                    stMultiplier: defaultPA.stMultiplier,
-                    paEngulfing: defaultPA.paEngulfing,
-                    paBd3bu2: defaultPA.paBd3bu2,
-                    paIncludeOpposite: defaultPA.paIncludeOpposite,
-                    paPointUp: defaultPA.paPointUp,
-                    paSwingUp: defaultPA.paSwingUp,
-                    tpType: defaultPA.tpType,
-                    slType: defaultPA.slType,
-                    customTpVal: defaultPA.customTpVal,
-                    customSlVal: defaultPA.customSlVal,
-                    tpSupertrend: defaultPA.tpSupertrend,
-                    allowLong: defaultPA.allowLong,
-                    allowShort: defaultPA.allowShort,
-                })
-                    .then((result) => {
-                        if (result?.error) setErrorMessage(result.error);
-                        else setScanResult(result);
-                    })
-                    .catch((err) => console.error(err))
-                    .finally(() => setScanning(false));
-            }
-        } else {
-            const defaultParams = {
-                stPeriod: 10,
-                stMultiplier: 3.0,
-                maPeriod: 288,
-                riskReward: 1.5,
-                entryType: 'candle_close',
-                tpSupertrend: true,
-                tpRR: true,
-                allowLong: true,
-                allowShort: true,
-            };
-
-            setStPeriod(defaultParams.stPeriod);
-            setStMultiplier(defaultParams.stMultiplier);
-            setMaPeriod(defaultParams.maPeriod);
-            setRiskReward(defaultParams.riskReward);
-            setEntryType(defaultParams.entryType);
-            setTpSupertrend(defaultParams.tpSupertrend);
-            setTpRR(defaultParams.tpRR);
-            setAllowLong(defaultParams.allowLong);
-            setAllowShort(defaultParams.allowShort);
-
-            if (ticker) {
-                setScanning(true);
-                scanPythonStrategy({
-                    strategyFile: selectedStrategyFile,
-                    ticker,
-                    countback: 500,
-                    rr: defaultParams.riskReward,
-                    entryType: defaultParams.entryType,
-                    stPeriod: defaultParams.stPeriod,
-                    stMultiplier: defaultParams.stMultiplier,
-                    maPeriod: defaultParams.maPeriod,
-                    allowLong: defaultParams.allowLong,
-                    allowShort: defaultParams.allowShort,
-                    tpSupertrend: defaultParams.tpSupertrend,
-                    tpRR: defaultParams.tpRR,
-                })
-                    .then((result) => {
-                        if (result?.error) setErrorMessage(result.error);
-                        else setScanResult(result);
-                    })
-                    .catch((err) => console.error(err))
-                    .finally(() => setScanning(false));
-            }
+        if (ticker) {
+            handleScan(ticker, 500, timeframe, defaultVals);
         }
-    }, [selectedSymbol, selectedStrategyFile, isVWAP, isPriceAction]);
+    }, [selectedSymbol, selectedStrategyFile, timeframe, handleScan]);
 
-    // 4.3 Template Handlers: Select, Save, Delete
+    // Template Handlers: Select, Save, Delete
     const handleSelectTemplate = (templateId) => {
         setSelectedTemplateId(templateId);
         if (!templateId) return;
@@ -1107,68 +555,26 @@ const PythonStrategy = () => {
             setTimeframe(tpl.timeframe);
         }
 
-        const cfg = tpl.config || {};
-        const isTargetVWAP = (tpl.strategyFile || selectedStrategyFile || '').toLowerCase().includes('vwap');
-        const isTargetPriceAction = (tpl.strategyFile || selectedStrategyFile || '').toLowerCase().includes('priceaction') || (tpl.strategyFile || selectedStrategyFile || '').toLowerCase().includes('price_action');
+        const tplConfig = tpl.config || {};
+        const mergedParams = {
+            ...getDefaultParams(tpl.strategyFile || selectedStrategyFile),
+            ...tplConfig,
+        };
+        setParams(mergedParams);
 
-        if (isTargetVWAP) {
-            if (cfg.vwapMaPeriod !== undefined) setVwapMaPeriod(cfg.vwapMaPeriod);
-            if (cfg.vwapAnchor !== undefined) setVwapAnchor(cfg.vwapAnchor);
-            if (cfg.vwapTpTarget !== undefined) setVwapTpTarget(cfg.vwapTpTarget);
-            if (cfg.mult1 !== undefined) setMult1(cfg.mult1);
-            if (cfg.mult2 !== undefined) setMult2(cfg.mult2);
-            if (cfg.mult3 !== undefined) setMult3(cfg.mult3);
-        } else if (isTargetPriceAction) {
-            if (cfg.stPeriod !== undefined) setStPeriod(cfg.stPeriod);
-            if (cfg.stMultiplier !== undefined) setStMultiplier(cfg.stMultiplier);
-            if (cfg.paEngulfing !== undefined) setPaEngulfing(cfg.paEngulfing);
-            if (cfg.paBd3bu2 !== undefined) setPaBd3bu2(cfg.paBd3bu2);
-            if (cfg.paIncludeOpposite !== undefined) setPaIncludeOpposite(cfg.paIncludeOpposite);
-            if (cfg.paPointUp !== undefined) setPaPointUp(cfg.paPointUp);
-            if (cfg.paSwingUp !== undefined) setPaSwingUp(cfg.paSwingUp);
-            if (cfg.tpType !== undefined) setTpType(cfg.tpType);
-            if (cfg.slType !== undefined) setSlType(cfg.slType);
-            if (cfg.customTpVal !== undefined) setCustomTpVal(cfg.customTpVal);
-            if (cfg.customSlVal !== undefined) setCustomSlVal(cfg.customSlVal);
-            if (cfg.tpSupertrend !== undefined) setTpSupertrend(cfg.tpSupertrend);
-        } else {
-            if (cfg.riskReward !== undefined) setRiskReward(cfg.riskReward);
-            if (cfg.entryType !== undefined) setEntryType(cfg.entryType);
-            if (cfg.stPeriod !== undefined) setStPeriod(cfg.stPeriod);
-            if (cfg.stMultiplier !== undefined) setStMultiplier(cfg.stMultiplier);
-            if (cfg.maPeriod !== undefined) setMaPeriod(cfg.maPeriod);
-            if (cfg.tpSupertrend !== undefined) setTpSupertrend(cfg.tpSupertrend);
-            if (cfg.tpRR !== undefined) setTpRR(cfg.tpRR);
-        }
-
-        if (cfg.allowLong !== undefined) setAllowLong(cfg.allowLong);
-        if (cfg.allowShort !== undefined) setAllowShort(cfg.allowShort);
-        const reqCount = cfg.countback || countback || 1000;
+        const reqCount = tplConfig.countback || countback || 1000;
         setCountback(reqCount);
         setBestInfo(null);
         setHasMore(true);
 
-        handleScan(selectedSymbol, reqCount, targetTf);
+        handleScan(selectedSymbol, reqCount, targetTf, mergedParams);
     };
 
-    const generateDefaultDescription = useCallback(() => {
-        if (isVWAP) {
-            return `VWAP(${vwapAnchor}) + MA${vwapMaPeriod} | TP: ${vwapTpTarget} | Dải: ${mult1}x/${mult2}x/${mult3}x | ${allowLong ? 'Long' : ''} ${allowShort ? 'Short' : ''}`.trim();
-        } else if (isPriceAction) {
-            const pas = [];
-            if (paEngulfing) pas.push('Engulfing');
-            if (paBd3bu2) pas.push('BD3BU2');
-            if (paIncludeOpposite) pas.push('IncludeOpposite');
-            if (paPointUp) pas.push('PointUp');
-            if (paSwingUp) pas.push('SwingUp');
-            const paStr = pas.length > 0 ? pas.join(', ') : 'All PA';
-            return `ST(${stPeriod}, ${stMultiplier}) + PA [${paStr}] | TP: ${tpType} | SL: ${slType} | ${allowLong ? 'Long' : ''} ${allowShort ? 'Short' : ''}`.trim();
-        } else {
-            return `Supertrend(${stPeriod}, ${stMultiplier}) + MA${maPeriod} | Entry: ${entryType === 'st_reversal' ? 'ST Reversal' : 'Nến đóng'} | R:R: 1:${riskReward} | TP ST: ${tpSupertrend ? 'Bật' : 'Tắt'} | ${allowLong ? 'Long' : ''} ${allowShort ? 'Short' : ''}`.trim();
-        }
-    }, [isVWAP, isPriceAction, vwapAnchor, vwapMaPeriod, vwapTpTarget, mult1, mult2, mult3, allowLong, allowShort, paEngulfing, paBd3bu2, paIncludeOpposite, paPointUp, paSwingUp, stPeriod, stMultiplier, tpType, slType, maPeriod, entryType, riskReward, tpSupertrend]);
-
     const handleOpenSaveModal = () => {
+        const defaultDesc = typeof currentStrategy?.generateDescription === 'function'
+            ? currentStrategy.generateDescription(params)
+            : '';
+
         if (selectedTemplateId) {
             const activeTpl = symbolTemplates.find(t =>
                 String(t.documentId || t.id) === String(selectedTemplateId) ||
@@ -1177,33 +583,29 @@ const PythonStrategy = () => {
             if (activeTpl) {
                 setOverwriteTemplateId(String(activeTpl.documentId || activeTpl.id));
                 setTemplateNameInput(activeTpl.name || '');
-                setTemplateDescInput(activeTpl.description || generateDefaultDescription());
+                setTemplateDescInput(activeTpl.description || defaultDesc);
                 setSaveModalOpen(true);
                 return;
             }
         }
 
         setOverwriteTemplateId('__NEW__');
-        const defaultName = isVWAP
-            ? `${selectedSymbol} - VWAP MA${vwapMaPeriod} ${vwapAnchor.toUpperCase()} (${timeframe})`
-            : isPriceAction
-                ? `${selectedSymbol} - ST(${stPeriod},${stMultiplier}) + PA (TP:${tpType}, SL:${slType}) (${timeframe})`
-                : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
+        const defaultName = `${selectedSymbol} - ${currentStrategy.name.replace(' Strategy', '')} (${timeframe})`;
         setTemplateNameInput(defaultName);
-        setTemplateDescInput(generateDefaultDescription());
+        setTemplateDescInput(defaultDesc);
         setSaveModalOpen(true);
     };
 
     const handleModalSelectTemplate = (val) => {
         setOverwriteTemplateId(val);
+        const defaultDesc = typeof currentStrategy?.generateDescription === 'function'
+            ? currentStrategy.generateDescription(params)
+            : '';
+
         if (!val || val === '__NEW__') {
-            const defaultName = isVWAP
-                ? `${selectedSymbol} - VWAP MA${vwapMaPeriod} ${vwapAnchor.toUpperCase()} (${timeframe})`
-                : isPriceAction
-                    ? `${selectedSymbol} - ST(${stPeriod},${stMultiplier}) + PA (TP:${tpType}, SL:${slType}) (${timeframe})`
-                    : `${selectedSymbol} - Supertrend MA${maPeriod} (${timeframe})`;
+            const defaultName = `${selectedSymbol} - ${currentStrategy.name.replace(' Strategy', '')} (${timeframe})`;
             setTemplateNameInput(defaultName);
-            setTemplateDescInput(generateDefaultDescription());
+            setTemplateDescInput(defaultDesc);
         } else {
             const tpl = symbolTemplates.find(t =>
                 String(t.documentId || t.id) === String(val) ||
@@ -1211,7 +613,7 @@ const PythonStrategy = () => {
             );
             if (tpl) {
                 setTemplateNameInput(tpl.name || '');
-                setTemplateDescInput(tpl.description || generateDefaultDescription());
+                setTemplateDescInput(tpl.description || defaultDesc);
             }
         }
     };
@@ -1223,60 +625,20 @@ const PythonStrategy = () => {
 
         setSavingTemplate(true);
         try {
-            let config;
-            if (isVWAP) {
-                config = {
-                    vwapMaPeriod: parseInt(vwapMaPeriod) || 9,
-                    vwapAnchor,
-                    vwapTpTarget,
-                    mult1: parseFloat(mult1) || 1.0,
-                    mult2: parseFloat(mult2) || 2.0,
-                    mult3: parseFloat(mult3) || 3.0,
-                    allowLong,
-                    allowShort,
-                    countback,
-                };
-            } else if (isPriceAction) {
-                config = {
-                    stPeriod: parseInt(stPeriod) || 10,
-                    stMultiplier: parseFloat(stMultiplier) || 3.0,
-                    paEngulfing,
-                    paBd3bu2,
-                    paIncludeOpposite,
-                    paPointUp,
-                    paSwingUp,
-                    tpType,
-                    slType,
-                    customTpVal: parseFloat(customTpVal) || 0,
-                    customSlVal: parseFloat(customSlVal) || 0,
-                    tpSupertrend,
-                    allowLong,
-                    allowShort,
-                    countback,
-                };
-            } else {
-                config = {
-                    riskReward: parseFloat(riskReward) || 1.5,
-                    entryType,
-                    stPeriod: parseInt(stPeriod) || 10,
-                    stMultiplier: parseFloat(stMultiplier) || 3.0,
-                    maPeriod: parseInt(maPeriod) || 288,
-                    tpSupertrend,
-                    tpRR,
-                    allowLong,
-                    allowShort,
-                    countback,
-                };
-            }
-
             const currentSymObj = symbols.find(s => String(s.Name || s.name || '').trim().toUpperCase() === String(selectedSymbol).trim().toUpperCase());
+            const defaultDesc = typeof currentStrategy?.generateDescription === 'function'
+                ? currentStrategy.generateDescription(params)
+                : '';
 
             const payload = {
                 name,
-                description: templateDescInput.trim() || generateDefaultDescription(),
+                description: templateDescInput.trim() || defaultDesc,
                 strategyFile: selectedStrategyFile,
                 timeframe,
-                config,
+                config: {
+                    ...params,
+                    countback,
+                },
                 symbol: currentSymObj?.documentId || currentSymObj?.id || null,
                 symbolName: selectedSymbol,
                 account: selectedAccount?.documentId || selectedAccount?.id || null,
@@ -1284,10 +646,8 @@ const PythonStrategy = () => {
 
             let savedResult = null;
             if (overwriteTemplateId && overwriteTemplateId !== '__NEW__') {
-                // Ghi đè template đã chọn
                 savedResult = await updateStrategyTemplate(overwriteTemplateId, payload);
             } else {
-                // Tạo template mới
                 savedResult = await createStrategyTemplate(payload);
             }
 
@@ -1326,9 +686,13 @@ const PythonStrategy = () => {
         }
     };
 
-    // Khi đổi file chiến lược, tự động scan lại với chiến lược mới
+    // Đổi file chiến lược: nạp params và optFlags mặc định theo schema mới
     const handleStrategyChange = (newFileName) => {
         setSelectedStrategyFile(newFileName);
+        const newParams = getDefaultParams(newFileName);
+        const newOptFlags = getDefaultOptFlags(newFileName);
+        setParams(newParams);
+        setOptFlags(newOptFlags);
         setBestInfo(null);
         setCountback(1000);
         setHasMore(true);
@@ -1342,7 +706,7 @@ const PythonStrategy = () => {
         }
     }, [selectedSymbol, selectedStrategyFile, timeframe]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // 5. Chuẩn bị dữ liệu nến cho TradingViewChart
+    // Chuẩn bị dữ liệu nến cho TradingViewChart
     const chartCandles = useMemo(() => {
         if (!scanResult?.candles) return [];
         return scanResult.candles.map(c => ({
@@ -1356,7 +720,7 @@ const PythonStrategy = () => {
         }));
     }, [scanResult]);
 
-    // 6. Chuẩn bị Markers tín hiệu cho TradingViewChart
+    // Chuẩn bị Markers tín hiệu cho TradingViewChart
     const chartSignals = useMemo(() => {
         if (!scanResult?.signals) return [];
         return scanResult.signals.map(sig => {
@@ -1364,19 +728,16 @@ const PythonStrategy = () => {
             const isTP = sig.type === 'takeprofit';
             const isSL = sig.type === 'stoploss';
             const isShort = sig.type === 'Short' || sig.pos_type === 'Short';
-            const isLong = sig.type === 'Long' || sig.pos_type === 'Long';
 
             let ruleType = 'entry';
-            let color = '#10b981'; // Green
+            let color = '#10b981';
             let shape = 'arrowUp';
             let position = 'belowBar';
             let text = '';
 
             if (isTP) {
                 ruleType = 'takeprofit';
-                color = '#3b82f6'; // Luôn là mũi tên blue
-                // Long TP: nằm TRÊN nến hướng xuống (aboveBar)
-                // Short TP: nằm DƯỚI nến hướng lên (belowBar)
+                color = '#3b82f6';
                 if (isShort) {
                     position = 'belowBar';
                     shape = 'arrowUp';
@@ -1386,18 +747,17 @@ const PythonStrategy = () => {
                 }
             } else if (isSL) {
                 ruleType = 'stoploss';
-                color = '#ef4444'; // Hình tròn màu đỏ (circle)
+                color = '#ef4444';
                 shape = 'circle';
                 position = isShort ? 'aboveBar' : 'belowBar';
-                text = '';
             } else if (isShort) {
                 ruleType = 'entry';
-                color = '#ef4444'; // Mũi tên đỏ hướng xuống
+                color = '#ef4444';
                 shape = 'arrowDown';
                 position = 'aboveBar';
             } else {
                 ruleType = 'entry';
-                color = '#10b981'; // Mũi tên xanh Green hướng lên
+                color = '#10b981';
                 shape = 'arrowUp';
                 position = 'belowBar';
             }
@@ -1424,20 +784,9 @@ const PythonStrategy = () => {
         });
     }, [scanResult]);
 
-    // 7. Lọc danh sách Trades hiển thị trong Table
-    const tradesList = useMemo(() => {
-        if (!scanResult?.trades) return [];
-        if (activeTab === 'all') return [...scanResult.trades].reverse();
-        if (activeTab === 'Open') return scanResult.trades.filter(t => t.status === 'Open').reverse();
-        if (activeTab === 'Closed') return scanResult.trades.filter(t => t.status === 'Closed').reverse();
-        if (activeTab === 'Long' || activeTab === 'Short') return scanResult.trades.filter(t => t.type === activeTab).reverse();
-        return [...scanResult.trades].reverse();
-    }, [scanResult, activeTab]);
-
     const summary = scanResult?.summary;
-    const activeTrade = summary?.activeTrade;
 
-    // 8. Tính toán Profit Factor (Tổng Gross Profit / Tổng Gross Loss)
+    // Tính toán Profit Factor
     const profitFactor = useMemo(() => {
         if (summary?.profitFactor !== undefined && summary?.profitFactor !== null) {
             return summary.profitFactor;
@@ -1460,7 +809,7 @@ const PythonStrategy = () => {
         return (grossProfit / grossLoss).toFixed(2);
     }, [scanResult, summary]);
 
-    // 9. Di chuyển và zoom biểu đồ tới nến Entry khi click View
+    // Zoom biểu đồ tới nến Entry khi click View
     const handleViewTrade = useCallback((trade) => {
         const targetDate = trade.entry_time || (trade.entry_date ? String(trade.entry_date).split('T')[0] : null);
         if (targetDate) {
@@ -1471,1482 +820,89 @@ const PythonStrategy = () => {
 
     return (
         <div className="flex-1 flex flex-col p-4 md:p-6 bg-gray-900 text-gray-100 min-h-screen space-y-6">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800 pb-4">
-                <div>
-                    <div className="flex items-center gap-2">
-                        <div className="p-2 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400 shadow-lg shadow-purple-500/10">
-                            <BrainCircuit size={24} />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-                                Python Strategy
-                                <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-medium border border-purple-500/30">
-                                    1 Entry 1 Lúc
-                                </span>
-                            </h1>
-                            <p className="text-sm text-gray-400 mt-0.5">
-                                Quét tín hiệu và mô phỏng chu kỳ lệnh (Entry ➔ TP/SL ➔ Tìm Entry mới) trực tiếp từ Python
-                            </p>
-                        </div>
-                    </div>
-                </div>
+            {/* 1. Header Area */}
+            <StrategyHeader
+                selectedAccount={selectedAccount}
+                selectedSymbol={selectedSymbol}
+            />
 
-                {/* Account badge & Trade Station link */}
-                <div className="flex items-center gap-2.5 self-start md:self-auto flex-wrap">
-                    {selectedAccount && (
-                        <div className="flex items-center gap-2 bg-gray-800/80 border border-gray-700/60 rounded-xl px-3.5 py-2 shadow-sm">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                            <span className="text-xs text-gray-400">Tài khoản:</span>
-                            <span className="text-xs font-semibold text-gray-200">{selectedAccount.Name || selectedAccount.name}</span>
-                        </div>
-                    )}
-                    <Link
-                        to={selectedSymbol ? `/trade-station?symbol=${encodeURIComponent(selectedSymbol)}` : "/trade-station"}
-                        className="px-3.5 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
-                        title={selectedSymbol ? `Chuyển tới Trade Station với mã ${selectedSymbol}` : "Chuyển tới Trade Station"}
-                    >
-                        <BarChart3 size={14} />
-                        <span>Trade Station</span>
-                    </Link>
-                </div>
-            </div>
+            {/* 2. Watchlist & Symbol Selection Box */}
+            <WatchlistSymbolBar
+                selectedWatchlistId={selectedWatchlistId}
+                onWatchlistChange={(val) => {
+                    setSelectedWatchlistId(val);
+                    setSelectedSymbol('');
+                    setScanResult(null);
+                    setBestInfo(null);
+                }}
+                accountWatchlists={accountWatchlists}
+                selectedSymbol={selectedSymbol}
+                onSymbolChange={(sym) => {
+                    setSelectedSymbol(sym);
+                    setBestInfo(null);
+                    setCountback(1000);
+                    setHasMore(true);
+                    if (sym) {
+                        handleScan(sym, 1000, timeframe);
+                    } else {
+                        setScanResult(null);
+                    }
+                }}
+                watchlistSymbols={watchlistSymbols}
+                selectedTemplateId={selectedTemplateId}
+                onTemplateSelect={handleSelectTemplate}
+                onTemplateDelete={handleDeleteTemplate}
+                symbolTemplates={symbolTemplates}
+                timeframe={timeframe}
+                onTimeframeChange={(newTf) => {
+                    setTimeframe(newTf);
+                    setCountback(1000);
+                    setHasMore(true);
+                    setBestInfo(null);
+                    handleScan(selectedSymbol, 1000, newTf);
+                }}
+            />
 
-            {/* 1. Box Top: Watchlist & Symbol Selection */}
-            <div className="bg-gray-800/80 backdrop-blur-md rounded-2xl border border-gray-700/70 p-4 shadow-xl space-y-3">
-                <div className="flex items-center gap-2 border-b border-gray-700/60 pb-2.5">
-                    <Layers size={16} className="text-blue-400" />
-                    <h2 className="text-sm font-bold text-gray-200 tracking-wide uppercase">
-                        Watchlist & Symbol Selection
-                    </h2>
-                </div>
+            {/* 3. Strategy Configuration Box (Dynamic Form) */}
+            <DynamicStrategyForm
+                strategyFiles={strategyFiles}
+                selectedStrategyFile={selectedStrategyFile}
+                onStrategyChange={handleStrategyChange}
+                currentStrategy={currentStrategy}
+                params={params}
+                onParamChange={handleParamChange}
+                optFlags={optFlags}
+                onOptFlagChange={handleOptFlagChange}
+                onToggleAllOpt={handleToggleAllOpt}
+                optCount={optCount}
+                totalOptCount={totalOptCount}
+                timeframe={timeframe}
+                spreadValues={spreadValues}
+                symbolInsightStats={symbolInsightStats}
+                loadingInsightStats={loadingInsightStats}
+                onOpenInsightModal={handleOpenInsightModal}
+                selectedSymbol={selectedSymbol}
+                scanResult={scanResult}
+                scanning={scanning}
+                optimizing={optimizing}
+                optimizationConfigsCount={optimizationConfigs.length}
+                onResetDefault={handleResetDefault}
+                onOpenSaveModal={handleOpenSaveModal}
+                onOpenLeaderboard={() => setOptimizationModalOpen(true)}
+                onOptimize={() => handleOptimize(selectedSymbol)}
+                onScan={() => handleScan(selectedSymbol)}
+            />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3.5 items-end">
-                    {/* Dropdown: WatchLists của Account */}
-                    <div className="lg:col-span-3 space-y-1.5">
-                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                            <Layers size={14} className="text-blue-400" />
-                            Account Watchlist
-                        </label>
-                        <select
-                            value={selectedWatchlistId}
-                            onChange={(e) => {
-                                const newWlId = e.target.value;
-                                setSelectedWatchlistId(newWlId);
-                                setSelectedSymbol('');
-                                setScanResult(null);
-                                setBestInfo(null);
-                            }}
-                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition cursor-pointer"
-                        >
-                            <option value="">-- Tất cả Symbol --</option>
-                            {accountWatchlists.map(wl => (
-                                <option key={wl.documentId || wl.id} value={wl.documentId || wl.id}>
-                                    {wl.name || wl.Name} ({wl.symbols?.length || 0})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+            {/* 4. Optimal Params Success Banner */}
+            <OptimalConfigBanner
+                bestInfo={bestInfo}
+                onClose={() => setBestInfo(null)}
+                onOpenLeaderboard={() => setOptimizationModalOpen(true)}
+                hasLeaderboard={optimizationConfigs.length > 0}
+                currentStrategy={currentStrategy}
+            />
 
-                    {/* Dropdown: Symbol trong Watchlist */}
-                    <div className="lg:col-span-3 space-y-1.5">
-                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                            <ListFilter size={14} className="text-emerald-400" />
-                            Symbol trong Watchlist
-                        </label>
-                        <select
-                            value={selectedSymbol}
-                            onChange={(e) => {
-                                const newSym = e.target.value;
-                                setSelectedSymbol(newSym);
-                                setBestInfo(null);
-                                setCountback(1000);
-                                setHasMore(true);
-                                if (newSym) {
-                                    handleScan(newSym, 1000, timeframe);
-                                } else {
-                                    setScanResult(null);
-                                }
-                            }}
-                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-semibold uppercase"
-                        >
-                            <option value="">-- Chọn Symbol --</option>
-                            {watchlistSymbols.map((sym, idx) => (
-                                <option key={`${sym}-${idx}`} value={sym}>
-                                    {sym}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {/* Dropdown: Strategy Template */}
-                    <div className="lg:col-span-4 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                <Bookmark size={14} className="text-cyan-400" />
-                                Strategy Template {selectedSymbol ? `(${selectedSymbol})` : ''}
-                            </label>
-                            {selectedTemplateId && (
-                                <button
-                                    type="button"
-                                    onClick={(e) => handleDeleteTemplate(selectedTemplateId, e)}
-                                    title="Xóa template đã chọn"
-                                    className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition cursor-pointer"
-                                >
-                                    <Trash2 size={12} />
-                                    <span>Xóa</span>
-                                </button>
-                            )}
-                        </div>
-                        <select
-                            value={selectedTemplateId}
-                            onChange={(e) => handleSelectTemplate(e.target.value)}
-                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition cursor-pointer font-medium"
-                        >
-                            <option value="">
-                                {symbolTemplates.length > 0
-                                    ? `-- Chọn Template của ${selectedSymbol} (${symbolTemplates.length}) --`
-                                    : `-- Chưa có Template (${selectedSymbol}) --`}
-                            </option>
-                            {symbolTemplates.map(tpl => {
-                                const tplId = String(tpl.id || tpl.documentId);
-                                const stratShortName = String(tpl.strategyFile || '').replace('strategy_', '').replace('.py', '');
-                                return (
-                                    <option key={tplId} value={tplId}>
-                                        {tpl.name} ({stratShortName} - {tpl.timeframe || 'D1'})
-                                    </option>
-                                );
-                            })}
-                        </select>
-                    </div>
-
-                    {/* Dropdown: Timeframe */}
-                    <div className="lg:col-span-2 space-y-1.5">
-                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                            <Clock size={14} className="text-amber-400" />
-                            Timeframe
-                        </label>
-                        <select
-                            value={timeframe}
-                            onChange={(e) => {
-                                const newTf = e.target.value;
-                                setTimeframe(newTf);
-                                setCountback(1000);
-                                setHasMore(true);
-                                setBestInfo(null);
-                                handleScan(selectedSymbol, 1000, newTf);
-                            }}
-                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition cursor-pointer font-semibold"
-                        >
-                            <option value="M1">M1 (1 Phút)</option>
-                            <option value="M5">M5 (5 Phút)</option>
-                            <option value="M30">M30 (30 Phút)</option>
-                            <option value="H4">H4 (4 Giờ)</option>
-                            <option value="D1">D1 (1 Ngày)</option>
-                            <option value="W1">W1 (1 Tuần)</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            {/* 2. Box Bottom: Strategy Configuration */}
-            <div className="bg-gray-800/80 backdrop-blur-md rounded-2xl border border-gray-700/70 p-4 shadow-xl space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-700/60 pb-2.5">
-                    <div className="flex items-center gap-2">
-                        <Sliders size={16} className="text-purple-400" />
-                        <h2 className="text-sm font-bold text-gray-200 tracking-wide uppercase">
-                            Strategy Configuration
-                        </h2>
-                    </div>
-
-                    {/* Selective Optimization Controls */}
-                    <div className="flex items-center gap-2 bg-gray-900/80 px-3 py-1.5 rounded-xl border border-gray-700/60">
-                        <span className="text-xs text-gray-300 flex items-center gap-1.5 font-medium">
-                            <Sparkles size={13} className="text-amber-400" />
-                            Tối ưu hóa:
-                            <span className="font-mono font-bold text-amber-300 bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 rounded text-[11px]">
-                                {optCount}/{totalOptCount}
-                            </span>
-                            <span className="text-[11px] text-gray-400">tham số</span>
-                        </span>
-                        <div className="flex items-center gap-1 text-[11px] ml-1 border-l border-gray-700 pl-2">
-                            <button
-                                type="button"
-                                onClick={() => handleToggleAllOpt(true)}
-                                className="px-2 py-0.5 rounded bg-gray-800 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 border border-gray-700 hover:border-amber-500/40 transition cursor-pointer font-medium text-[10px]"
-                            >
-                                Chọn tất cả
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleToggleAllOpt(false)}
-                                className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 border border-gray-700 transition cursor-pointer font-medium text-[10px]"
-                            >
-                                Bỏ chọn
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                    {/* CỘT 1: STRATEGY & INDICATORS CONFIGURATION */}
-                    <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div>
-                            <span className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                                <BrainCircuit size={14} className="text-purple-400" />
-                                Strategy & Indicators Configuration
-                            </span>
-                        </div>
-
-                        {/* Dropdown: Python Strategy Files */}
-                        <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                <BrainCircuit size={13} className="text-purple-400" />
-                                Python Strategy
-                            </label>
-                            <select
-                                value={selectedStrategyFile}
-                                onChange={(e) => handleStrategyChange(e.target.value)}
-                                className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition cursor-pointer font-mono h-[42px]"
-                            >
-                                {strategyFiles.length === 0 ? (
-                                    <>
-                                        <option value="strategy_supertrend_ma288.py">strategy_supertrend_ma288.py</option>
-                                        <option value="strategy_vwap_ma9.py">strategy_vwap_ma9.py</option>
-                                    </>
-                                ) : (
-                                    strategyFiles.map(file => (
-                                        <option key={file.fileName} value={file.fileName}>
-                                            {file.name || file.fileName}
-                                        </option>
-                                    ))
-                                )}
-                            </select>
-                        </div>
-
-                        {/* Indicator Parameters */}
-                        {isVWAP ? (
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                                {/* MA Period */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="Chu kỳ MA (SMA)">
-                                            <BarChart3 size={12} className="text-amber-400 shrink-0" />
-                                            MA Period
-                                        </label>
-                                        <label
-                                            title={optVwapMaPeriod ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optVwapMaPeriod
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optVwapMaPeriod}
-                                                onChange={(e) => setOptVwapMaPeriod(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optVwapMaPeriod ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max="500"
-                                        value={vwapMaPeriod}
-                                        onChange={(e) => setVwapMaPeriod(e.target.value)}
-                                        placeholder="9"
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition font-mono h-[42px]"
-                                    />
-                                </div>
-
-                                {/* VWAP Anchor */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="Chu kỳ Anchor của VWAP">
-                                            <Clock size={12} className="text-blue-400 shrink-0" />
-                                            Anchor
-                                        </label>
-                                        <label
-                                            title={optVwapAnchor ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optVwapAnchor
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optVwapAnchor}
-                                                onChange={(e) => setOptVwapAnchor(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optVwapAnchor ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <select
-                                        value={vwapAnchor}
-                                        onChange={(e) => setVwapAnchor(e.target.value)}
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-xs text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition cursor-pointer h-[42px]"
-                                    >
-                                        <option value="day">Ngày (Daily)</option>
-                                        <option value="week">Tuần (Weekly)</option>
-                                        <option value="month">Tháng (Month)</option>
-                                        <option value="quarter">Quý (Quarter)</option>
-                                        <option value="year">Năm (Year)</option>
-                                    </select>
-                                </div>
-
-                                {/* Mult 2 */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="Hệ số dải Upper 2 / Lower 2">
-                                            <Activity size={12} className="text-purple-400 shrink-0" />
-                                            Band 2 (σ)
-                                        </label>
-                                        <label
-                                            title={optMult2 ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optMult2
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optMult2}
-                                                onChange={(e) => setOptMult2(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optMult2 ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="0.5"
-                                        max="5.0"
-                                        value={mult2}
-                                        onChange={(e) => setMult2(e.target.value)}
-                                        placeholder="2.0"
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition font-mono h-[42px]"
-                                    />
-                                </div>
-
-                                {/* Mult 3 */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="Hệ số dải Upper 3 / Lower 3">
-                                            <Activity size={12} className="text-rose-400 shrink-0" />
-                                            Band 3 (σ)
-                                        </label>
-                                        <label
-                                            title={optMult3 ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optMult3
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optMult3}
-                                                onChange={(e) => setOptMult3(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optMult3 ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="1.0"
-                                        max="6.0"
-                                        value={mult3}
-                                        onChange={(e) => setMult3(e.target.value)}
-                                        placeholder="3.0"
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 transition font-mono h-[42px]"
-                                    />
-                                </div>
-                            </div>
-                        ) : isPriceAction ? (
-                            <div className="space-y-3">
-                                {/* Supertrend Params */}
-                                <div className="grid grid-cols-2 gap-2.5">
-                                    {/* ST Period */}
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="SUPERTREND_PERIOD">
-                                                <TrendingUp size={12} className="text-emerald-400 shrink-0" />
-                                                ST Period
-                                            </label>
-                                            <label
-                                                title={optStPeriod ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optStPeriod
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optStPeriod}
-                                                    onChange={(e) => setOptStPeriod(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optStPeriod ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            max="500"
-                                            value={stPeriod}
-                                            onChange={(e) => setStPeriod(e.target.value)}
-                                            placeholder="10"
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
-                                        />
-                                    </div>
-
-                                    {/* ST Multiplier */}
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="SUPERTREND_MULTIPLIER">
-                                                <Activity size={12} className="text-emerald-400 shrink-0" />
-                                                ST Multiplier
-                                            </label>
-                                            <label
-                                                title={optStMultiplier ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optStMultiplier
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optStMultiplier}
-                                                    onChange={(e) => setOptStMultiplier(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optStMultiplier ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <input
-                                            type="number"
-                                            step="0.1"
-                                            min="0.1"
-                                            max="50"
-                                            value={stMultiplier}
-                                            onChange={(e) => setStMultiplier(e.target.value)}
-                                            placeholder="3.0"
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
-                                        />
-                                    </div>
-                                </div>
-
-                                {/* Danh sách 5 Price Action Checkboxes */}
-                                <div className="space-y-1.5 pt-1">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <Activity size={13} className="text-purple-400" />
-                                            Price Action Filter (Tick chọn kích hoạt)
-                                        </label>
-                                        <div className="flex items-center gap-1.5">
-                                            <label
-                                                title={optPaPatterns ? "Bỏ chọn để giữ nguyên tổ hợp mẫu hình PA hiện tại khi optimize" : "Chọn để tự động tìm kiếm tổ hợp mẫu hình PA tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optPaPatterns
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optPaPatterns}
-                                                    onChange={(e) => setOptPaPatterns(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optPaPatterns ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                            <span className="text-[10px] text-purple-300 font-mono bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-full">
-                                                Kích hoạt khi thỏa mãn (OR)
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        {/* 1. Engulfing */}
-                                        <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${paEngulfing ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50' : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={paEngulfing}
-                                                onChange={(e) => setPaEngulfing(e.target.checked)}
-                                                className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
-                                                    <span>1. Engulfing</span>
-                                                    <span className="text-[10px] text-purple-400 font-mono">Bao trùm</span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
-                                                    Nến đóng cửa vượt qua toàn bộ nến trước
-                                                </p>
-                                            </div>
-                                        </label>
-
-                                        {/* 2. BD3BU2 */}
-                                        <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${paBd3bu2 ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50' : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={paBd3bu2}
-                                                onChange={(e) => setPaBd3bu2(e.target.checked)}
-                                                className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
-                                                    <span>2. BD3BU2 / BU3BD2</span>
-                                                    <span className="text-[10px] text-cyan-400 font-mono">6 Nến</span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
-                                                    Nến 2 là cực trị, Nến 0 breakout vượt 1 &amp; 2
-                                                </p>
-                                            </div>
-                                        </label>
-
-                                        {/* 3. IncludeOpposite */}
-                                        <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${paIncludeOpposite ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50' : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={paIncludeOpposite}
-                                                onChange={(e) => setPaIncludeOpposite(e.target.checked)}
-                                                className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
-                                                    <span>3. IncludeOpposite</span>
-                                                    <span className="text-[10px] text-emerald-400 font-mono">Ngược màu</span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
-                                                    Nến vượt 2 nến trước &amp; có nến ngược màu
-                                                </p>
-                                            </div>
-                                        </label>
-
-                                        {/* 4. PointUp / PointDown */}
-                                        <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${paPointUp ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50' : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={paPointUp}
-                                                onChange={(e) => setPaPointUp(e.target.checked)}
-                                                className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
-                                                    <span>4. PointUp / PointDown</span>
-                                                    <span className="text-[10px] text-amber-400 font-mono">3 Nến</span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
-                                                    Fractal đỉnh / đáy với nến giữa cực trị
-                                                </p>
-                                            </div>
-                                        </label>
-
-                                        {/* 5. SwingUp / SwingDown */}
-                                        <label className={`sm:col-span-2 flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${paSwingUp ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50' : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={paSwingUp}
-                                                onChange={(e) => setPaSwingUp(e.target.checked)}
-                                                className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
-                                            />
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
-                                                    <span>5. SwingUp / SwingDown</span>
-                                                    <span className="text-[10px] text-rose-400 font-mono">Swing Cực Trị</span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
-                                                    PointUp cao nhất hoặc PointDown thấp nhất so với 2 bên
-                                                </p>
-                                            </div>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-3 gap-2.5">
-                                {/* Supertrend Period */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="SUPERTREND_PERIOD">
-                                            <TrendingUp size={12} className="text-emerald-400 shrink-0" />
-                                            ST Period
-                                        </label>
-                                        <label
-                                            title={optStPeriod ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optStPeriod
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optStPeriod}
-                                                onChange={(e) => setOptStPeriod(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optStPeriod ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max="500"
-                                        value={stPeriod}
-                                        onChange={(e) => setStPeriod(e.target.value)}
-                                        placeholder="10"
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
-                                    />
-                                </div>
-
-                                {/* Supertrend Multiplier */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="SUPERTREND_MULTIPLIER">
-                                            <Activity size={12} className="text-emerald-400 shrink-0" />
-                                            ST Multiplier
-                                        </label>
-                                        <label
-                                            title={optStMultiplier ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optStMultiplier
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optStMultiplier}
-                                                onChange={(e) => setOptStMultiplier(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optStMultiplier ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="0.1"
-                                        max="50"
-                                        value={stMultiplier}
-                                        onChange={(e) => setStMultiplier(e.target.value)}
-                                        placeholder="3.0"
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-mono h-[42px]"
-                                    />
-                                </div>
-
-                                {/* MA Period */}
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1 text-[11px] truncate" title="MA_PERIOD">
-                                            <BarChart3 size={12} className="text-purple-400 shrink-0" />
-                                            MA Period
-                                        </label>
-                                        <label
-                                            title={optMaPeriod ? "Bỏ chọn để giữ cố định giá trị này khi optimize" : "Chọn để tự động tìm kiếm giá trị tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optMaPeriod
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optMaPeriod}
-                                                onChange={(e) => setOptMaPeriod(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optMaPeriod ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max="1000"
-                                        value={maPeriod}
-                                        onChange={(e) => setMaPeriod(e.target.value)}
-                                        placeholder="288"
-                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-2.5 py-2 text-sm text-center text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition font-mono h-[42px]"
-                                    />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* CỘT 2: ENTRY, TAKE PROFIT & STOP LOSS */}
-                    <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
-                            <span className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                                <Target size={14} className="text-indigo-400" />
-                                Entry, Take Profit & Stop Loss
-                            </span>
-                        </div>
-
-                        {isVWAP ? (
-                            <>
-                                {/* Hàng 1: Điều kiện Vào lệnh (Entry) & Lựa chọn Loại lệnh */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <Activity size={13} className="text-indigo-400" />
-                                            Điều kiện Vào lệnh (Entry)
-                                        </label>
-                                        <div className="w-full bg-gray-900/90 border border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-indigo-300 font-medium flex items-center h-[42px]" title="Giá đóng cửa > MA & Giá > Lower 2 & MA < VWAP">
-                                            <span className="truncate">Giá &gt; MA{vwapMaPeriod} &amp; Giá &gt; Lower2 &amp; MA &lt; VWAP</span>
-                                        </div>
-                                    </div>
-
-                                    {/* 2 Checkbox: Long Trade & Short Trade */}
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <Layers size={13} className="text-purple-400" />
-                                            Loại lệnh giao dịch
-                                        </label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowLong}
-                                                    onChange={(e) => setAllowLong(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
-                                                />
-                                                <TrendingUp size={14} className={allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                                <span className={`text-xs font-semibold truncate ${allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>
-                                                    Long
-                                                </span>
-                                            </label>
-
-                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowShort}
-                                                    onChange={(e) => setAllowShort(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
-                                                />
-                                                <TrendingDown size={14} className={allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                                <span className={`text-xs font-semibold truncate ${allowShort ? 'text-rose-300' : 'text-gray-400'}`}>
-                                                    Short
-                                                </span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Hàng 2: Mục tiêu Chốt lời (Take Profit) & Cắt lỗ (Stop Loss) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                                <Target size={13} className="text-emerald-400" />
-                                                Mục tiêu Chốt lời (Take Profit)
-                                            </label>
-                                            <label
-                                                title={optVwapTpTarget ? "Bỏ chọn để giữ cố định mốc chốt lời này khi optimize" : "Chọn để tự động tìm kiếm mốc chốt lời tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optVwapTpTarget
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optVwapTpTarget}
-                                                    onChange={(e) => setOptVwapTpTarget(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optVwapTpTarget ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <select
-                                            value={vwapTpTarget}
-                                            onChange={(e) => setVwapTpTarget(e.target.value)}
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer h-[42px]"
-                                        >
-                                            <option value="tp1_vwap">TP 1: Tại đường VWAP (Mặc định)</option>
-                                            <option value="tp2_upper2">TP 2: Tại dải Upper 2</option>
-                                            <option value="tp3_upper3">TP 3: Tại dải Upper 3</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <ShieldAlert size={13} className="text-rose-400" />
-                                            Cắt lỗ (Stop Loss)
-                                        </label>
-                                        <div className="w-full bg-gray-900/90 border border-rose-500/30 rounded-xl px-3 py-2 text-xs text-rose-300 font-semibold flex items-center justify-between h-[42px]">
-                                            <span>Tại Lower 2 (VWAP - 2.0σ)</span>
-                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">LOWER 2</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        ) : isPriceAction ? (
-                            <>
-                                {/* Hàng 1 của Cột 2: Điều kiện Vào lệnh (Entry) & Lựa chọn Loại lệnh */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <Activity size={13} className="text-indigo-400" />
-                                            Điều kiện Vào lệnh (Entry)
-                                        </label>
-                                        <div className="w-full bg-gray-900/90 border border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-indigo-300 font-medium flex items-center justify-between h-[42px]" title="Supertrend Xu hướng + Price Action đã tick">
-                                            <span className="truncate">ST Trend + Price Action đã tick</span>
-                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">TREND + PA</span>
-                                        </div>
-                                    </div>
-
-                                    {/* 2 Checkbox: Long Trade & Short Trade */}
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <Layers size={13} className="text-purple-400" />
-                                            Loại lệnh giao dịch
-                                        </label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowLong}
-                                                    onChange={(e) => setAllowLong(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
-                                                />
-                                                <TrendingUp size={14} className={allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                                <span className={`text-xs font-semibold truncate ${allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>
-                                                    Long
-                                                </span>
-                                            </label>
-
-                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowShort}
-                                                    onChange={(e) => setAllowShort(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
-                                                />
-                                                <TrendingDown size={14} className={allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                                <span className={`text-xs font-semibold truncate ${allowShort ? 'text-rose-300' : 'text-gray-400'}`}>
-                                                    Short
-                                                </span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Hàng 2: Dropdown Take Profit & Stop Loss (Nạp Spread từ SymbolInsight) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    {/* Dropdown Take Profit */}
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                                <Target size={13} className="text-emerald-400" />
-                                                Take Profit (từ Entry)
-                                            </label>
-                                            <label
-                                                title={optTpType ? "Bỏ chọn để giữ cố định mốc TP này khi optimize" : "Chọn để tự động tìm kiếm mốc TP tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optTpType
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optTpType}
-                                                    onChange={(e) => setOptTpType(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optTpType ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <select
-                                            value={tpType}
-                                            onChange={(e) => setTpType(e.target.value)}
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-medium h-[42px]"
-                                        >
-                                            <option value="P25">P25 (Spread Hẹp {spreadValues?.p25 ? `• ${formatNumber(spreadValues.p25)}` : ''})</option>
-                                            <option value="P50">P50 (Trung vị {spreadValues?.p50 ? `• ${formatNumber(spreadValues.p50)}` : ''}) - Mặc định</option>
-                                            <option value="P75">P75 (Spread Rộng {spreadValues?.p75 ? `• ${formatNumber(spreadValues.p75)}` : ''})</option>
-                                            <option value="P90">P90 (Spread Đột biến {spreadValues?.p90 ? `• ${formatNumber(spreadValues.p90)}` : ''})</option>
-                                            <option value="P99">P99 (Spread Cực đại {spreadValues?.p99 ? `• ${formatNumber(spreadValues.p99)}` : ''})</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Dropdown Stop Loss */}
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                                <ShieldAlert size={13} className="text-rose-400" />
-                                                Stop Loss (từ Entry)
-                                            </label>
-                                            <label
-                                                title={optSlType ? "Bỏ chọn để giữ cố định mốc SL này khi optimize" : "Chọn để tự động tìm kiếm mốc SL tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optSlType
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optSlType}
-                                                    onChange={(e) => setOptSlType(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optSlType ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <select
-                                            value={slType}
-                                            onChange={(e) => setSlType(e.target.value)}
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 transition cursor-pointer font-medium h-[42px]"
-                                        >
-                                            <option value="P25">P25 (Spread Hẹp {spreadValues?.p25 ? `• ${formatNumber(spreadValues.p25)}` : ''})</option>
-                                            <option value="P50">P50 (Trung vị {spreadValues?.p50 ? `• ${formatNumber(spreadValues.p50)}` : ''})</option>
-                                            <option value="P75">P75 (Spread Rộng {spreadValues?.p75 ? `• ${formatNumber(spreadValues.p75)}` : ''}) - Mặc định</option>
-                                            <option value="P90">P90 (Spread Đột biến {spreadValues?.p90 ? `• ${formatNumber(spreadValues.p90)}` : ''})</option>
-                                            <option value="supertrend">Theo dải Supertrend</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                {/* Hàng 3: Nguồn dữ liệu Spread & Tùy chọn thoát lệnh */}
-                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 bg-gray-900/60 p-2.5 rounded-xl border border-gray-700/60 text-xs">
-                                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                                        <button
-                                            type="button"
-                                            onClick={handleOpenInsightModal}
-                                            disabled={loadingInsightStats || !selectedSymbol}
-                                            className="px-3 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 font-semibold border border-blue-500/30 flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-sm"
-                                            title="Mở danh sách các bản ghi Insight đã lưu cho mã này"
-                                        >
-                                            <RefreshCw size={13} className={loadingInsightStats ? 'animate-spin' : ''} />
-                                            <span>Nạp Spread Insight</span>
-                                        </button>
-                                        {symbolInsightStats ? (
-                                            <span className="text-[11px] text-cyan-300 font-medium truncate flex items-center gap-1">
-                                                <CheckCircle2 size={12} className="text-cyan-400 shrink-0" />
-                                                <span className="truncate">{symbolInsightStats.title || `${selectedSymbol} Insight`}</span>
-                                            </span>
-                                        ) : (
-                                            <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90 font-medium">
-                                                <AlertTriangle size={12} className="text-amber-400 shrink-0" />
-                                                <span>Chưa có Insight cho {selectedSymbol || 'symbol'}.</span>
-                                                <Link
-                                                    to={`/strategy-insight?symbol=${encodeURIComponent(selectedSymbol || '')}`}
-                                                    className="text-cyan-400 hover:text-cyan-300 underline font-semibold flex items-center gap-0.5 ml-1 transition"
-                                                >
-                                                    <span>Tạo Insight</span>
-                                                    <ExternalLink size={10} />
-                                                </Link>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <label
-                                            title={optPaTpSupertrend ? "Bỏ chọn để giữ cố định tùy chọn này khi optimize" : "Chọn để tự động tìm kiếm tùy chọn tối ưu"}
-                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                optPaTpSupertrend
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                    : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={optPaTpSupertrend}
-                                                onChange={(e) => setOptPaTpSupertrend(e.target.checked)}
-                                                className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                            />
-                                            <span>{optPaTpSupertrend ? 'Opt' : 'Lock'}</span>
-                                        </label>
-                                        <label className="flex items-center gap-2 cursor-pointer select-none text-gray-300 hover:text-white">
-                                            <input
-                                                type="checkbox"
-                                                checked={tpSupertrend}
-                                                onChange={(e) => setTpSupertrend(e.target.checked)}
-                                                className="w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
-                                            />
-                                            <span className="text-xs">Chốt khi ST đảo chiều</span>
-                                        </label>
-                                    </div>
-                                </div>
-
-                                {/* Hàng 4: Hiển thị box #summary-metrics-card thay cho dòng chữ */}
-                                {symbolInsightStats ? (
-                                    <div id="summary-metrics-card" className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-950/80 p-2.5 rounded-xl border border-cyan-500/40 shadow-inner">
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Spread P50 (Trung vị)</span>
-                                            <span className="font-mono text-sky-300 font-bold">
-                                                {formatNumber(symbolInsightStats.spreadMedianPrice)} ({Number(symbolInsightStats.spreadMedianPercent || 0).toFixed(2)}%)
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Spread Rộng (P75)</span>
-                                            <span className="font-mono text-cyan-300 font-bold">
-                                                {formatNumber(symbolInsightStats.spreadP75Price)} ({Number(symbolInsightStats.spreadP75Percent || 0).toFixed(2)}%)
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Giờ Tăng mạnh</span>
-                                            <span className="text-emerald-400 font-semibold truncate block">
-                                                {symbolInsightStats.bestBullHour || 'N/A'}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Ngày Tăng tốt</span>
-                                            <span className="text-emerald-400 font-semibold truncate block">
-                                                {symbolInsightStats.bestBullDay || 'N/A'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ) : scanResult?.spreadStats ? (
-                                    <div id="summary-metrics-card" className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-950/60 p-2.5 rounded-xl border border-gray-800">
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Spread P50 (Lịch sử nến)</span>
-                                            <span className="font-mono text-sky-300 font-bold">
-                                                {formatNumber(spreadValues?.p50 || 0)} ({Number(scanResult.spreadStats.medianPercent || 0).toFixed(2)}%)
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Spread Rộng (P75)</span>
-                                            <span className="font-mono text-cyan-300 font-bold">
-                                                {formatNumber(spreadValues?.p75 || 0)} ({Number(scanResult.spreadStats.p75Percent || 0).toFixed(2)}%)
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Spread Đột biến (P90)</span>
-                                            <span className="font-mono text-amber-300 font-semibold truncate block">
-                                                {formatNumber(spreadValues?.p90 || 0)} ({Number(scanResult.spreadStats.p90Percent || 0).toFixed(2)}%)
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500 block text-[10px]">Nguồn dữ liệu</span>
-                                            <div className="flex items-center justify-between gap-1">
-                                                <span className="text-gray-400 font-medium truncate block">
-                                                    Tính từ Lịch sử nến
-                                                </span>
-                                                <Link
-                                                    to={`/strategy-insight?symbol=${encodeURIComponent(selectedSymbol || '')}`}
-                                                    className="text-cyan-400 hover:text-cyan-300 font-semibold text-[10px] shrink-0 underline flex items-center gap-0.5"
-                                                >
-                                                    Tạo Insight <ExternalLink size={9} />
-                                                </Link>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : null}
-                            </>
-                        ) : (
-                            <>
-                                {/* Hàng 1: Điều kiện Vào lệnh (Entry) & Lựa chọn Loại lệnh */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                                <Activity size={13} className="text-indigo-400" />
-                                                Điều kiện Vào lệnh (Entry)
-                                            </label>
-                                            <label
-                                                title={optEntryType ? "Bỏ chọn để giữ cố định điều kiện entry này khi optimize" : "Chọn để tự động tìm kiếm điều kiện entry tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optEntryType
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optEntryType}
-                                                    onChange={(e) => setOptEntryType(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optEntryType ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <select
-                                            value={entryType}
-                                            onChange={(e) => setEntryType(e.target.value)}
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition cursor-pointer font-medium h-[42px]"
-                                        >
-                                            <option value="candle_close">Đóng cửa nến xanh/đỏ (Mặc định)</option>
-                                            <option value="st_reversal">Khi Supertrend đổi chiều</option>
-                                        </select>
-                                    </div>
-
-                                    {/* 2 Checkbox: Long Trade & Short Trade */}
-                                    <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                            <Layers size={13} className="text-purple-400" />
-                                            Loại lệnh giao dịch
-                                        </label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowLong}
-                                                    onChange={(e) => setAllowLong(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
-                                                />
-                                                <TrendingUp size={14} className={allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                                <span className={`text-xs font-semibold truncate ${allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>
-                                                    Long
-                                                </span>
-                                            </label>
-
-                                            <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowShort}
-                                                    onChange={(e) => setAllowShort(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
-                                                />
-                                                <TrendingDown size={14} className={allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
-                                                <span className={`text-xs font-semibold truncate ${allowShort ? 'text-rose-300' : 'text-gray-400'}`}>
-                                                    Short
-                                                </span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Hàng 2: Mục tiêu Chốt lời (Take Profit Options) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5" title="Tỷ lệ Risk : Reward cho lệnh">
-                                                <Target size={13} className="text-amber-400" />
-                                                Risk : Reward (R:R)
-                                            </label>
-                                            <label
-                                                title={optRiskReward ? "Bỏ chọn để giữ cố định R:R này khi optimize" : "Chọn để tự động tìm kiếm R:R tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optRiskReward
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optRiskReward}
-                                                    onChange={(e) => setOptRiskReward(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optRiskReward ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <input
-                                            type="number"
-                                            step="0.1"
-                                            min="0.1"
-                                            max="20"
-                                            value={riskReward}
-                                            onChange={(e) => setRiskReward(e.target.value)}
-                                            disabled={!tpRR}
-                                            placeholder="1.5"
-                                            className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition font-mono disabled:opacity-40 disabled:cursor-not-allowed h-[42px]"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                                                <CheckCircle2 size={13} className="text-emerald-400" />
-                                                Tùy chọn Chốt lời
-                                            </label>
-                                            <label
-                                                title={optTpMode ? "Bỏ chọn để giữ cố định chế độ TP này khi optimize" : "Chọn để tự động tìm kiếm chế độ TP tối ưu"}
-                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
-                                                    optTpMode
-                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={optTpMode}
-                                                    onChange={(e) => setOptTpMode(e.target.checked)}
-                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
-                                                />
-                                                <span>{optTpMode ? 'Opt' : 'Lock'}</span>
-                                            </label>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <label className={`flex items-center gap-2 bg-gray-900 border rounded-xl px-2.5 py-2 cursor-pointer transition select-none h-[42px] ${tpSupertrend ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={tpSupertrend}
-                                                    onChange={(e) => setTpSupertrend(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
-                                                />
-                                                <span className={`text-xs font-medium truncate ${tpSupertrend ? 'text-emerald-300' : 'text-gray-400'}`}>
-                                                    ST Đảo chiều
-                                                </span>
-                                            </label>
-
-                                            <label className={`flex items-center gap-2 bg-gray-900 border rounded-xl px-2.5 py-2 cursor-pointer transition select-none h-[42px] ${tpRR ? 'border-amber-500/50 bg-amber-950/20 shadow-sm shadow-amber-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
-                                                }`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={tpRR}
-                                                    onChange={(e) => setTpRR(e.target.checked)}
-                                                    className="w-4 h-4 rounded text-amber-600 bg-gray-800 border-gray-600 focus:ring-amber-500 focus:ring-offset-gray-900 cursor-pointer accent-amber-500"
-                                                />
-                                                <span className={`text-xs font-medium truncate ${tpRR ? 'text-amber-300' : 'text-gray-400'}`}>
-                                                    Theo R:R
-                                                </span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-
-                {/* Status bar & Button Run Scan Row */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-gray-700/50">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                        <span className="font-medium text-gray-300">Cấu hình:</span>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-semibold font-mono">
-                            <Clock size={12} className="text-amber-400" />
-                            {timeframe}
-                        </span>
-                        {isVWAP ? (
-                            <>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-300 border border-blue-500/20 text-xs font-medium">
-                                    <Activity size={12} className="text-blue-400" />
-                                    VWAP ({vwapAnchor.toUpperCase()}) + MA({vwapMaPeriod})
-                                </span>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
-                                    <Target size={12} className="text-emerald-400" />
-                                    {vwapTpTarget === 'tp1_vwap' ? 'TP: VWAP' : (vwapTpTarget === 'tp2_upper2' ? 'TP: Upper 2' : 'TP: Upper 3')}
-                                </span>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
-                                    <ShieldAlert size={12} className="text-rose-400" />
-                                    SL: Lower 2
-                                </span>
-                            </>
-                        ) : isPriceAction ? (
-                            <>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-xs font-medium font-mono">
-                                    <Sliders size={12} className="text-cyan-400" />
-                                    ST({stPeriod},{stMultiplier})
-                                </span>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/20 text-xs font-medium">
-                                    <Activity size={12} className="text-purple-400" />
-                                    PA: {[paEngulfing && 'Engulfing', paBd3bu2 && 'BD3BU2', paIncludeOpposite && 'IncludeOpposite', paPointUp && 'PointUp', paSwingUp && 'SwingUp'].filter(Boolean).join(', ') || 'None'}
-                                </span>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
-                                    <Target size={12} className="text-emerald-400" />
-                                    TP: {tpType}
-                                </span>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
-                                    <ShieldAlert size={12} className="text-rose-400" />
-                                    SL: {slType}
-                                </span>
-                            </>
-                        ) : (
-                            <>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-medium">
-                                    <Activity size={12} className="text-indigo-400" />
-                                    Entry: {entryType === 'st_reversal' ? 'Supertrend đảo chiều' : 'Đóng cửa nến xanh/đỏ'}
-                                </span>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-xs font-medium font-mono">
-                                    <Sliders size={12} className="text-cyan-400" />
-                                    ST({stPeriod},{stMultiplier}) + MA({maPeriod})
-                                </span>
-                                {tpSupertrend && (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
-                                        <CheckCircle2 size={12} className="text-emerald-400" />
-                                        ST Đảo chiều
-                                    </span>
-                                )}
-                                {tpRR && (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium">
-                                        <CheckCircle2 size={12} className="text-amber-400" />
-                                        Cố định R:R ({riskReward}R)
-                                    </span>
-                                )}
-                            </>
-                        )}
-                        {allowLong && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
-                                <TrendingUp size={12} className="text-emerald-400" />
-                                Long
-                            </span>
-                        )}
-                        {allowShort && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
-                                <TrendingDown size={12} className="text-rose-400" />
-                                Short
-                            </span>
-                        )}
-                        {!allowLong && !allowShort && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
-                                <AlertTriangle size={12} className="text-rose-400" />
-                                Chưa chọn loại lệnh
-                            </span>
-                        )}
-                    </div>
-
-                    <div className="flex items-center gap-2.5 self-stretch sm:self-auto shrink-0">
-                        {/* Button Default - Reset về tham số mặc định */}
-                        <button
-                            onClick={handleResetDefault}
-                            disabled={scanning || optimizing}
-                            title="Reset các thông số indicator và cấu hình về mặc định"
-                            className="h-[42px] bg-gray-800/90 hover:bg-gray-700 hover:text-white border border-gray-700 hover:border-gray-600 active:scale-[0.98] text-gray-300 font-semibold rounded-xl px-3.5 sm:px-4 flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
-                        >
-                            <RotateCcw size={15} className="text-gray-400" />
-                            <span>Default</span>
-                        </button>
-
-                        {/* Button Save Config - Lưu cấu hình thành template */}
-                        <button
-                            onClick={handleOpenSaveModal}
-                            disabled={scanning || optimizing || !selectedSymbol}
-                            title="Lưu cấu hình hiện tại thành Strategy Template vào Strapi"
-                            className="h-[42px] bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 hover:text-white border border-cyan-500/40 hover:border-cyan-500 active:scale-[0.98] font-semibold rounded-xl px-3.5 sm:px-4 flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
-                        >
-                            <BookmarkPlus size={15} className="text-cyan-400" />
-                            <span>Save Config</span>
-                        </button>
-
-                        {/* Button BXH Tối Ưu - Hiển thị lại bảng leaderboard nếu đã có kết quả optimize */}
-                        {optimizationConfigs.length > 0 && (
-                            <button
-                                onClick={() => setOptimizationModalOpen(true)}
-                                title="Xem lại bảng danh sách các cấu hình tối ưu đã tìm được"
-                                className="h-[42px] bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border border-amber-500/40 hover:border-amber-500/60 active:scale-[0.98] font-semibold rounded-xl px-3.5 sm:px-4 flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer flex-1 sm:flex-none"
-                            >
-                                <Trophy size={16} className="text-amber-400" />
-                                <span>BXH Tối Ưu ({optimizationConfigs.length})</span>
-                            </button>
-                        )}
-
-                        {/* Button Optimize - Tìm tham số có Profit Factor cao nhất */}
-                        <button
-                            onClick={() => handleOptimize(selectedSymbol)}
-                            disabled={scanning || optimizing || !selectedSymbol || optCount === 0}
-                            title={optCount === 0 ? "Vui lòng chọn ít nhất 1 tham số để tối ưu" : `Tự động tìm kiếm bộ tham số tốt nhất cho ${optCount}/${totalOptCount} tham số đã chọn`}
-                            className="h-[42px] bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 active:scale-[0.98] text-white font-bold rounded-xl px-4 sm:px-5 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
-                        >
-                            {optimizing ? (
-                                <>
-                                    <RefreshCw size={16} className="animate-spin" />
-                                    <span>Optimizing...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <Sparkles size={16} className="text-yellow-200 fill-yellow-200" />
-                                    <span>Optimize {optCount < totalOptCount ? `(${optCount})` : ''}</span>
-                                </>
-                            )}
-                        </button>
-
-                        {/* Button Run Scan */}
-                        <button
-                            onClick={() => handleScan(selectedSymbol)}
-                            disabled={scanning || optimizing || !selectedSymbol}
-                            className="h-[42px] bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 active:scale-[0.98] text-white font-semibold rounded-xl px-5 sm:px-6 flex items-center justify-center gap-2 shadow-lg shadow-purple-600/25 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-1 sm:flex-none"
-                        >
-                            {scanning ? (
-                                <>
-                                    <RefreshCw size={16} className="animate-spin" />
-                                    <span>Scanning...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <Play size={16} className="fill-current" />
-                                    <span>Run Scan</span>
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Optimal Params Success Banner */}
-            {bestInfo && (
-                <div className="bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/40 rounded-xl p-3.5 text-sm text-amber-200 flex items-center justify-between gap-3 shadow-md shadow-amber-500/5">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 shrink-0">
-                            <Sparkles size={18} />
-                        </div>
-                        <div className="text-xs leading-relaxed">
-                            <span className="font-bold text-amber-300">
-                                {bestInfo.rank ? `Đang áp dụng cấu hình Top #${bestInfo.rank}:` : 'Đang áp dụng cấu hình tối ưu:'}
-                            </span>
-                            <span className="ml-1.5 inline-block text-gray-300">
-                                Profit Factor: <strong className="text-emerald-400 text-sm font-bold">{bestInfo.profitFactor}</strong>
-                                {' '}| Win Rate: <strong className="text-sky-300 font-bold">{bestInfo.winRate}%</strong> ({bestInfo.totalTrades || bestInfo.closedTrades} lệnh)
-                                {' '}| PnL: <strong className={Number(bestInfo.totalPnlPercent || 0) >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{bestInfo.totalPnlPercent > 0 ? '+' : ''}{bestInfo.totalPnlPercent}%</strong>
-                                {isVWAP ? (
-                                    <>
-                                        {' '}| <span className="font-mono text-cyan-300">VWAP + MA({bestInfo.maPeriod}) | Band 2 ({bestInfo.mult2}σ) | Band 3 ({bestInfo.mult3}σ)</span>
-                                        {' '}| TP: <span className="text-emerald-300 font-semibold">{bestInfo.tpTarget === 'tp1_vwap' ? 'VWAP' : (bestInfo.tpTarget === 'tp2_upper2' ? 'Upper 2' : 'Upper 3')}</span>
-                                    </>
-                                ) : isPriceAction ? (
-                                    <>
-                                        {' '}| <span className="font-mono text-cyan-300">ST({bestInfo.stPeriod}, {bestInfo.stMultiplier})</span>
-                                        {' '}| <span className="text-purple-300 font-medium">PA: {bestInfo.paSummary || 'Active'}</span>
-                                        {' '}| TP: <span className="text-emerald-300 font-semibold">{bestInfo.tpType || 'P50'}</span>
-                                        {' '}| SL: <span className="text-rose-300 font-semibold">{bestInfo.slType || 'P75'}</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        {' '}| <span className="font-mono text-cyan-300">ST({bestInfo.stPeriod}, {bestInfo.stMultiplier}) + MA({bestInfo.maPeriod})</span>
-                                        {' '}| Entry: <span className="text-indigo-300 font-semibold">{bestInfo.entryType === 'st_reversal' ? 'ST Đảo chiều' : 'Đóng nến'}</span>
-                                        {' '}| R:R: <span className="text-amber-300 font-semibold">{bestInfo.riskReward}R</span>
-                                    </>
-                                )}
-                            </span>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                        {optimizationConfigs.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => setOptimizationModalOpen(true)}
-                                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-                            >
-                                <Trophy size={13} />
-                                <span>Xem BXH ({optimizationConfigs.length})</span>
-                            </button>
-                        )}
-                        <button
-                            onClick={() => setBestInfo(null)}
-                            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition cursor-pointer text-xs"
-                            title="Đóng thông báo"
-                        >
-                            ✕
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Error Banner */}
+            {/* 5. Error Banner */}
             {errorMessage && (
                 <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3.5 text-sm text-red-300 flex items-center gap-2.5">
                     <AlertTriangle size={18} className="text-red-400 shrink-0" />
@@ -2954,351 +910,45 @@ const PythonStrategy = () => {
                 </div>
             )}
 
-            {/* Strategy Highlights & Performance Metrics */}
-            {scanResult && summary && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 shadow-sm">
-                        <span className="text-xs text-gray-400 block mb-1">Profit Factor</span>
-                        <div className="flex items-baseline gap-1.5">
-                            <span className={`text-lg font-bold ${profitFactor === '∞' || parseFloat(profitFactor) >= 1.5
-                                ? 'text-emerald-400'
-                                : parseFloat(profitFactor) >= 1.0
-                                    ? 'text-sky-400'
-                                    : 'text-rose-400'
-                                }`}>
-                                {profitFactor}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                                (Lãi / Lỗ)
-                            </span>
-                        </div>
-                    </div>
+            {/* 6. Summary Metrics Bar */}
+            <SummaryMetricsBar
+                scanResult={scanResult}
+                profitFactor={profitFactor}
+            />
 
-                    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 shadow-sm">
-                        <span className="text-xs text-gray-400 block mb-1">Tổng số lệnh (Trades)</span>
-                        <div className="flex items-baseline gap-1.5">
-                            <span className="text-lg font-bold text-white">{summary.totalTrades}</span>
-                            <span className="text-xs text-gray-400">
-                                ({summary.closedTrades} đóng, {summary.activeTrade ? '1 mở' : '0 mở'})
-                            </span>
-                        </div>
-                    </div>
+            {/* 7. Active Position Action Bar */}
+            <ActiveTradeBanner
+                activeTrade={summary?.activeTrade}
+                ticker={scanResult?.ticker || selectedSymbol}
+            />
 
-                    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 shadow-sm">
-                        <span className="text-xs text-gray-400 block mb-1">Tỷ lệ thắng (Win Rate)</span>
-                        <div className="flex items-baseline gap-1.5">
-                            <span className={`text-lg font-bold ${summary.winRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                {summary.winRate}%
-                            </span>
-                            <span className="text-xs text-gray-400">
-                                ({summary.winTrades} TP / {summary.lossTrades} SL)
-                            </span>
-                        </div>
-                    </div>
+            {/* 8. Chart Area */}
+            <TradingChartSection
+                chartCardRef={chartCardRef}
+                scanning={scanning}
+                chartCandles={chartCandles}
+                chartSignals={chartSignals}
+                symbol={scanResult?.ticker || selectedSymbol}
+                timeframe={timeframe}
+                currentStrategy={currentStrategy}
+                params={params}
+                focusDate={focusDate}
+                onLoadMore={handleLoadMore}
+                loadingMore={loadingMore}
+                hasMore={hasMore}
+            />
 
-                    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 shadow-sm">
-                        <span className="text-xs text-gray-400 block mb-1">Tổng Lợi nhuận (PnL)</span>
-                        <span className={`text-lg font-bold ${summary.totalPnlPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {summary.totalPnlPercent > 0 ? `+${summary.totalPnlPercent}%` : `${summary.totalPnlPercent}%`}
-                        </span>
-                    </div>
+            {/* 9. Trades History Table */}
+            <TradesHistoryTable
+                trades={scanResult?.trades || []}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                focusDate={focusDate}
+                onViewTrade={handleViewTrade}
+                ticker={scanResult?.ticker || selectedSymbol}
+            />
 
-                    <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 shadow-sm">
-                        <span className="text-xs text-gray-400 block mb-1">ST({stPeriod},{stMultiplier}) & MA({maPeriod})</span>
-                        <div className="text-xs space-y-0.5">
-                            <div className="text-amber-400">ST: <b>{formatNumber(summary.supertrend || 0)}</b></div>
-                            <div className="text-purple-400">MA: <b>{formatNumber(summary.ma288 || 0)}</b></div>
-                        </div>
-                    </div>
-
-                    {/* Active Position Card */}
-                    <div className={`border rounded-xl p-3 shadow-sm ${activeTrade
-                        ? activeTrade.type === 'Long'
-                            ? 'bg-emerald-950/30 border-emerald-500/30'
-                            : 'bg-red-950/30 border-red-500/30'
-                        : 'bg-gray-800/60 border-gray-700/50'
-                        }`}>
-                        <span className="text-xs text-gray-400 block mb-1">Trạng thái Vị thế</span>
-                        {activeTrade ? (
-                            <div className="space-y-0.5">
-                                <div className="flex items-center gap-1 font-bold text-xs">
-                                    {activeTrade.type === 'Long' ? (
-                                        <TrendingUp size={14} className="text-emerald-400" />
-                                    ) : (
-                                        <TrendingDown size={14} className="text-red-400" />
-                                    )}
-                                    <span className={activeTrade.type === 'Long' ? 'text-emerald-400' : 'text-red-400'}>
-                                        ĐANG GIỮ {activeTrade.type.toUpperCase()}
-                                    </span>
-                                </div>
-                                <div className="text-xs text-gray-300">
-                                    PnL: <b className={activeTrade.pnl_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                                        {activeTrade.pnl_percent > 0 ? `+${activeTrade.pnl_percent}%` : `${activeTrade.pnl_percent}%`}
-                                    </b>
-                                </div>
-                            </div>
-                        ) : (
-                            <span className="text-xs text-gray-500 italic block mt-1">Đang chờ Entry mới</span>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Active Position Action Bar */}
-            {activeTrade && (
-                <div className="bg-gradient-to-r from-gray-800/90 via-gray-800/70 to-gray-800/90 border border-gray-700 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex flex-wrap items-center gap-4 text-sm">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Lệnh đang giữ:</span>
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${activeTrade.type === 'Long' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'
-                                }`}>
-                                {activeTrade.type.toUpperCase()} (#{activeTrade.trade_no})
-                            </span>
-                            <span className="text-xs text-gray-400">
-                                ({dayjs(activeTrade.entry_date).format('YYYY-MM-DD')})
-                            </span>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                            <span className="text-gray-300">Entry: <b className="text-white">{formatNumber(activeTrade.entry_price)}</b></span>
-                            <span className="text-red-300">SL: <b className="text-red-400">{formatNumber(activeTrade.stop_loss)}</b></span>
-                            <span className="text-emerald-300">TP ({activeTrade.risk_reward}R): <b className="text-emerald-400">{formatNumber(activeTrade.take_profit)}</b></span>
-                        </div>
-                    </div>
-
-                    <Link
-                        to={`/trade-station?symbol=${encodeURIComponent(scanResult?.ticker || '')}&price=${activeTrade.entry_price}&slPrice=${activeTrade.stop_loss}&tpPrice=${activeTrade.take_profit}`}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-blue-600/20 cursor-pointer self-start md:self-auto"
-                    >
-                        <span>Mở trên Trade Station</span>
-                        <ExternalLink size={14} />
-                    </Link>
-                </div>
-            )}
-
-            {/* Chart Area */}
-            <div ref={chartCardRef} className="bg-gray-800 rounded-2xl border border-gray-700/80 p-4 shadow-xl flex flex-col space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-700/60 pb-3 gap-2">
-                    <div className="flex items-center gap-2">
-                        <Activity size={18} className="text-blue-400" />
-                        <h2 className="text-base font-bold text-gray-100">
-                            Biểu đồ Nến & Chu kỳ Lệnh ({scanResult?.ticker || selectedSymbol})
-                        </h2>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-                        <span className="inline-flex items-center gap-1">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span> Mũi tên xanh Green ↑: Entry Long
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Mũi tên đỏ Red ↓: Entry Short
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span> Mũi tên xanh Blue: Take Profit
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span> Chấm tròn đỏ ●: Stop Loss
-                        </span>
-                    </div>
-                </div>
-
-                <div className="h-[480px] w-full relative rounded-xl overflow-hidden bg-gray-900">
-                    {scanning ? (
-                        <div className="h-full w-full flex flex-col items-center justify-center space-y-3">
-                            <RefreshCw size={36} className="text-purple-400 animate-spin" />
-                            <p className="text-sm text-gray-400">Đang chạy chiến lược Python & mô phỏng lệnh 1 lúc...</p>
-                        </div>
-                    ) : chartCandles.length > 0 ? (
-                        <TradingViewChart
-                            data={chartCandles}
-                            symbol={scanResult?.ticker || selectedSymbol}
-                            signals={chartSignals}
-                            template={isVWAP ? "VWAP" : "Supertrend"}
-                            vwapAnchor={vwapAnchor}
-                            timeframe={timeframe}
-                            supertrendPeriod={parseInt(stPeriod) || 10}
-                            supertrendMultiplier={parseFloat(stMultiplier) || 3.0}
-                            maPeriod={parseInt(isVWAP ? vwapMaPeriod : maPeriod) || (isVWAP ? 9 : 288)}
-                            focusDate={focusDate}
-                            onLoadMore={handleLoadMore}
-                            isLoadingMore={loadingMore}
-                            hasMore={hasMore}
-                        />
-                    ) : (
-                        <div className="h-full w-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-                            <BrainCircuit size={40} className="opacity-40" />
-                            <p className="text-sm">Vui lòng chọn Symbol và bấm <b>Run Scan</b> để nạp biểu đồ</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Trades History Table */}
-            <div className="bg-gray-800 rounded-2xl border border-gray-700/80 overflow-hidden shadow-xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-gray-700/80 gap-3">
-                    <div className="flex items-center gap-2">
-                        <Clock size={18} className="text-purple-400" />
-                        <h3 className="text-base font-bold text-gray-100">
-                            Lịch sử Lệnh Giao Dịch (1 Lệnh 1 Lúc) ({tradesList.length})
-                        </h3>
-                    </div>
-
-                    <div className="flex items-center bg-gray-900 p-1 rounded-xl border border-gray-700 text-xs">
-                        <button
-                            onClick={() => setActiveTab('all')}
-                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${activeTab === 'all' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                                }`}
-                        >
-                            Tất cả ({scanResult?.trades?.length || 0})
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('Open')}
-                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${activeTab === 'Open' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                                }`}
-                        >
-                            Đang mở ({scanResult?.trades?.filter(t => t.status === 'Open').length || 0})
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('Closed')}
-                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${activeTab === 'Closed' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                                }`}
-                        >
-                            Đã đóng ({scanResult?.trades?.filter(t => t.status === 'Closed').length || 0})
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('Long')}
-                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${activeTab === 'Long' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                                }`}
-                        >
-                            Long ({scanResult?.trades?.filter(t => t.type === 'Long').length || 0})
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('Short')}
-                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${activeTab === 'Short' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                                }`}
-                        >
-                            Short ({scanResult?.trades?.filter(t => t.type === 'Short').length || 0})
-                        </button>
-                    </div>
-                </div>
-
-                <div className="overflow-x-auto max-h-96 custom-scrollbar">
-                    <table className="w-full text-left border-collapse text-sm">
-                        <thead className="bg-gray-900/70 text-gray-400 text-xs uppercase tracking-wider sticky top-0 backdrop-blur z-10">
-                            <tr>
-                                <th className="py-3 px-3">#</th>
-                                <th className="py-3 px-3">Vị thế</th>
-                                <th className="py-3 px-3">Ngày Vào (Entry)</th>
-                                <th className="py-3 px-3">Giá Vào</th>
-                                <th className="py-3 px-3">Cắt lỗ (SL)</th>
-                                <th className="py-3 px-3">Chốt lời (TP)</th>
-                                <th className="py-3 px-3">Ngày Đóng (Exit)</th>
-                                <th className="py-3 px-3">Giá Đóng</th>
-                                <th className="py-3 px-3">Kết Quả</th>
-                                <th className="py-3 px-3">PnL (%)</th>
-                                <th className="py-3 px-3">Thời Gian</th>
-                                <th className="py-3 px-3 text-right">Hành động</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700/50 text-gray-300">
-                            {tradesList.length === 0 ? (
-                                <tr>
-                                    <td colSpan="12" className="py-8 text-center text-gray-500 italic">
-                                        Không có lệnh giao dịch nào phù hợp.
-                                    </td>
-                                </tr>
-                            ) : (
-                                tradesList.map((trade, idx) => {
-                                    const tradeDate = trade.entry_time || (trade.entry_date ? String(trade.entry_date).split('T')[0] : '');
-                                    const isFocused = focusDate === tradeDate;
-
-                                    return (
-                                        <tr key={idx} className={`transition ${isFocused ? 'bg-purple-900/20' : 'hover:bg-gray-700/30'}`}>
-                                            <td className="py-3 px-3 font-mono text-xs text-gray-500">
-                                                #{trade.trade_no}
-                                            </td>
-                                            <td className="py-3 px-3">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleViewTrade(trade)}
-                                                    title={`Xem nến Entry ${trade.entry_time || (trade.entry_date ? dayjs(trade.entry_date).format('YYYY-MM-DD') : '')} trên biểu đồ`}
-                                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm hover:scale-105 active:scale-95 ${trade.type === 'Long'
-                                                        ? isFocused
-                                                            ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-emerald-600/30'
-                                                            : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30'
-                                                        : isFocused
-                                                            ? 'bg-red-600 text-white ring-2 ring-red-400 shadow-red-600/30'
-                                                            : 'bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30'
-                                                        }`}
-                                                >
-                                                    {trade.type === 'Long' ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                                                    <span>{trade.type.toUpperCase()}</span>
-                                                    <Eye size={11} className="opacity-70 ml-0.5" />
-                                                </button>
-                                            </td>
-                                            <td className="py-3 px-3 font-mono text-xs text-gray-300">
-                                                {dayjs(trade.entry_date).format('YYYY-MM-DD')}
-                                            </td>
-                                            <td className="py-3 px-3 font-semibold text-white">
-                                                {formatNumber(trade.entry_price)}
-                                            </td>
-                                            <td className="py-3 px-3 text-red-400 font-medium text-xs">
-                                                {formatNumber(trade.stop_loss)}
-                                            </td>
-                                            <td className="py-3 px-3 text-emerald-400 font-medium text-xs">
-                                                {trade.take_profit ? formatNumber(trade.take_profit) : <span className="text-gray-400 italic text-[11px]">Theo ST</span>}
-                                            </td>
-                                            <td className="py-3 px-3 font-mono text-xs text-gray-400">
-                                                {trade.exit_date ? dayjs(trade.exit_date).format('YYYY-MM-DD') : '-'}
-                                            </td>
-                                            <td className="py-3 px-3 font-semibold text-gray-200">
-                                                {trade.exit_price ? formatNumber(trade.exit_price) : '-'}
-                                            </td>
-                                            <td className="py-3 px-3 text-xs">
-                                                {trade.status === 'Open' ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
-                                                        <Clock size={12} /> Đang mở
-                                                    </span>
-                                                ) : trade.exit_reason === 'StopLoss' ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 font-bold">
-                                                        <XCircle size={12} /> Stop Loss
-                                                    </span>
-                                                ) : (trade.exit_reason && trade.exit_reason.includes('TakeProfit')) || trade.pnl_percent > 0 ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
-                                                        <CheckCircle2 size={12} /> {trade.exit_reason || 'Take Profit'}
-                                                    </span>
-                                                ) : (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 font-bold">
-                                                        <AlertTriangle size={12} /> {trade.exit_reason || 'Đóng vị thế'}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="py-3 px-3 font-bold">
-                                                <span className={trade.pnl_percent > 0 ? 'text-emerald-400' : trade.pnl_percent < 0 ? 'text-rose-400' : 'text-gray-400'}>
-                                                    {trade.pnl_percent > 0 ? `+${trade.pnl_percent}%` : `${trade.pnl_percent}%`}
-                                                </span>
-                                            </td>
-                                            <td className="py-3 px-3 text-xs text-gray-400">
-                                                {trade.holding_bars || 0} nến
-                                            </td>
-                                            <td className="py-3 px-3 text-right">
-                                                <Link
-                                                    to={`/trade-station?symbol=${encodeURIComponent(scanResult?.ticker || '')}&price=${trade.entry_price}&slPrice=${trade.stop_loss}&tpPrice=${trade.take_profit || ''}`}
-                                                    className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-semibold transition"
-                                                >
-                                                    <span>Đặt lệnh</span>
-                                                    <ExternalLink size={12} />
-                                                </Link>
-                                            </td>
-                                        </tr>
-                                    );
-                                })
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* Deflated Sharpe Ratio (DSR) Card */}
+            {/* 10. Deflated Sharpe Ratio Card */}
             {scanResult?.trades && scanResult.trades.length > 0 && (
                 <DeflatedSharpeRatioCard
                     trades={scanResult.trades}
@@ -3307,612 +957,49 @@ const PythonStrategy = () => {
                 />
             )}
 
-            {/* Modal Save Strategy Template */}
-            {saveModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5">
-                        <div className="flex items-center justify-between border-b border-gray-700 pb-3">
-                            <div className="flex items-center gap-2">
-                                <BookmarkPlus size={20} className="text-cyan-400" />
-                                <h3 className="text-base font-bold text-gray-100">Lưu Strategy Template</h3>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setSaveModalOpen(false)}
-                                className="text-gray-400 hover:text-gray-200 p-1 rounded-lg transition cursor-pointer"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
+            {/* 11. Modal Lưu Strategy Template */}
+            <SaveTemplateModal
+                isOpen={saveModalOpen}
+                onClose={() => setSaveModalOpen(false)}
+                onSave={handleSaveTemplate}
+                saving={savingTemplate}
+                templateNameInput={templateNameInput}
+                setTemplateNameInput={setTemplateNameInput}
+                templateDescInput={templateDescInput}
+                setTemplateDescInput={setTemplateDescInput}
+                overwriteTemplateId={overwriteTemplateId}
+                onModalSelectTemplate={handleModalSelectTemplate}
+                symbolTemplates={symbolTemplates}
+                selectedSymbol={selectedSymbol}
+                selectedStrategyFile={selectedStrategyFile}
+                timeframe={timeframe}
+                currentStrategy={currentStrategy}
+                params={params}
+            />
 
-                        <form onSubmit={handleSaveTemplate} className="space-y-4">
-                            {/* Dropdown: Chọn Template để ghi đè hoặc tạo mới */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
-                                    <span>Chọn Template ghi đè hoặc tạo mới:</span>
-                                    {overwriteTemplateId && overwriteTemplateId !== '__NEW__' ? (
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
-                                            Chế độ: Ghi đè
-                                        </span>
-                                    ) : (
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
-                                            Chế độ: Tạo mới
-                                        </span>
-                                    )}
-                                </label>
-                                <select
-                                    value={overwriteTemplateId || '__NEW__'}
-                                    onChange={(e) => handleModalSelectTemplate(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2.5 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition cursor-pointer font-medium"
-                                >
-                                    <option value="__NEW__">✨ [+ Tạo Template Mới Cho {selectedSymbol}]</option>
-                                    {symbolTemplates.map(tpl => {
-                                        const tplId = String(tpl.id || tpl.documentId);
-                                        return (
-                                            <option key={tplId} value={tplId}>
-                                                🔄 Ghi đè: {tpl.name} ({tpl.timeframe || 'D1'})
-                                            </option>
-                                        );
-                                    })}
-                                </select>
-                            </div>
+            {/* 12. Modal Lịch sử Insight đã lưu (SymbolInsight) */}
+            <InsightHistoryModal
+                isOpen={insightModalOpen}
+                onClose={() => setInsightModalOpen(false)}
+                selectedSymbol={selectedSymbol}
+                loadingInsightStats={loadingInsightStats}
+                savedInsightsList={savedInsightsList}
+                symbolInsightStats={symbolInsightStats}
+                onSelectInsightItem={handleSelectInsightItem}
+            />
 
-                            {/* Tên Template Input */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
-                                    <span>Tên Template *</span>
-                                    <span className="text-[11px] text-gray-500 font-normal">Có thể chỉnh sửa</span>
-                                </label>
-                                <input
-                                    type="text"
-                                    required
-                                    placeholder="Nhập tên template..."
-                                    value={templateNameInput}
-                                    onChange={(e) => setTemplateNameInput(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 font-medium"
-                                    autoFocus
-                                />
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-gray-300">Mô tả (tùy chọn)</label>
-                                <textarea
-                                    rows={2}
-                                    placeholder="Ghi chú về thiết lập tham số hoặc thị trường áp dụng..."
-                                    value={templateDescInput}
-                                    onChange={(e) => setTemplateDescInput(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                />
-                            </div>
-
-                            <div className="bg-gray-900/80 rounded-xl p-3 border border-gray-700/50 space-y-1 text-xs text-gray-400">
-                                <div className="flex justify-between">
-                                    <span>Symbol:</span>
-                                    <span className="text-emerald-400 font-bold font-mono">{selectedSymbol}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Chiến lược:</span>
-                                    <span className="text-gray-200 font-semibold">{selectedStrategyFile}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Timeframe:</span>
-                                    <span className="text-amber-400 font-semibold">{timeframe}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Cấu hình:</span>
-                                    <span className="text-gray-300 font-mono text-[11px] truncate max-w-[210px]">
-                                        {isVWAP
-                                            ? `MA${vwapMaPeriod} | ${vwapAnchor.toUpperCase()} | ${vwapTpTarget}`
-                                            : `ST(${stPeriod}, ${stMultiplier}) | MA${maPeriod} | RR ${riskReward}`}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-end gap-2.5 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setSaveModalOpen(false)}
-                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl text-sm font-semibold transition cursor-pointer"
-                                >
-                                    Hủy
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={savingTemplate || !templateNameInput.trim()}
-                                    className={`px-5 py-2 text-white rounded-xl text-sm font-bold shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer ${
-                                        overwriteTemplateId && overwriteTemplateId !== '__NEW__'
-                                            ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/25'
-                                            : 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-500/25'
-                                    }`}
-                                >
-                                    {savingTemplate ? (
-                                        <>
-                                            <RefreshCw size={14} className="animate-spin" />
-                                            <span>Đang lưu...</span>
-                                        </>
-                                    ) : overwriteTemplateId && overwriteTemplateId !== '__NEW__' ? (
-                                        <>
-                                            <RefreshCw size={14} />
-                                            <span>Ghi đè Template</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Save size={14} />
-                                            <span>Lưu Template Mới</span>
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-            {/* Modal Lịch sử Insight đã lưu (SymbolInsight) */}
-            {insightModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-2xl max-h-[85vh] shadow-2xl flex flex-col overflow-hidden">
-                        {/* Modal Header */}
-                        <div className="flex items-center justify-between p-4 border-b border-gray-700 bg-gray-900/90">
-                            <div className="flex items-center gap-2">
-                                <Bookmark size={18} className="text-cyan-400" />
-                                <h3 className="text-sm font-bold text-gray-100">
-                                    Lịch sử Insight đã lưu ({selectedSymbol})
-                                </h3>
-                                <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700 font-mono">
-                                    {savedInsightsList.length} bản ghi
-                                </span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setInsightModalOpen(false)}
-                                className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition cursor-pointer"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        {/* Modal Body */}
-                        <div className="p-4 overflow-y-auto space-y-3 divide-y divide-gray-700/60 custom-scrollbar">
-                            {loadingInsightStats ? (
-                                <div className="py-12 flex flex-col items-center justify-center space-y-3 text-gray-400">
-                                    <RefreshCw size={28} className="animate-spin text-cyan-400" />
-                                    <span className="text-xs">Đang tải danh sách Insight đã lưu...</span>
-                                </div>
-                            ) : savedInsightsList.length === 0 ? (
-                                <div className="py-12 text-center text-gray-400 text-xs space-y-3">
-                                    <p className="font-semibold text-gray-300">Chưa có bản ghi Insight nào được lưu cho mã {selectedSymbol}.</p>
-                                    <p className="text-gray-500">Bạn có thể sang trang Strategy Insight để phân tích thống kê và bấm Lưu Insight.</p>
-                                    <div className="pt-2">
-                                        <Link
-                                            to={`/strategy-insight?symbol=${encodeURIComponent(selectedSymbol || '')}`}
-                                            onClick={() => setInsightModalOpen(false)}
-                                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition shadow-md shadow-cyan-900/30"
-                                        >
-                                            <span>Tới trang Strategy Insight</span>
-                                            <ExternalLink size={13} />
-                                        </Link>
-                                    </div>
-                                </div>
-                            ) : (
-                                savedInsightsList.map((item) => {
-                                    const itemId = item.documentId || item.id;
-                                    const isCurrentSelected = symbolInsightStats && (String(symbolInsightStats.documentId || symbolInsightStats.id) === String(itemId));
-
-                                    return (
-                                        <div
-                                            key={itemId}
-                                            className={`pt-3 first:pt-0 flex flex-col gap-2.5 p-3 rounded-xl transition border ${
-                                                isCurrentSelected
-                                                    ? 'bg-cyan-950/30 border-cyan-500/60 ring-1 ring-cyan-500/40'
-                                                    : 'bg-gray-900/50 hover:bg-gray-900/90 border-gray-700/70 hover:border-gray-600'
-                                            }`}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-xs font-bold text-sky-300 truncate">
-                                                            {item.title || `${selectedSymbol} - ${item.startDate} ~ ${item.endDate}`}
-                                                        </span>
-                                                        {isCurrentSelected && (
-                                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold shrink-0">
-                                                                Đang áp dụng
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="text-[11px] text-gray-400 flex flex-wrap items-center gap-2 mt-1 font-mono">
-                                                        <span>Lưu lúc: {dayjs(item.savedAt || item.createdAt).format('DD/MM/YYYY HH:mm')}</span>
-                                                        <span>•</span>
-                                                        <span className="text-amber-400 font-bold">{item.timeframe || 'D1'}</span>
-                                                        <span>•</span>
-                                                        <span>{item.totalCandles || 0} nến</span>
-                                                        {item.startDate && (
-                                                            <>
-                                                                <span>•</span>
-                                                                <span>({item.startDate} ~ {item.endDate})</span>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleSelectInsightItem(item)}
-                                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm ${
-                                                        isCurrentSelected
-                                                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/25'
-                                                            : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-600/25'
-                                                    }`}
-                                                >
-                                                    <Check size={13} />
-                                                    <span>{isCurrentSelected ? 'Đã chọn' : 'Chọn bản ghi'}</span>
-                                                </button>
-                                            </div>
-
-                                            {/* Summary metrics card trong Modal */}
-                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-950/80 p-2.5 rounded-xl border border-gray-800">
-                                                <div>
-                                                    <span className="text-gray-500 block text-[10px]">Spread P50 (Trung vị)</span>
-                                                    <span className="font-mono text-sky-300 font-bold">
-                                                        {formatNumber(item.spreadMedianPrice)} ({Number(item.spreadMedianPercent || 0).toFixed(2)}%)
-                                                    </span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-gray-500 block text-[10px]">Spread Rộng (P75)</span>
-                                                    <span className="font-mono text-cyan-300 font-bold">
-                                                        {formatNumber(item.spreadP75Price)} ({Number(item.spreadP75Percent || 0).toFixed(2)}%)
-                                                    </span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-gray-500 block text-[10px]">Giờ Tăng mạnh</span>
-                                                    <span className="text-emerald-400 font-semibold truncate block">
-                                                        {item.bestBullHour || 'N/A'}
-                                                    </span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-gray-500 block text-[10px]">Ngày Tăng tốt</span>
-                                                    <span className="text-emerald-400 font-semibold truncate block">
-                                                        {item.bestBullDay || 'N/A'}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
-
-                        {/* Modal Footer */}
-                        <div className="p-3 bg-gray-900 border-t border-gray-700 flex justify-end">
-                            <button
-                                type="button"
-                                onClick={() => setInsightModalOpen(false)}
-                                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-xl transition cursor-pointer"
-                            >
-                                Đóng
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal Bảng Xếp Hạng Cấu Hình Tối Ưu (Optimization Leaderboard Modal) */}
-            {optimizationModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-6 animate-in fade-in duration-200">
-                    <div className="bg-gray-900 border border-gray-700/80 rounded-2xl w-full max-w-6xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden ring-1 ring-white/10">
-                        {/* Modal Header */}
-                        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-800 bg-gray-950/80">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 shrink-0">
-                                    <Trophy size={22} />
-                                </div>
-                                <div>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <h3 className="text-base sm:text-lg font-bold text-gray-100 flex items-center gap-2">
-                                            <span>Bảng Xếp Hạng Cấu Hình Tối Ưu</span>
-                                            <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-semibold">
-                                                {filteredOptimizationConfigs.length} cấu hình
-                                            </span>
-                                        </h3>
-                                    </div>
-                                    <p className="text-xs text-gray-400 flex flex-wrap items-center gap-2 mt-0.5 font-mono">
-                                        <span className="text-emerald-400 font-bold">{selectedSymbol}</span>
-                                        <span>•</span>
-                                        <span className="text-amber-400 font-bold">{timeframe}</span>
-                                        <span>•</span>
-                                        <span className="text-gray-300">{selectedStrategyFile}</span>
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setOptimizationModalOpen(false)}
-                                className="p-2 text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition cursor-pointer"
-                            >
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        {/* Filter & Search Bar */}
-                        <div className="p-3 sm:p-4 border-b border-gray-800/80 bg-gray-950/40 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                            {/* Search Input */}
-                            <div className="relative flex-1 max-w-md">
-                                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Tìm kiếm theo PA (Engulfing, BD3BU2), TP (P50), SL (P75)..."
-                                    value={optimizationSearch}
-                                    onChange={(e) => setOptimizationSearch(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700/80 hover:border-gray-600 rounded-xl pl-9 pr-3 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition font-medium"
-                                />
-                                {optimizationSearch && (
-                                    <button
-                                        onClick={() => setOptimizationSearch('')}
-                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-0.5 rounded cursor-pointer"
-                                    >
-                                        <X size={13} />
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Sort Filter Tabs */}
-                            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-                                <span className="text-xs text-gray-400 shrink-0 mr-1 hidden sm:inline">Sắp xếp:</span>
-                                {[
-                                    { key: 'rank', label: 'Hạng (Rank)' },
-                                    { key: 'profitFactor', label: 'Profit Factor' },
-                                    { key: 'winRate', label: 'Win Rate' },
-                                    { key: 'totalTrades', label: 'Tổng lệnh' },
-                                    { key: 'totalPnlPercent', label: 'Tổng % PnL' }
-                                ].map(sortItem => {
-                                    const isActive = optimizationSortBy === sortItem.key;
-                                    return (
-                                        <button
-                                            key={sortItem.key}
-                                            type="button"
-                                            onClick={() => {
-                                                if (isActive) {
-                                                    setOptimizationSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
-                                                } else {
-                                                    setOptimizationSortBy(sortItem.key);
-                                                    setOptimizationSortDir(sortItem.key === 'rank' ? 'asc' : 'desc');
-                                                }
-                                            }}
-                                            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition cursor-pointer whitespace-nowrap ${
-                                                isActive
-                                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
-                                                    : 'bg-gray-800/80 text-gray-400 hover:text-gray-200 border border-gray-700/60 hover:border-gray-600'
-                                            }`}
-                                        >
-                                            <span>{sortItem.label}</span>
-                                            {isActive && (
-                                                optimizationSortDir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />
-                                            )}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* Modal Body: Table */}
-                        <div className="p-3 sm:p-4 overflow-y-auto flex-1 custom-scrollbar">
-                            {filteredOptimizationConfigs.length === 0 ? (
-                                <div className="py-16 text-center text-gray-400 space-y-2">
-                                    <AlertTriangle size={32} className="mx-auto text-amber-400/80" />
-                                    <p className="text-sm font-semibold text-gray-300">Không tìm thấy cấu hình nào khớp với bộ lọc.</p>
-                                    <p className="text-xs text-gray-500">Vui lòng thử thay đổi từ khóa tìm kiếm hoặc bấm chạy lại Optimize.</p>
-                                </div>
-                            ) : (
-                                <div className="overflow-x-auto rounded-xl border border-gray-800">
-                                    <table className="w-full text-left border-collapse text-xs">
-                                        <thead>
-                                            <tr className="bg-gray-950/80 text-gray-400 border-b border-gray-800 font-semibold uppercase tracking-wider text-[10px]">
-                                                <th className="py-3 px-3.5 text-center w-14"># Hạng</th>
-                                                <th className="py-3 px-3.5 min-w-[240px]">Thông số Cấu hình</th>
-                                                <th className="py-3 px-3 text-center">Profit Factor</th>
-                                                <th className="py-3 px-3 text-center min-w-[120px]">Tỷ Lệ Thắng (Win Rate)</th>
-                                                <th className="py-3 px-3 text-center">Tổng Số Lệnh</th>
-                                                <th className="py-3 px-3 text-right">Tổng PnL (%)</th>
-                                                <th className="py-3 px-3 text-right">Gross Profit / Loss</th>
-                                                <th className="py-3 px-3.5 text-center w-28">Hành động</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-800/60 bg-gray-900/40">
-                                            {filteredOptimizationConfigs.map((item, index) => {
-                                                const isApplied = activeAppliedConfigRank === item.rank;
-                                                const pfNum = Number(item.profitFactor || 0);
-                                                const wrNum = Number(item.winRate || 0);
-                                                const pnlNum = Number(item.totalPnlPercent || 0);
-
-                                                return (
-                                                    <tr
-                                                        key={item.rank || index}
-                                                        className={`transition hover:bg-gray-800/50 ${
-                                                            isApplied ? 'bg-amber-500/10 hover:bg-amber-500/15' : ''
-                                                        }`}
-                                                    >
-                                                        {/* # Rank */}
-                                                        <td className="py-3 px-3.5 text-center font-mono">
-                                                            {item.rank === 1 ? (
-                                                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold shadow-sm shadow-amber-500/20">
-                                                                    🥇 #1
-                                                                </span>
-                                                            ) : item.rank === 2 ? (
-                                                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-slate-400/20 text-slate-200 border border-slate-400/50 font-bold">
-                                                                    🥈 #2
-                                                                </span>
-                                                            ) : item.rank === 3 ? (
-                                                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-amber-700/20 text-amber-400 border border-amber-700/50 font-bold">
-                                                                    🥉 #3
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-gray-400 font-semibold">
-                                                                    #{item.rank}
-                                                                </span>
-                                                            )}
-                                                        </td>
-
-                                                        {/* Parameters */}
-                                                        <td className="py-3 px-3.5">
-                                                            <div className="flex flex-wrap items-center gap-1.5">
-                                                                {isVWAP ? (
-                                                                    <>
-                                                                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
-                                                                            MA({item.maPeriod})
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[11px]">
-                                                                            {item.vwapAnchor?.toUpperCase()}
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px]">
-                                                                            TP: {item.tpTarget === 'tp1_vwap' ? 'VWAP' : (item.tpTarget === 'tp2_upper2' ? 'Upper 2' : 'Upper 3')}
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono text-[11px]">
-                                                                            ({item.mult2}σ, {item.mult3}σ)
-                                                                        </span>
-                                                                    </>
-                                                                ) : isPriceAction ? (
-                                                                    <>
-                                                                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
-                                                                            ST({item.stPeriod}, {item.stMultiplier})
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium text-[11px]" title="Price Action Combo">
-                                                                            {item.paSummary || 'Top PA'}
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-medium text-[11px]">
-                                                                            TP: {item.tpType}
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium text-[11px]">
-                                                                            SL: {item.slType}
-                                                                        </span>
-                                                                        {item.tpSupertrend && (
-                                                                            <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px]">
-                                                                                TP ST
-                                                                            </span>
-                                                                        )}
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
-                                                                            ST({item.stPeriod}, {item.stMultiplier}) + MA({item.maPeriod})
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px]">
-                                                                            {item.riskReward}R
-                                                                        </span>
-                                                                        <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px]">
-                                                                            {item.entryType === 'st_reversal' ? 'ST Đảo chiều' : 'Nến đóng'}
-                                                                        </span>
-                                                                        {item.tpSupertrend && (
-                                                                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">
-                                                                                TP ST
-                                                                            </span>
-                                                                        )}
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        </td>
-
-                                                        {/* Profit Factor */}
-                                                        <td className="py-3 px-3 text-center">
-                                                            <span
-                                                                className={`inline-block px-2.5 py-1 rounded-lg font-mono font-bold text-xs border ${
-                                                                    pfNum >= 2.0
-                                                                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
-                                                                        : pfNum >= 1.3
-                                                                        ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                                                                        : pfNum >= 1.0
-                                                                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                                                        : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                                                                }`}
-                                                            >
-                                                                {pfNum.toFixed(2)}
-                                                            </span>
-                                                        </td>
-
-                                                        {/* Win Rate */}
-                                                        <td className="py-3 px-3">
-                                                            <div className="flex flex-col items-center gap-1">
-                                                                <span className="font-mono font-bold text-gray-200">
-                                                                    {wrNum.toFixed(1)}%
-                                                                </span>
-                                                                <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden flex">
-                                                                    <div
-                                                                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                                                                        style={{ width: `${Math.min(wrNum, 100)}%` }}
-                                                                    />
-                                                                </div>
-                                                                <span className="text-[10px] text-gray-400 font-mono">
-                                                                    {item.winTrades}W / {item.lossTrades}L
-                                                                </span>
-                                                            </div>
-                                                        </td>
-
-                                                        {/* Total Trades */}
-                                                        <td className="py-3 px-3 text-center font-mono font-semibold text-gray-200">
-                                                            {item.totalTrades}
-                                                        </td>
-
-                                                        {/* Total PnL (%) */}
-                                                        <td className="py-3 px-3 text-right font-mono font-bold">
-                                                            <span className={pnlNum >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                                                                {pnlNum > 0 ? '+' : ''}{pnlNum.toFixed(2)}%
-                                                            </span>
-                                                        </td>
-
-                                                        {/* Gross Profit / Loss */}
-                                                        <td className="py-3 px-3 text-right font-mono text-[11px] text-gray-400">
-                                                            <div className="text-emerald-400">+{Number(item.grossProfit || 0).toFixed(2)}%</div>
-                                                            <div className="text-rose-400">-{Number(item.grossLoss || 0).toFixed(2)}%</div>
-                                                        </td>
-
-                                                        {/* Action Button */}
-                                                        <td className="py-3 px-3.5 text-center">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleApplyOptimizeConfig(item)}
-                                                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 w-full cursor-pointer shadow-sm ${
-                                                                    isApplied
-                                                                        ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
-                                                                        : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-amber-500/25 active:scale-95'
-                                                                }`}
-                                                            >
-                                                                {isApplied ? (
-                                                                    <>
-                                                                        <Check size={13} className="text-emerald-400" />
-                                                                        <span>Đang dùng</span>
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <Sparkles size={13} />
-                                                                        <span>Áp dụng</span>
-                                                                    </>
-                                                                )}
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Modal Footer */}
-                        <div className="p-3.5 sm:p-4 bg-gray-950/80 border-t border-gray-800 flex items-center justify-between text-xs text-gray-400">
-                            <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                                <span>Bấm <b>"Áp dụng"</b> để nạp bộ tham số vào form chiến lược & chạy quét kiểm tra trên biểu đồ.</span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setOptimizationModalOpen(false)}
-                                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-xl text-xs font-semibold transition cursor-pointer"
-                            >
-                                Đóng
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* 13. Modal BXH Cấu Hình Tối Ưu (Optimization Leaderboard) */}
+            <OptimizationLeaderboardModal
+                isOpen={optimizationModalOpen}
+                onClose={() => setOptimizationModalOpen(false)}
+                optimizationConfigs={optimizationConfigs}
+                activeAppliedConfigRank={activeAppliedConfigRank}
+                onApplyConfig={handleApplyOptimizeConfig}
+                selectedSymbol={selectedSymbol}
+                selectedStrategyFile={selectedStrategyFile}
+                timeframe={timeframe}
+                currentStrategy={currentStrategy}
+            />
         </div>
     );
 };

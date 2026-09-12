@@ -278,7 +278,7 @@ const PythonSignals = () => {
     }, [configuredSymbols.length, processedItems]);
 
     return (
-        <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
+        <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
             {/* Header & Main Actions */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 p-6 rounded-2xl border border-gray-700 shadow-xl">
                 <div>
@@ -516,13 +516,12 @@ const PythonSignals = () => {
                         return (
                             <div
                                 key={item.symbol.id || symName}
-                                className={`rounded-xl border transition-all duration-200 flex flex-col justify-between overflow-hidden bg-gray-800/80 hover:bg-gray-800 backdrop-blur-sm shadow-md hover:shadow-xl ${
-                                    isOpen
-                                        ? (isProfit
-                                            ? 'border-emerald-500/40 hover:border-emerald-500/70'
-                                            : 'border-rose-500/40 hover:border-rose-500/70')
-                                        : 'border-gray-700/70 hover:border-gray-600'
-                                }`}
+                                className={`rounded-xl border transition-all duration-200 flex flex-col justify-between overflow-hidden bg-gray-800/80 hover:bg-gray-800 backdrop-blur-sm shadow-md hover:shadow-xl ${isOpen
+                                    ? (isProfit
+                                        ? 'border-emerald-500/40 hover:border-emerald-500/70'
+                                        : 'border-rose-500/40 hover:border-rose-500/70')
+                                    : 'border-gray-700/70 hover:border-gray-600'
+                                    }`}
                             >
                                 {/* Top Card Header */}
                                 <div className="p-4 border-b border-gray-700/50 flex items-start justify-between gap-2">
@@ -547,11 +546,10 @@ const PythonSignals = () => {
                                     {/* Status Badge */}
                                     <div className="shrink-0">
                                         {isOpen ? (
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-                                                isLong
-                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                                            }`}>
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${isLong
+                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                                                }`}>
                                                 <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isLong ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                                                 {isLong ? 'OPEN LONG' : 'OPEN SHORT'}
                                             </span>
@@ -778,11 +776,10 @@ const PythonSignals = () => {
                                             {/* Status */}
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {isOpen ? (
-                                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
-                                                        isLong
-                                                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
-                                                            : 'bg-red-500/15 text-red-300 border border-red-500/40'
-                                                    }`}>
+                                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${isLong
+                                                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40'
+                                                        : 'bg-red-500/15 text-red-300 border border-red-500/40'
+                                                        }`}>
                                                         {isLong ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
                                                         {isLong ? 'OPEN LONG' : 'OPEN SHORT'}
                                                     </span>
