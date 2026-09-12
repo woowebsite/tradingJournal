@@ -15,6 +15,7 @@ import ManageScored from './pages/ManageScored';
 import ManageRules from './pages/ManageRules';
 import ManageStrategies from './pages/ManageStrategies';
 import Signals from './pages/Signals';
+import PythonSignals from './pages/PythonSignals';
 import ManageWatchlists from './pages/Watchlists';
 import ManageSymbols from './pages/ManageSymbols';
 import ManageWebhooks from './pages/ManageWebhooks';
@@ -76,6 +77,7 @@ function App() {
             <Route path="journal-analysis" element={<JournalAnalysis />} />
             <Route path="settings" element={<Settings />} />
             <Route path="signals" element={<Signals />} />
+            <Route path="python-signals" element={<PythonSignals />} />
             <Route path="tcbs-strategy-signals" element={<TCBSStrategySignals />} />
             <Route path="tcbs-recommendation" element={<TCBSRecommendations />} />
             <Route path="manage-market" element={<ManageMarket />} />

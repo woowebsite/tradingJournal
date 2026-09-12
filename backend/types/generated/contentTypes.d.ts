@@ -1391,6 +1391,10 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
       'oneToOne',
       'api::stock-ratio.stock-ratio'
     >;
+    strategy_template: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::strategy-template.strategy-template'
+    >;
     strategy_templates: Schema.Attribute.Relation<
       'oneToMany',
       'api::strategy-template.strategy-template'

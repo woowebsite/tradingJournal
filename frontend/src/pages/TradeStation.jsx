@@ -605,9 +605,11 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
     const symbolTemplates = useMemo(() => {
         if (!selectedSymbol) return [];
         const cleanSym = String(selectedSymbol.Name || selectedSymbol.name || '').trim().toUpperCase();
+        const assignedId = selectedSymbol.strategy_template?.documentId || selectedSymbol.strategy_template?.id || (typeof selectedSymbol.strategy_template === 'string' || typeof selectedSymbol.strategy_template === 'number' ? selectedSymbol.strategy_template : null);
         return templates.filter(t => {
             const tSymName = String(t.symbolName || t.symbol?.Name || t.symbol?.name || '').trim().toUpperCase();
-            return tSymName === cleanSym;
+            const isAssigned = assignedId && (String(t.documentId || t.id) === String(assignedId) || String(t.id) === String(assignedId));
+            return tSymName === cleanSym || isAssigned;
         });
     }, [templates, selectedSymbol]);
 
@@ -619,28 +621,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         ) || null;
     }, [selectedTemplateId, symbolTemplates]);
 
-    useEffect(() => {
-        if (selectedTemplateId) {
-            const exists = symbolTemplates.some(t =>
-                String(t.documentId || t.id) === String(selectedTemplateId) ||
-                String(t.id) === String(selectedTemplateId)
-            );
-            if (!exists) {
-                setSelectedTemplateId('');
-                setChartTemplate('Supertrend');
-                setMaPeriod(288);
-                setStPeriod(10);
-                setStMultiplier(3);
-            }
-        } else {
-            setChartTemplate('Supertrend');
-            setMaPeriod(288);
-            setStPeriod(10);
-            setStMultiplier(3);
-        }
-    }, [selectedSymbol, symbolTemplates, selectedTemplateId]);
-
-    const handleSelectTemplate = (templateId) => {
+    const handleSelectTemplate = useCallback((templateId) => {
         setSelectedTemplateId(templateId);
         if (!templateId) {
             setChartTemplate('Supertrend');
@@ -700,7 +681,52 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 resolution: targetTf
             }));
         }
-    };
+    }, [dispatch, selectedAccount?.market?.Name, selectedSymbol, selectedSymbolId, symbolTemplates, timeframe]);
+
+    useEffect(() => {
+        if (!selectedSymbol) {
+            setSelectedTemplateId('');
+            setChartTemplate('Supertrend');
+            setMaPeriod(288);
+            setStPeriod(10);
+            setStMultiplier(3);
+            return;
+        }
+
+        const assignedTemplate = selectedSymbol.strategy_template;
+        const assignedId = assignedTemplate?.documentId || assignedTemplate?.id || (typeof assignedTemplate === 'string' || typeof assignedTemplate === 'number' ? assignedTemplate : null);
+
+        if (assignedId && templates.length > 0) {
+            const foundInTemplates = templates.find(t =>
+                String(t.documentId || t.id) === String(assignedId) ||
+                String(t.id) === String(assignedId)
+            );
+            if (foundInTemplates) {
+                const targetId = foundInTemplates.documentId || foundInTemplates.id;
+                handleSelectTemplate(targetId);
+                return;
+            }
+        }
+
+        if (selectedTemplateId) {
+            const exists = symbolTemplates.some(t =>
+                String(t.documentId || t.id) === String(selectedTemplateId) ||
+                String(t.id) === String(selectedTemplateId)
+            );
+            if (!exists) {
+                setSelectedTemplateId('');
+                setChartTemplate('Supertrend');
+                setMaPeriod(288);
+                setStPeriod(10);
+                setStMultiplier(3);
+            }
+        } else {
+            setChartTemplate('Supertrend');
+            setMaPeriod(288);
+            setStPeriod(10);
+            setStMultiplier(3);
+        }
+    }, [selectedSymbolId, templates]);
 
     // Auto scan python strategy when template is selected or changed to keep signals and chart in sync
     useEffect(() => {

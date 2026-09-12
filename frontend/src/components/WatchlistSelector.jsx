@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { useDispatch } from 'react-redux';
+import React, { useState, useCallback, useMemo } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { RefreshCw, Edit2, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
-import { loadExternalHistory, fetchHistories } from '../features/marketSlice';
+import { loadExternalHistory, fetchHistories, fetchSymbols } from '../features/marketSlice';
 import { updateWatchlist, fetchWatchlists } from '../features/watchlistSlice';
 import WatchlistModal from './WatchlistModal';
 
@@ -14,6 +14,7 @@ const WatchlistSelector = ({
     searchTerm = ''
 }) => {
     const dispatch = useDispatch();
+    const { histories = [] } = useSelector(state => state.market);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const {
@@ -35,6 +36,33 @@ const WatchlistSelector = ({
         }
         return accountSymbols;
     })();
+
+    // Group Redux market histories by Symbol ID and Name for fast O(1) lookup
+    const historiesBySymbol = useMemo(() => {
+        const map = new Map();
+        (histories || []).forEach(h => {
+            if (!h) return;
+            const docId = h.symbol?.documentId;
+            const numId = h.symbol?.id;
+            const symName = String(h.symbol?.Name || h.symbol?.name || '').trim().toUpperCase();
+
+            if (docId) {
+                const k = String(docId);
+                if (!map.has(k)) map.set(k, []);
+                map.get(k).push(h);
+            }
+            if (numId) {
+                const k = String(numId);
+                if (!map.has(k)) map.set(k, []);
+                map.get(k).push(h);
+            }
+            if (symName) {
+                if (!map.has(symName)) map.set(symName, []);
+                map.get(symName).push(h);
+            }
+        });
+        return map;
+    }, [histories]);
 
     const handleUpdateWatchlist = async (data) => {
         try {
@@ -87,9 +115,17 @@ const WatchlistSelector = ({
             await dispatch(fetchHistories({ symbolIds, forceRefresh: true })).unwrap();
         }
 
+        // Also refresh symbols in Redux
+        const marketId = selectedAccount?.market?.documentId || selectedAccount?.market?.id;
+        if (marketId) {
+            await dispatch(fetchSymbols(marketId));
+        } else {
+            await dispatch(fetchSymbols());
+        }
+
         setIsRefreshing(false);
         alert(`Watchlist refresh complete.\nUpdated symbols: ${updatedCount}\nErrors: ${errors}`);
-    }, [dispatch, filteredSymbols, selectedAccount?.market?.Name, selectedSymbolId]);
+    }, [dispatch, filteredSymbols, selectedAccount?.market?.Name, selectedAccount?.market?.documentId, selectedAccount?.market?.id]);
 
     return (
         <div className="w-full flex flex-col">
@@ -153,23 +189,43 @@ const WatchlistSelector = ({
                     ) : (
                         filteredSymbols.map(symbol => {
                             const id = symbol.documentId || symbol.id;
+                            const symName = String(symbol.Name || symbol.name || '').trim().toUpperCase();
 
                             // Merge data from accountSymbols because watchlist symbols are not deeply populated
                             const fullSymbol = accountSymbols.find(s => (s.documentId || s.id) === id) || symbol;
+
+                            // Candidate candles: prefer fresh Redux market histories, fallback to nested symbol_histories
+                            const symbolCandles = (id && historiesBySymbol.get(String(id))) || 
+                                                  (symName && historiesBySymbol.get(symName)) || 
+                                                  fullSymbol.symbol_histories || 
+                                                  symbol.symbol_histories || 
+                                                  [];
 
                             let currentPrice = 0;
                             let isUp = true;
                             let changePercent = 0;
 
-                            if (fullSymbol.symbol_histories && fullSymbol.symbol_histories.length > 0) {
-                                const sorted = [...fullSymbol.symbol_histories].sort((a, b) => new Date(b.date) - new Date(a.date));
+                            if (symbolCandles && symbolCandles.length > 0) {
+                                const sorted = [...symbolCandles].sort((a, b) => new Date(b.date) - new Date(a.date));
                                 const latest = sorted[0];
-                                currentPrice = latest.close || 0;
+                                currentPrice = Number(latest.close) || 0;
 
                                 if (sorted.length > 1) {
-                                    const diff = latest.close - latest.open;
+                                    const prev = sorted[1];
+                                    const prevClose = Number(prev.close);
+                                    if (prevClose > 0) {
+                                        const diff = currentPrice - prevClose;
+                                        isUp = diff >= 0;
+                                        changePercent = Math.abs((diff / prevClose) * 100);
+                                    } else if (Number(latest.open) > 0) {
+                                        const diff = currentPrice - Number(latest.open);
+                                        isUp = diff >= 0;
+                                        changePercent = Math.abs((diff / Number(latest.open)) * 100);
+                                    }
+                                } else if (Number(latest.open) > 0) {
+                                    const diff = currentPrice - Number(latest.open);
                                     isUp = diff >= 0;
-                                    changePercent = Math.abs((diff / latest.open) * 100);
+                                    changePercent = Math.abs((diff / Number(latest.open)) * 100);
                                 }
                             }
 

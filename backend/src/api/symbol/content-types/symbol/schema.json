@@ -101,6 +101,11 @@
       "target": "api::strategy-template.strategy-template",
       "mappedBy": "symbol"
     },
+    "strategy_template": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::strategy-template.strategy-template"
+    },
     "symbol_insights": {
       "type": "relation",
       "relation": "oneToMany",

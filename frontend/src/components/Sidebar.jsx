@@ -83,6 +83,7 @@ const Sidebar = () => {
                     path: '/signals',
                     subItems: [
                         { label: 'Strategy Signals', path: '/signals' },
+                        { label: 'Python Signals', path: '/python-signals' },
                         { label: 'TCBS Signals', path: '/tcbs-strategy-signals' },
                         { label: 'Recommendation', path: '/tcbs-recommendation' },
                         { label: 'Webhook Signals', path: '/webhook-signals' }
