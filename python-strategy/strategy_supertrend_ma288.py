@@ -1301,11 +1301,20 @@ def optimize_strategy_parameters(
     countback: int = 50000,
     allow_long: bool = True,
     allow_short: bool = True,
-    timeframe: str = "D1"
+    timeframe: str = "D1",
+    current_st_period: int = 10,
+    current_st_multiplier: float = 3.0,
+    current_ma_period: int = 288,
+    current_rr: float = 1.5,
+    current_entry_type: str = "candle_close",
+    current_tp_supertrend: bool = True,
+    current_tp_rr: bool = True,
+    opt_config: Dict = None
 ) -> Dict:
     """
-    Tự động chạy Grid Search tối ưu hóa tất cả các tham số dựa trên TOÀN BỘ dữ liệu lịch sử
-    có trong Strapi theo Timeframe đã chọn để đưa ra con số Profit Factor tối ưu thực tế và chuẩn xác nhất.
+    Tự động chạy Grid Search tối ưu hóa các tham số dựa trên TOÀN BỘ dữ liệu lịch sử
+    có trong Strapi theo Timeframe đã chọn. Tham số nào được tick Opt mới tìm kiếm thay đổi,
+    các tham số không tick sẽ được giữ cố định theo giá trị hiện tại.
     """
     # Tối ưu hóa số lượng nến mẫu (tối đa 5,000 nến để đảm bảo phản hồi nhanh < 10 giây)
     req_count = min(int(countback), 5000) if countback else 5000
@@ -1325,22 +1334,69 @@ def optimize_strategy_parameters(
     low_arr = df['low'].values
     n = len(df)
 
+    if opt_config is None:
+        opt_config = {}
+
+    opt_st_period = opt_config.get("stPeriod", True)
+    opt_st_multiplier = opt_config.get("stMultiplier", True)
+    opt_ma_period = opt_config.get("maPeriod", True)
+    opt_risk_reward = opt_config.get("riskReward", True)
+    opt_entry_type = opt_config.get("entryType", True)
+    opt_tp_mode = opt_config.get("tpMode", True)
+
     # 1. Grid tham số cần tối ưu (Tinh chỉnh tập giá trị cốt lõi)
-    st_period_grid = [7, 10, 14]
-    st_multiplier_grid = [2.0, 2.5, 3.0, 3.5]
+    if opt_st_period:
+        st_period_grid = [7, 10, 14]
+        if current_st_period and int(current_st_period) not in st_period_grid:
+            st_period_grid.append(int(current_st_period))
+            st_period_grid.sort()
+    else:
+        st_period_grid = [int(current_st_period or 10)]
 
-    all_ma_periods = [34, 50, 89, 150, 200, 288]
-    ma_period_grid = [m for m in all_ma_periods if m <= n - 10]
-    if not ma_period_grid:
-        ma_period_grid = [min(20, n - 5)]
+    if opt_st_multiplier:
+        st_multiplier_grid = [2.0, 2.5, 3.0, 3.5]
+        if current_st_multiplier and float(current_st_multiplier) not in st_multiplier_grid:
+            st_multiplier_grid.append(float(current_st_multiplier))
+            st_multiplier_grid.sort()
+    else:
+        st_multiplier_grid = [float(current_st_multiplier or 3.0)]
 
-    rr_ratio_grid = [1.2, 1.5, 2.0, 2.5]
-    entry_type_grid = ["candle_close", "st_reversal"]
-    tp_modes = [
-        (True, False),  # Chỉ theo Supertrend đảo chiều
-        (False, True),  # Chỉ theo R:R
-        (True, True)    # Cả hai: Chốt theo phương thức nào chạm trước
-    ]
+    if opt_ma_period:
+        all_ma_periods = [34, 50, 89, 150, 200, 288]
+        if current_ma_period and int(current_ma_period) not in all_ma_periods:
+            all_ma_periods.append(int(current_ma_period))
+        ma_period_grid = sorted([m for m in all_ma_periods if m <= n - 10])
+        if not ma_period_grid:
+            ma_period_grid = [min(20, n - 5)]
+    else:
+        curr_m = int(current_ma_period or 288)
+        ma_period_grid = [min(curr_m, max(5, n - 5))]
+
+    if opt_risk_reward:
+        rr_ratio_grid = [1.2, 1.5, 2.0, 2.5]
+        if current_rr and float(current_rr) not in rr_ratio_grid:
+            rr_ratio_grid.append(float(current_rr))
+            rr_ratio_grid.sort()
+    else:
+        rr_ratio_grid = [float(current_rr or 1.5)]
+
+    if opt_entry_type:
+        entry_type_grid = ["candle_close", "st_reversal"]
+    else:
+        entry_type_grid = [str(current_entry_type or "candle_close")]
+
+    if opt_tp_mode:
+        tp_modes = [
+            (True, False),  # Chỉ theo Supertrend đảo chiều
+            (False, True),  # Chỉ theo R:R
+            (True, True)    # Cả hai: Chốt theo phương thức nào chạm trước
+        ]
+    else:
+        cur_st = bool(current_tp_supertrend)
+        cur_rr = bool(current_tp_rr)
+        if not cur_st and not cur_rr:
+            cur_st = True
+        tp_modes = [(cur_st, cur_rr)]
 
     # 2. Precalculate MA indicators
     ma_cache = {}
@@ -1532,6 +1588,7 @@ if __name__ == "__main__":
     parser.add_argument("--st-period", type=int, default=SUPERTREND_PERIOD, help="Supertrend ATR Period")
     parser.add_argument("--st-multiplier", type=float, default=SUPERTREND_MULTIPLIER, help="Supertrend Multiplier")
     parser.add_argument("--ma-period", type=int, default=MA_PERIOD, help="MA Period (SMA)")
+    parser.add_argument("--opt-config", type=str, default="", help="JSON config xác định các tham số được tick để tối ưu")
 
     # Lựa chọn loại lệnh: Long / Short
     parser.add_argument("--allow-long", dest="allow_long", action="store_true", default=True, help="Cho phép mở lệnh Long")
@@ -1549,12 +1606,27 @@ if __name__ == "__main__":
 
     if args.optimize:
         ticker = args.ticker or "VNINDEX"
+        opt_cfg = {}
+        if args.opt_config:
+            try:
+                opt_cfg = json.loads(args.opt_config)
+            except Exception:
+                opt_cfg = {}
+
         res = optimize_strategy_parameters(
             ticker=ticker,
             countback=args.countback,
             allow_long=args.allow_long,
             allow_short=args.allow_short,
-            timeframe=args.timeframe
+            timeframe=args.timeframe,
+            current_st_period=args.st_period,
+            current_st_multiplier=args.st_multiplier,
+            current_ma_period=args.ma_period,
+            current_rr=args.rr,
+            current_entry_type=args.entry_type,
+            current_tp_supertrend=args.tp_supertrend,
+            current_tp_rr=args.tp_rr,
+            opt_config=opt_cfg
         )
         if args.json:
             print(json.dumps(res, ensure_ascii=False))

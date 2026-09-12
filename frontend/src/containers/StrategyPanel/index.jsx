@@ -29,7 +29,7 @@ const StrategyPanel = ({
     const [activeTab, setActiveTab] = useState('summary');
 
     return (
-        <div className="h-[300px] shrink-0 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
+        <div className="h-auto shrink-0 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
             <div className="flex border-b border-gray-700 bg-gray-900/50">
                 <div className={`flex-1 flex items-center ${activeTab === 'summary' ? 'border-b-2 border-blue-500 bg-gray-800/50' : ''}`}>
                     <button

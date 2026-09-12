@@ -112,37 +112,22 @@ const StrategySummary = ({
 
     // Generate dynamic template rules details if using a strategy template (e.g. Price Action / Supertrend MA288 / VWAP MA9 / Ichimoku)
     const templateInfo = useMemo(() => {
-        if (!selectedTemplate && !activeStrategy?.strategyFile && !activeStrategy?.template) return null;
-        const tpl = selectedTemplate || {};
-        const cfg = tpl.config || activeStrategy?.config || {};
-        const stratFile = (tpl.strategyFile || activeStrategy?.strategyFile || '').toLowerCase();
-        const tplName = (tpl.name || activeStrategy?.name || '').toLowerCase();
-        const rawTemplate = (tpl.template || activeStrategy?.template || '').toLowerCase();
+        const tpl = selectedTemplate || (activeStrategy?.strategyFile || activeStrategy?.template ? activeStrategy : null);
+        if (!tpl) return null;
 
-        const isVWAP = stratFile.includes('vwap') || tplName.includes('vwap') || rawTemplate.includes('vwap');
-        const isPriceAction = stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || tplName.includes('price action') || tplName.includes('pa') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined;
-        const isIchimoku = stratFile.includes('ichimoku') || tplName.includes('ichimoku') || rawTemplate.includes('ichimoku');
+        const cfg = tpl.config || {};
+        const stratFile = String(tpl.strategyFile || '').toLowerCase();
+        const tplName = String(tpl.name || '').toLowerCase();
+        const rawTemplate = String(tpl.template || '').toLowerCase();
 
-        if (isVWAP) {
-            const ma = cfg.vwapMaPeriod || cfg.maPeriod || 9;
-            const anchor = cfg.vwapAnchor || 'year';
-            const mult1 = cfg.mult1 || 1.0;
-            const mult2 = cfg.mult2 || 2.0;
-            const mult3 = cfg.mult3 || 3.0;
-            const tpTarget = cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap';
-            const allowL = cfg.allowLong !== undefined ? cfg.allowLong : true;
-            const allowS = cfg.allowShort !== undefined ? cfg.allowShort : true;
+        // 1. Phân loại Supertrend + Price Action
+        const isPriceAction = stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || tplName.includes('price action') || tplName.includes('+ pa') || tplName.includes(' pa ') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined || cfg.paBd3bu2 !== undefined || cfg.slType !== undefined;
+        // 2. Phân loại VWAP MA9
+        const isVWAP = !isPriceAction && (stratFile.includes('vwap') || tplName.includes('vwap') || rawTemplate.includes('vwap') || cfg.vwapMaPeriod !== undefined || cfg.vwapAnchor !== undefined);
+        // 3. Phân loại Ichimoku
+        const isIchimoku = !isPriceAction && !isVWAP && (stratFile.includes('ichimoku') || tplName.includes('ichimoku') || rawTemplate.includes('ichimoku'));
 
-            const tpLabel = tpTarget === 'tp1_vwap' ? 'Đường VWAP' : tpTarget === 'tp2_upper2' ? `Dải Upper 2 (${mult2}x)` : `Dải Upper 3 (${mult3}x)`;
-
-            return {
-                type: 'VWAP MA9',
-                summaryDesc: `VWAP (${anchor.toUpperCase()}) + MA${ma} | Dải: ${mult1}x/${mult2}x/${mult3}x | TP: ${tpTarget} | ${allowL ? 'Long' : ''} ${allowS ? 'Short' : ''}`.trim(),
-                entryText: `• Long: Giá đóng cửa > MA${ma} & nằm trên VWAP (${anchor.toUpperCase()}) ${allowL ? '✅' : '❌'}\n• Short: Giá đóng cửa < MA${ma} & nằm dưới VWAP (${anchor.toUpperCase()}) ${allowS ? '✅' : '❌'}`,
-                slText: `• Đặt Stop Loss tại đường VWAP hoặc Dải Lower Band 2 (${mult2}x StdDev).`,
-                tpText: `• Chốt lời theo dải mục tiêu: ${tpLabel} (hoặc dải Lower tương ứng khi Short).`
-            };
-        } else if (isPriceAction) {
+        if (isPriceAction) {
             const stPeriod = cfg.stPeriod || 10;
             const stMult = cfg.stMultiplier || 3.0;
             const allowL = cfg.allowLong !== undefined ? cfg.allowLong : true;
@@ -177,6 +162,25 @@ const StrategySummary = ({
                 entryText: `• Long: Supertrend Uptrend (${stPeriod}, ${stMult}) + Mô hình PA Bullish [${paText}] ${allowL ? '✅' : '❌'}\n• Short: Supertrend Downtrend (${stPeriod}, ${stMult}) + Mô hình PA Bearish [${paText}] ${allowS ? '✅' : '❌'}`,
                 slText: slDesc,
                 tpText: tpDesc
+            };
+        } else if (isVWAP) {
+            const ma = cfg.vwapMaPeriod || cfg.maPeriod || 9;
+            const anchor = cfg.vwapAnchor || 'year';
+            const mult1 = cfg.mult1 || 1.0;
+            const mult2 = cfg.mult2 || 2.0;
+            const mult3 = cfg.mult3 || 3.0;
+            const tpTarget = cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap';
+            const allowL = cfg.allowLong !== undefined ? cfg.allowLong : true;
+            const allowS = cfg.allowShort !== undefined ? cfg.allowShort : true;
+
+            const tpLabel = tpTarget === 'tp1_vwap' ? 'Đường VWAP' : tpTarget === 'tp2_upper2' ? `Dải Upper 2 (${mult2}x)` : `Dải Upper 3 (${mult3}x)`;
+
+            return {
+                type: 'VWAP MA9',
+                summaryDesc: `VWAP (${anchor.toUpperCase()}) + MA${ma} | Dải: ${mult1}x/${mult2}x/${mult3}x | TP: ${tpTarget} | ${allowL ? 'Long' : ''} ${allowS ? 'Short' : ''}`.trim(),
+                entryText: `• Long: Giá đóng cửa > MA${ma} & nằm trên VWAP (${anchor.toUpperCase()}) ${allowL ? '✅' : '❌'}\n• Short: Giá đóng cửa < MA${ma} & nằm dưới VWAP (${anchor.toUpperCase()}) ${allowS ? '✅' : '❌'}`,
+                slText: `• Đặt Stop Loss tại đường VWAP hoặc Dải Lower Band 2 (${mult2}x StdDev).`,
+                tpText: `• Chốt lời theo dải mục tiêu: ${tpLabel} (hoặc dải Lower tương ứng khi Short).`
             };
         } else if (isIchimoku) {
             const ma = cfg.maPeriod || 78;

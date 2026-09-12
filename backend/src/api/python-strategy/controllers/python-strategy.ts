@@ -275,6 +275,43 @@ export default {
         timeframe = 'D1',
         vwapAnchor,
         vwap_anchor,
+        riskReward,
+        rr,
+        entryType,
+        entry_type,
+        stPeriod,
+        st_period,
+        stMultiplier,
+        st_multiplier,
+        maPeriod,
+        ma_period,
+        tpSupertrend,
+        tp_supertrend,
+        tpRR,
+        tp_rr,
+        vwapMaPeriod,
+        vwap_ma_period,
+        vwapTpTarget,
+        vwap_tp_target,
+        mult1,
+        mult2,
+        mult3,
+        paEngulfing,
+        pa_engulfing,
+        paBd3bu2,
+        pa_bd3bu2,
+        paIncludeOpposite,
+        pa_include_opposite,
+        paPointUp,
+        pa_point_up,
+        paSwingUp,
+        pa_swing_up,
+        tpType,
+        tp_type,
+        slType,
+        sl_type,
+        optConfig,
+        opt_config,
       } = ctx.request.body || {};
 
       const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
@@ -305,6 +342,72 @@ export default {
         '--optimize',
         '--countback', String(countback),
       ];
+
+      const safeOptConfig = optConfig || opt_config;
+      if (safeOptConfig && typeof safeOptConfig === 'object') {
+        args.push('--opt-config', JSON.stringify(safeOptConfig));
+      }
+
+      if (stPeriod || st_period) {
+        args.push('--st-period', String(stPeriod || st_period));
+      }
+      if (stMultiplier || st_multiplier) {
+        args.push('--st-multiplier', String(stMultiplier || st_multiplier));
+      }
+      if (maPeriod || ma_period || vwapMaPeriod || vwap_ma_period) {
+        args.push('--ma-period', String(maPeriod || ma_period || vwapMaPeriod || vwap_ma_period));
+      }
+      if (riskReward || rr) {
+        args.push('--rr', String(riskReward || rr));
+      }
+      if (entryType || entry_type) {
+        args.push('--entry-type', String(entryType || entry_type));
+      }
+
+      if (tpSupertrend !== undefined || tp_supertrend !== undefined) {
+        const isTpST = toBool(tpSupertrend ?? tp_supertrend, true);
+        args.push(isTpST ? '--tp-supertrend' : '--no-tp-supertrend');
+      }
+
+      if (tpRR !== undefined || tp_rr !== undefined) {
+        const isTpRiskReward = toBool(tpRR ?? tp_rr, true);
+        args.push(isTpRiskReward ? '--tp-rr' : '--no-tp-rr');
+      }
+
+      if (mult1 !== undefined) args.push('--mult1', String(mult1));
+      if (mult2 !== undefined) args.push('--mult2', String(mult2));
+      if (mult3 !== undefined) args.push('--mult3', String(mult3));
+      if (vwapTpTarget || vwap_tp_target) {
+        args.push('--tp-target', String(vwapTpTarget || vwap_tp_target));
+      }
+
+      if (paEngulfing !== undefined || pa_engulfing !== undefined) {
+        const isEngulf = toBool(paEngulfing ?? pa_engulfing, true);
+        args.push(isEngulf ? '--pa-engulfing' : '--no-pa-engulfing');
+      }
+      if (paBd3bu2 !== undefined || pa_bd3bu2 !== undefined) {
+        const isBd = toBool(paBd3bu2 ?? pa_bd3bu2, true);
+        args.push(isBd ? '--pa-bd3bu2' : '--no-pa-bd3bu2');
+      }
+      if (paIncludeOpposite !== undefined || pa_include_opposite !== undefined) {
+        const isInc = toBool(paIncludeOpposite ?? pa_include_opposite, true);
+        args.push(isInc ? '--pa-include-opposite' : '--no-pa-include-opposite');
+      }
+      if (paPointUp !== undefined || pa_point_up !== undefined) {
+        const isPt = toBool(paPointUp ?? pa_point_up, false);
+        args.push(isPt ? '--pa-point-up' : '--no-pa-point-up');
+      }
+      if (paSwingUp !== undefined || pa_swing_up !== undefined) {
+        const isSw = toBool(paSwingUp ?? pa_swing_up, false);
+        args.push(isSw ? '--pa-swing-up' : '--no-pa-swing-up');
+      }
+
+      if (tpType || tp_type) {
+        args.push('--tp-type', String(tpType || tp_type));
+      }
+      if (slType || sl_type) {
+        args.push('--sl-type', String(slType || sl_type));
+      }
 
       if (isVWAP) {
         const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';

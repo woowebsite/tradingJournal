@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import {
     Activity,
@@ -96,6 +96,12 @@ const MONTH_NAMES = [
 
 const StrategyInsight = () => {
     const dispatch = useDispatch();
+    const [searchParams] = useSearchParams();
+    const querySymbol = useMemo(() => {
+        const s = searchParams.get('symbol');
+        return s ? s.trim().toUpperCase() : '';
+    }, [searchParams]);
+
     const { selectedAccount } = useAccount();
     const { items: watchlists = [] } = useSelector(state => state.watchlists);
     const { symbols = [] } = useSelector(state => state.market);
@@ -103,7 +109,7 @@ const StrategyInsight = () => {
 
     // Filter & Selection States
     const [selectedWatchlistId, setSelectedWatchlistId] = useState('');
-    const [selectedSymbol, setSelectedSymbol] = useState('');
+    const [selectedSymbol, setSelectedSymbol] = useState(querySymbol || '');
     const [timeframe, setTimeframe] = useState('D1');
     const [insightMode, setInsightMode] = useState('spread'); // 'spread' | 'intraday' | 'week' | 'year'
     const [spreadViewUnit, setSpreadViewUnit] = useState('price'); // 'price' | 'percent'
@@ -139,12 +145,25 @@ const StrategyInsight = () => {
         });
     }, [watchlists, selectedAccount]);
 
-    // Set first watchlist ID if not set
+    // Set first watchlist ID if not set (unless querySymbol matched another)
     useEffect(() => {
         if (accountWatchlists.length > 0 && !selectedWatchlistId) {
+            if (querySymbol) {
+                const targetWl = accountWatchlists.find(w => {
+                    const syms = w.symbols || [];
+                    return syms.some(s => {
+                        const sName = typeof s === 'string' ? s : (s?.Name || s?.name || s?.ticker || '');
+                        return sName.trim().toUpperCase() === querySymbol;
+                    });
+                });
+                if (targetWl) {
+                    setSelectedWatchlistId(targetWl.documentId || targetWl.id);
+                    return;
+                }
+            }
             setSelectedWatchlistId(accountWatchlists[0].documentId || accountWatchlists[0].id);
         }
-    }, [accountWatchlists, selectedWatchlistId]);
+    }, [accountWatchlists, selectedWatchlistId, querySymbol]);
 
     // Normalize symbols in active watchlist
     const watchlistSymbols = useMemo(() => {
@@ -164,19 +183,23 @@ const StrategyInsight = () => {
             return String(s?.Name || s?.name || s?.ticker || '').trim().toUpperCase();
         }).filter(Boolean);
 
-        return [...new Set(normalized)];
-    }, [selectedWatchlistId, accountWatchlists, symbols]);
+        if (querySymbol && !normalized.includes(querySymbol)) {
+            normalized.unshift(querySymbol);
+        }
 
-    // Reset selectedSymbol when watchlist changes if current symbol not in new list
+        return [...new Set(normalized)];
+    }, [selectedWatchlistId, accountWatchlists, symbols, querySymbol]);
+
+    // Reset selectedSymbol when watchlist changes if current symbol not in new list (and not querySymbol)
     useEffect(() => {
         if (watchlistSymbols.length > 0 && selectedSymbol) {
             const currentSelectedInList = watchlistSymbols.includes(selectedSymbol);
-            if (!currentSelectedInList) {
+            if (!currentSelectedInList && (!querySymbol || selectedSymbol !== querySymbol)) {
                 setSelectedSymbol('');
                 setScanResult(null);
             }
         }
-    }, [watchlistSymbols, selectedSymbol]);
+    }, [watchlistSymbols, selectedSymbol, querySymbol]);
 
     // 3. Scan & Load Chart Strategy Data
     const handleLoadInsight = useCallback(async (tickerToScan = null, customCountback = null, customTimeframe = null) => {
@@ -228,6 +251,15 @@ const StrategyInsight = () => {
             setScanning(false);
         }
     }, [selectedSymbol, timeframe, countback]);
+
+    // Auto load insight if querySymbol is provided in URL
+    const queryLoadedRef = useRef(false);
+    useEffect(() => {
+        if (querySymbol && !queryLoadedRef.current) {
+            queryLoadedRef.current = true;
+            handleLoadInsight(querySymbol, 1000, timeframe);
+        }
+    }, [querySymbol, timeframe, handleLoadInsight]);
 
     // Infinite scroll: load more historical candles
     const handleLoadMore = useCallback(async () => {
@@ -1304,7 +1336,7 @@ const StrategyInsight = () => {
                         </div>
                     )}
                     <Link
-                        to="/python-strategy"
+                        to={selectedSymbol ? `/python-strategy?symbol=${encodeURIComponent(selectedSymbol)}` : "/python-strategy"}
                         className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition"
                     >
                         <BrainCircuit size={14} />

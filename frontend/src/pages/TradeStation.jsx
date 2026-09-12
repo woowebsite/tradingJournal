@@ -177,12 +177,78 @@ const TradeStation = () => {
         });
     }, [addAutoTradeLog]);
 
+const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
+    const cfg = tpl?.config || {};
+    const stratFile = String(tpl?.strategyFile || (fallbackCtx.chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py')).toLowerCase();
+    const stratName = String(tpl?.name || stratFile.replace('.py', '')).toLowerCase();
+    const rawTemplate = String(tpl?.template || '').toLowerCase();
+
+    const isPriceAction = stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || stratName.includes('price action') || stratName.includes('+ pa') || stratName.includes(' pa ') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined || cfg.slType !== undefined || cfg.paBd3bu2 !== undefined;
+    const isVWAP = !isPriceAction && (stratFile.includes('vwap') || stratName.includes('vwap') || rawTemplate.includes('vwap') || cfg.vwapMaPeriod !== undefined || cfg.vwapAnchor !== undefined || (!tpl && fallbackCtx.chartTemplate === 'VWAP'));
+
+    if (isPriceAction) {
+        return {
+            strategyFile: tpl?.strategyFile || 'strategy_supertrend_priceaction.py',
+            ticker: symName,
+            timeframe: targetTf,
+            countback: cfg.countback || 1000,
+            stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
+            stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
+            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false,
+            paEngulfing: cfg.paEngulfing !== undefined ? cfg.paEngulfing : true,
+            paBd3bu2: cfg.paBd3bu2 !== undefined ? cfg.paBd3bu2 : true,
+            paIncludeOpposite: cfg.paIncludeOpposite !== undefined ? cfg.paIncludeOpposite : true,
+            paPointUp: cfg.paPointUp !== undefined ? cfg.paPointUp : false,
+            paSwingUp: cfg.paSwingUp !== undefined ? cfg.paSwingUp : false,
+            tpType: cfg.tpType || 'P50',
+            slType: cfg.slType || 'P75',
+            customTpVal: parseFloat(cfg.customTpVal) || 0,
+            customSlVal: parseFloat(cfg.customSlVal) || 0,
+        };
+    } else if (isVWAP) {
+        return {
+            strategyFile: tpl?.strategyFile || 'strategy_vwap_ma9.py',
+            ticker: symName,
+            timeframe: targetTf,
+            countback: cfg.countback || 1000,
+            maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || fallbackCtx.maPeriod || 9) || 9,
+            vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || fallbackCtx.maPeriod || 9) || 9,
+            vwapAnchor: cfg.vwapAnchor || fallbackCtx.vwapAnchor || 'year',
+            mult1: parseFloat(cfg.mult1) || 1.0,
+            mult2: parseFloat(cfg.mult2) || 2.0,
+            mult3: parseFloat(cfg.mult3) || 3.0,
+            tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+            vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+        };
+    } else {
+        return {
+            strategyFile: tpl?.strategyFile || 'strategy_supertrend_ma288.py',
+            ticker: symName,
+            timeframe: targetTf,
+            countback: cfg.countback || 1000,
+            rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
+            riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+            entryType: cfg.entryType || 'candle_close',
+            stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
+            stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
+            maPeriod: parseInt(cfg.maPeriod || fallbackCtx.maPeriod || 288) || 288,
+            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
+            tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
+            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+        };
+    }
+};
+
     const handleCandleCloseAutoTrade = useCallback(async (candle, symName, currentTf) => {
         const ctx = autoTradeContextRef.current;
         if (!ctx?.isAutoTradeEnabled) return;
 
         const tpl = ctx.selectedTemplate;
-        const cfg = tpl?.config || {};
         const stratFile = tpl?.strategyFile || (ctx.chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py');
         const stratName = tpl?.name || stratFile.replace('.py', '');
 
@@ -190,39 +256,7 @@ const TradeStation = () => {
         setIsScanningOnCandleClose(true);
 
         try {
-            const isVWAPStrat = (stratFile || '').toLowerCase().includes('vwap') || (stratName || '').toLowerCase().includes('vwap');
-            const scanParams = isVWAPStrat ? {
-                strategyFile: stratFile,
-                ticker: symName,
-                timeframe: currentTf,
-                countback: cfg.countback || 1000,
-                maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || ctx.maPeriod) || 9,
-                vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || ctx.maPeriod) || 9,
-                vwapAnchor: cfg.vwapAnchor || ctx.vwapAnchor || 'year',
-                mult1: parseFloat(cfg.mult1) || 1.0,
-                mult2: parseFloat(cfg.mult2) || 2.0,
-                mult3: parseFloat(cfg.mult3) || 3.0,
-                tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-                vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-            } : {
-                strategyFile: stratFile,
-                ticker: symName,
-                timeframe: currentTf,
-                countback: cfg.countback || 1000,
-                rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
-                riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
-                entryType: cfg.entryType || 'candle_close',
-                stPeriod: parseInt(cfg.stPeriod || ctx.stPeriod) || 10,
-                stMultiplier: parseFloat(cfg.stMultiplier || ctx.stMultiplier) || 3.0,
-                maPeriod: parseInt(cfg.maPeriod || ctx.maPeriod) || 288,
-                tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
-                tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
-                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-            };
-
+            const scanParams = buildPythonScanParams(tpl, symName, currentTf, ctx);
             const res = await scanPythonStrategy(scanParams);
             if (res && !res.error) {
                 setPythonScanResult(res);
@@ -676,42 +710,8 @@ const TradeStation = () => {
         }
 
         const symName = selectedSymbol.Name.trim().toUpperCase();
-        const cfg = selectedTemplate.config || {};
-        const stratFile = selectedTemplate.strategyFile || (chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py');
-        const isVWAPStrat = (stratFile || '').toLowerCase().includes('vwap') || (selectedTemplate.name || '').toLowerCase().includes('vwap');
         const targetTf = selectedTemplate.timeframe || timeframe || 'D1';
-
-        const scanParams = isVWAPStrat ? {
-            strategyFile: stratFile,
-            ticker: symName,
-            timeframe: targetTf,
-            countback: cfg.countback || 1000,
-            maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || maPeriod) || 9,
-            vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || maPeriod) || 9,
-            vwapAnchor: cfg.vwapAnchor || vwapAnchor || 'year',
-            mult1: parseFloat(cfg.mult1) || 1.0,
-            mult2: parseFloat(cfg.mult2) || 2.0,
-            mult3: parseFloat(cfg.mult3) || 3.0,
-            tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-            vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-        } : {
-            strategyFile: stratFile,
-            ticker: symName,
-            timeframe: targetTf,
-            countback: cfg.countback || 1000,
-            rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
-            riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
-            entryType: cfg.entryType || 'candle_close',
-            stPeriod: parseInt(cfg.stPeriod || stPeriod) || 10,
-            stMultiplier: parseFloat(cfg.stMultiplier || stMultiplier) || 3.0,
-            maPeriod: parseInt(cfg.maPeriod || maPeriod) || 288,
-            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
-            tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
-            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-        };
+        const scanParams = buildPythonScanParams(selectedTemplate, symName, targetTf, { chartTemplate, timeframe, vwapAnchor, maPeriod, stPeriod, stMultiplier });
 
         scanPythonStrategy(scanParams)
             .then(res => {
@@ -720,7 +720,7 @@ const TradeStation = () => {
                 }
             })
             .catch(err => console.warn('Could not sync python strategy signals for template:', err));
-    }, [selectedTemplate, selectedSymbol?.Name, timeframe, chartTemplate]);
+    }, [selectedTemplate, selectedSymbol?.Name, timeframe, chartTemplate, vwapAnchor, maPeriod, stPeriod, stMultiplier]);
 
     const handleTimeframeChange = (newTf) => {
         setTimeframe(newTf);
@@ -1272,9 +1272,6 @@ const TradeStation = () => {
         try {
             // 1. Determine template & configuration
             const tpl = selectedTemplate;
-            const cfg = tpl?.config || {};
-            const stratFile = tpl?.strategyFile || (chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py');
-            const isVWAP = chartTemplate === 'VWAP' || (stratFile && stratFile.toLowerCase().includes('vwap')) || (tpl?.name && tpl.name.toLowerCase().includes('vwap'));
             const targetTf = tpl?.timeframe || timeframe || 'D1';
 
             let entry = null;
@@ -1282,40 +1279,9 @@ const TradeStation = () => {
             let tp = null;
 
             // 2. Try Python Strategy scan if template or python strategy is specified
-            if (tpl?.strategyFile || tpl?.type === 'Python' || stratFile) {
+            if (tpl?.strategyFile || tpl?.type === 'Python' || chartTemplate === 'VWAP' || chartTemplate === 'Supertrend') {
                 try {
-                    const isVWAPStrat = (stratFile || '').toLowerCase().includes('vwap') || (tpl?.name || '').toLowerCase().includes('vwap');
-                    const scanParams = isVWAPStrat ? {
-                        strategyFile: stratFile,
-                        ticker: symName,
-                        timeframe: targetTf,
-                        countback: cfg.countback || 1000,
-                        maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
-                        vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9,
-                        vwapAnchor: cfg.vwapAnchor || 'year',
-                        mult1: parseFloat(cfg.mult1) || 1.0,
-                        mult2: parseFloat(cfg.mult2) || 2.0,
-                        mult3: parseFloat(cfg.mult3) || 3.0,
-                        tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-                        vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-                        allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-                        allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-                    } : {
-                        strategyFile: stratFile,
-                        ticker: symName,
-                        timeframe: targetTf,
-                        countback: cfg.countback || 1000,
-                        rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
-                        riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
-                        entryType: cfg.entryType || 'candle_close',
-                        stPeriod: parseInt(cfg.stPeriod) || 10,
-                        stMultiplier: parseFloat(cfg.stMultiplier) || 3.0,
-                        maPeriod: parseInt(cfg.maPeriod) || 288,
-                        tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
-                        tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
-                        allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-                        allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-                    };
+                    const scanParams = buildPythonScanParams(tpl, symName, targetTf, { chartTemplate, timeframe, vwapAnchor, maPeriod, stPeriod, stMultiplier });
                     const res = await scanPythonStrategy(scanParams);
                     if (res && !res.error) {
                         setPythonScanResult(res);
@@ -1332,13 +1298,14 @@ const TradeStation = () => {
                             tp = latestTrade.take_profit;
                         } else if (res.summary?.currentPrice) {
                             entry = livePrice || res.summary.currentPrice;
+                            const isVWAP = String(scanParams.strategyFile).includes('vwap');
                             if (isVWAP) {
                                 const lastCandle = res.candles?.at(-1);
                                 const vwapVal = lastCandle?.vwap || res.summary?.vwap;
                                 sl = vwapVal ? +Number(vwapVal).toFixed(2) : null;
                                 if (entry && sl) {
                                     const dist = Math.abs(entry - sl);
-                                    tp = +(entry >= sl ? entry + dist * (cfg.rr || 1.5) : entry - dist * (cfg.rr || 1.5)).toFixed(2);
+                                    tp = +(entry >= sl ? entry + dist * 1.5 : entry - dist * 1.5).toFixed(2);
                                 }
                             } else {
                                 const stVal = res.summary.supertrend || res.candles?.at(-1)?.supertrend;
@@ -1346,7 +1313,7 @@ const TradeStation = () => {
                                 sl = stVal ? +Number(stVal).toFixed(2) : null;
                                 if (entry && sl) {
                                     const dist = Math.abs(entry - sl);
-                                    tp = +(stDir === 1 ? entry + dist * (cfg.rr || 1.5) : entry - dist * (cfg.rr || 1.5)).toFixed(2);
+                                    tp = +(stDir === 1 ? entry + dist * 1.5 : entry - dist * 1.5).toFixed(2);
                                 }
                             }
                         }

@@ -839,7 +839,18 @@ def optimize_price_action_strategy(
     timeframe: str = "D1",
     countback: int = 5000,
     allow_long: bool = True,
-    allow_short: bool = True
+    allow_short: bool = True,
+    current_st_period: int = 10,
+    current_st_multiplier: float = 3.0,
+    current_pa_engulfing: bool = True,
+    current_pa_bd3bu2: bool = True,
+    current_pa_include_opposite: bool = True,
+    current_pa_point_up: bool = False,
+    current_pa_swing_up: bool = False,
+    current_tp_type: str = "P50",
+    current_sl_type: str = "P75",
+    current_tp_supertrend: bool = False,
+    opt_config: Dict = None
 ) -> Dict:
     df = fetch_market_candles(ticker, countback=countback, timeframe=timeframe)
     if df.empty or len(df) < 30:
@@ -853,22 +864,67 @@ def optimize_price_action_strategy(
 
     spread_stats = calculate_spread_percentiles(df)
 
-    st_period_grid = [7, 10, 14]
-    st_multiplier_grid = [2.0, 3.0, 4.0]
-    tp_type_grid = ["P25", "P50", "P75", "P90", "P99"]
-    sl_type_grid = ["P50", "P75", "P90", "supertrend"]
-    tp_st_grid = [False, True]
+    if opt_config is None:
+        opt_config = {}
 
-    pa_combos = [
-        {"pa_engulfing": True, "pa_bd3bu2": True, "pa_include_opposite": True, "pa_point_up": True, "pa_swing_up": True, "name": "All 5 PA"},
-        {"pa_engulfing": True, "pa_bd3bu2": True, "pa_include_opposite": True, "pa_point_up": False, "pa_swing_up": False, "name": "Top 3 PA"},
-        {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": True, "pa_swing_up": True, "name": "Reversals"},
-        {"pa_engulfing": True, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": False, "pa_swing_up": False, "name": "Engulfing Only"},
-        {"pa_engulfing": False, "pa_bd3bu2": True, "pa_include_opposite": False, "pa_point_up": False, "pa_swing_up": False, "name": "BD3BU2 Only"},
-        {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": True, "pa_point_up": False, "pa_swing_up": False, "name": "IncludeOpposite Only"},
-        {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": True, "pa_swing_up": False, "name": "PointUp Only"},
-        {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": False, "pa_swing_up": True, "name": "SwingUp Only"},
-    ]
+    opt_st_period = opt_config.get("stPeriod", True)
+    opt_st_multiplier = opt_config.get("stMultiplier", True)
+    opt_pa_patterns = opt_config.get("paPatterns", True)
+    opt_tp_type = opt_config.get("tpType", True)
+    opt_sl_type = opt_config.get("slType", True)
+    opt_tp_supertrend = opt_config.get("tpSupertrend", True)
+
+    if opt_st_period:
+        st_period_grid = [7, 10, 14]
+        if current_st_period and int(current_st_period) not in st_period_grid:
+            st_period_grid.append(int(current_st_period))
+            st_period_grid.sort()
+    else:
+        st_period_grid = [int(current_st_period or 10)]
+
+    if opt_st_multiplier:
+        st_multiplier_grid = [2.0, 3.0, 4.0]
+        if current_st_multiplier and float(current_st_multiplier) not in st_multiplier_grid:
+            st_multiplier_grid.append(float(current_st_multiplier))
+            st_multiplier_grid.sort()
+    else:
+        st_multiplier_grid = [float(current_st_multiplier or 3.0)]
+
+    if opt_tp_type:
+        tp_type_grid = ["P25", "P50", "P75", "P90", "P99"]
+    else:
+        tp_type_grid = [str(current_tp_type or "P50")]
+
+    if opt_sl_type:
+        sl_type_grid = ["P50", "P75", "P90", "supertrend"]
+    else:
+        sl_type_grid = [str(current_sl_type or "P75")]
+
+    if opt_tp_supertrend:
+        tp_st_grid = [False, True]
+    else:
+        tp_st_grid = [bool(current_tp_supertrend)]
+
+    if opt_pa_patterns:
+        pa_combos = [
+            {"pa_engulfing": True, "pa_bd3bu2": True, "pa_include_opposite": True, "pa_point_up": True, "pa_swing_up": True, "name": "All 5 PA"},
+            {"pa_engulfing": True, "pa_bd3bu2": True, "pa_include_opposite": True, "pa_point_up": False, "pa_swing_up": False, "name": "Top 3 PA"},
+            {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": True, "pa_swing_up": True, "name": "Reversals"},
+            {"pa_engulfing": True, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": False, "pa_swing_up": False, "name": "Engulfing Only"},
+            {"pa_engulfing": False, "pa_bd3bu2": True, "pa_include_opposite": False, "pa_point_up": False, "pa_swing_up": False, "name": "BD3BU2 Only"},
+            {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": True, "pa_point_up": False, "pa_swing_up": False, "name": "IncludeOpposite Only"},
+            {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": True, "pa_swing_up": False, "name": "PointUp Only"},
+            {"pa_engulfing": False, "pa_bd3bu2": False, "pa_include_opposite": False, "pa_point_up": False, "pa_swing_up": True, "name": "SwingUp Only"},
+        ]
+    else:
+        pa_combos = [{
+            "pa_engulfing": bool(current_pa_engulfing),
+            "pa_bd3bu2": bool(current_pa_bd3bu2),
+            "pa_include_opposite": bool(current_pa_include_opposite),
+            "pa_point_up": bool(current_pa_point_up),
+            "pa_swing_up": bool(current_pa_swing_up),
+            "name": "Đang chọn"
+        }]
 
     st_cache = {}
     for p in st_period_grid:
@@ -1101,16 +1157,16 @@ def optimize_price_action_strategy(
 
     if not best_combo:
         best_combo = {
-            "st_period": 10,
-            "st_multiplier": 3.0,
-            "pa_engulfing": True,
-            "pa_bd3bu2": True,
-            "pa_include_opposite": True,
-            "pa_point_up": False,
-            "pa_swing_up": False,
-            "tp_type": "P50",
-            "sl_type": "P75",
-            "tp_supertrend": False
+            "st_period": int(current_st_period or 10),
+            "st_multiplier": float(current_st_multiplier or 3.0),
+            "pa_engulfing": bool(current_pa_engulfing),
+            "pa_bd3bu2": bool(current_pa_bd3bu2),
+            "pa_include_opposite": bool(current_pa_include_opposite),
+            "pa_point_up": bool(current_pa_point_up),
+            "pa_swing_up": bool(current_pa_swing_up),
+            "tp_type": str(current_tp_type or "P50"),
+            "sl_type": str(current_sl_type or "P75"),
+            "tp_supertrend": bool(current_tp_supertrend)
         }
 
     full_result = scan_symbol_json(
@@ -1160,6 +1216,7 @@ def optimize_price_action_strategy(
 
 if __name__ == "__main__":
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(description="Supertrend + Price Action Strategy Scanner & Optimizer")
     parser.add_argument("--ticker", type=str, default="VNINDEX", help="Ticker symbol")
@@ -1167,6 +1224,7 @@ if __name__ == "__main__":
     parser.add_argument("--json", action="store_true", help="Output JSON format")
     parser.add_argument("--optimize", action="store_true", help="Auto optimize best parameters")
     parser.add_argument("--countback", type=int, default=1000, help="Number of candles")
+    parser.add_argument("--opt-config", type=str, default="", help="JSON config xác định các tham số được tick để tối ưu")
 
     # Supertrend
     parser.add_argument("--st-period", type=int, default=10, help="Supertrend period")
@@ -1207,12 +1265,30 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.optimize:
+        opt_cfg = {}
+        if args.opt_config:
+            try:
+                opt_cfg = json.loads(args.opt_config)
+            except Exception:
+                opt_cfg = {}
+
         res = optimize_price_action_strategy(
             ticker=args.ticker,
             timeframe=args.timeframe,
             countback=args.countback,
             allow_long=args.allow_long,
-            allow_short=args.allow_short
+            allow_short=args.allow_short,
+            current_st_period=args.st_period,
+            current_st_multiplier=args.st_multiplier,
+            current_pa_engulfing=args.pa_engulfing,
+            current_pa_bd3bu2=args.pa_bd3bu2,
+            current_pa_include_opposite=args.pa_include_opposite,
+            current_pa_point_up=args.pa_point_up,
+            current_pa_swing_up=args.pa_swing_up,
+            current_tp_type=args.tp_type,
+            current_sl_type=args.sl_type,
+            current_tp_supertrend=args.tp_supertrend,
+            opt_config=opt_cfg
         )
     else:
         res = scan_symbol_json(

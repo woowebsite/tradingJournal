@@ -1027,11 +1027,17 @@ def optimize_strategy_parameters(
     allow_long: bool = True,
     allow_short: bool = True,
     timeframe: str = "D1",
-    vwap_anchor: str = "year"
+    vwap_anchor: str = "year",
+    current_ma_period: int = 9,
+    current_mult2: float = 2.0,
+    current_mult3: float = 3.0,
+    current_tp_target: str = "tp1_vwap",
+    opt_config: Dict = None
 ) -> Dict:
     """
     Tự động quét Grid Search tìm bộ tham số MA, VWAP Bands và TP Target
     mang lại Profit Factor cao nhất dựa trên TOÀN BỘ dữ liệu có trong Strapi.
+    Các tham số được tick Opt mới tìm kiếm thay đổi, các tham số không tick sẽ giữ nguyên.
     """
     # Tối ưu hóa số lượng nến mẫu (tối đa 5,000 nến để phản hồi nhanh)
     req_count = min(int(countback), 5000) if countback else 5000
@@ -1050,14 +1056,50 @@ def optimize_strategy_parameters(
     low_arr = df['low'].values
     n = len(df)
 
-    ma_period_grid = [5, 7, 9, 13, 20, 34, 50]
-    ma_period_grid = [m for m in ma_period_grid if m <= n - 10]
-    if not ma_period_grid:
-        ma_period_grid = [min(9, n - 5)]
+    if opt_config is None:
+        opt_config = {}
 
-    tp_target_grid = ["tp1_vwap", "tp2_upper2", "tp3_upper3"]
-    mult2_grid = [1.5, 2.0, 2.5]
-    mult3_grid = [2.5, 3.0, 3.5]
+    opt_ma_period = opt_config.get("maPeriod", opt_config.get("vwapMaPeriod", True))
+    opt_mult2 = opt_config.get("mult2", True)
+    opt_mult3 = opt_config.get("mult3", True)
+    opt_tp_target = opt_config.get("tpTarget", opt_config.get("vwapTpTarget", True))
+    opt_vwap_anchor = opt_config.get("vwapAnchor", False)
+
+    if opt_ma_period:
+        all_ma_periods = [5, 7, 9, 13, 20, 34, 50]
+        if current_ma_period and int(current_ma_period) not in all_ma_periods:
+            all_ma_periods.append(int(current_ma_period))
+        ma_period_grid = sorted([m for m in all_ma_periods if m <= n - 10])
+        if not ma_period_grid:
+            ma_period_grid = [min(9, n - 5)]
+    else:
+        ma_period_grid = [min(int(current_ma_period or 9), max(3, n - 5))]
+
+    if opt_tp_target:
+        tp_target_grid = ["tp1_vwap", "tp2_upper2", "tp3_upper3"]
+    else:
+        tp_target_grid = [str(current_tp_target or "tp1_vwap")]
+
+    if opt_mult2:
+        mult2_grid = [1.5, 2.0, 2.5]
+        if current_mult2 and float(current_mult2) not in mult2_grid:
+            mult2_grid.append(float(current_mult2))
+            mult2_grid.sort()
+    else:
+        mult2_grid = [float(current_mult2 or 2.0)]
+
+    if opt_mult3:
+        mult3_grid = [2.5, 3.0, 3.5]
+        if current_mult3 and float(current_mult3) not in mult3_grid:
+            mult3_grid.append(float(current_mult3))
+            mult3_grid.sort()
+    else:
+        mult3_grid = [float(current_mult3 or 3.0)]
+
+    if opt_vwap_anchor:
+        anchor_grid = ["day", "week", "month", "quarter", "year"]
+    else:
+        anchor_grid = [str(vwap_anchor or "year").lower().strip()]
 
     # Precalculate MA
     ma_cache = {}
@@ -1065,19 +1107,20 @@ def optimize_strategy_parameters(
         ma_series = calculate_sma(df, period=m, price_col='close')
         ma_cache[m] = ma_series.values
 
-    # Precalculate VWAP Bands
-    clean_anchor = str(vwap_anchor or "year").lower().strip()
+    # Precalculate VWAP Bands for all anchors in grid
     vwap_cache = {}
-    for m2 in mult2_grid:
-        for m3 in mult3_grid:
-            df_vwap = calculate_anchored_vwap_with_bands(df.copy(), anchor=clean_anchor, mult1=1.0, mult2=m2, mult3=m3)
-            vwap_cache[(m2, m3)] = {
-                "vwap": df_vwap['vwap'].values,
-                "up2": df_vwap['vwap_upper2'].values,
-                "low2": df_vwap['vwap_lower2'].values,
-                "up3": df_vwap['vwap_upper3'].values,
-                "low3": df_vwap['vwap_lower3'].values,
-            }
+    for anc in anchor_grid:
+        clean_anc = str(anc or "year").lower().strip()
+        for m2 in mult2_grid:
+            for m3 in mult3_grid:
+                df_vwap = calculate_anchored_vwap_with_bands(df.copy(), anchor=clean_anc, mult1=1.0, mult2=m2, mult3=m3)
+                vwap_cache[(clean_anc, m2, m3)] = {
+                    "vwap": df_vwap['vwap'].values,
+                    "up2": df_vwap['vwap_upper2'].values,
+                    "low2": df_vwap['vwap_lower2'].values,
+                    "up3": df_vwap['vwap_upper3'].values,
+                    "low3": df_vwap['vwap_lower3'].values,
+                }
 
     # Phân loại độ tin cậy mẫu (Sample Size Reliability Tiers) dựa trên tổng số nến n
     target_trades = max(15, min(30, int(n / 35))) if n >= 300 else max(8, int(n / 25))
@@ -1088,88 +1131,91 @@ def optimize_strategy_parameters(
     best_combo = None
     all_candidates = []
 
-    for m in ma_period_grid:
-        ma_arr = ma_cache[m]
-        for m2 in mult2_grid:
-            for m3 in mult3_grid:
-                v_data = vwap_cache[(m2, m3)]
-                for tp_t in tp_target_grid:
-                    res = fast_backtest_eval_vwap(
-                        close_arr=close_arr,
-                        high_arr=high_arr,
-                        low_arr=low_arr,
-                        ma_arr=ma_arr,
-                        vwap_arr=v_data["vwap"],
-                        up2_arr=v_data["up2"],
-                        low2_arr=v_data["low2"],
-                        up3_arr=v_data["up3"],
-                        low3_arr=v_data["low3"],
-                        tp_target=tp_t,
-                        allow_long=allow_long,
-                        allow_short=allow_short,
-                        start_idx=start_idx
-                    )
+    for anc in anchor_grid:
+        clean_anc = str(anc or "year").lower().strip()
+        for m in ma_period_grid:
+            ma_arr = ma_cache[m]
+            for m2 in mult2_grid:
+                for m3 in mult3_grid:
+                    v_data = vwap_cache[(clean_anc, m2, m3)]
+                    for tp_t in tp_target_grid:
+                        res = fast_backtest_eval_vwap(
+                            close_arr=close_arr,
+                            high_arr=high_arr,
+                            low_arr=low_arr,
+                            ma_arr=ma_arr,
+                            vwap_arr=v_data["vwap"],
+                            up2_arr=v_data["up2"],
+                            low2_arr=v_data["low2"],
+                            up3_arr=v_data["up3"],
+                            low3_arr=v_data["low3"],
+                            tp_target=tp_t,
+                            allow_long=allow_long,
+                            allow_short=allow_short,
+                            start_idx=start_idx
+                        )
 
-                    closed = res['closed_trades']
-                    if closed == 0:
-                        continue
+                        closed = res['closed_trades']
+                        if closed == 0:
+                            continue
 
-                    pf = res['profit_factor']
-                    pnl = res['total_pnl']
-                    wr = res['win_rate']
+                        pf = res['profit_factor']
+                        pnl = res['total_pnl']
+                        wr = res['win_rate']
 
-                    # 1. Giới hạn PF trần (Capped PF) ở mức 10.0 để tránh trường hợp ít lệnh không loss đẩy PF ảo lên 100-200
-                    capped_pf = min(pf, 10.0)
+                        # 1. Giới hạn PF trần (Capped PF) ở mức 10.0 để tránh trường hợp ít lệnh không loss đẩy PF ảo lên 100-200
+                        capped_pf = min(pf, 10.0)
 
-                    # 2. Xếp hạng Tier theo độ tin cậy thống kê (Số lượng lệnh mẫu)
-                    if closed >= target_trades and pnl > 0 and pf >= 1.2:
-                        tier = 4  # Rất đáng tin cậy: Mẫu lớn, PnL dương, PF tốt
-                    elif closed >= min_solid_trades and pnl > 0 and pf >= 1.1:
-                        tier = 3  # Đáng tin cậy: Mẫu khá, PnL dương
-                    elif closed >= 6 and pnl > 0:
-                        tier = 2  # Chấp nhận được
-                    elif closed >= 3:
-                        tier = 1  # Mẫu nhỏ
-                    else:
-                        tier = 0  # Mẫu quá ít (< 3 lệnh)
+                        # 2. Xếp hạng Tier theo độ tin cậy thống kê (Số lượng lệnh mẫu)
+                        if closed >= target_trades and pnl > 0 and pf >= 1.2:
+                            tier = 4  # Rất đáng tin cậy: Mẫu lớn, PnL dương, PF tốt
+                        elif closed >= min_solid_trades and pnl > 0 and pf >= 1.1:
+                            tier = 3  # Đáng tin cậy: Mẫu khá, PnL dương
+                        elif closed >= 6 and pnl > 0:
+                            tier = 2  # Chấp nhận được
+                        elif closed >= 3:
+                            tier = 1  # Mẫu nhỏ
+                        else:
+                            tier = 0  # Mẫu quá ít (< 3 lệnh)
 
-                    # 3. Điểm đánh giá tổng hợp (Composite Fitness Score):
-                    trade_weight = np.sqrt(closed)
-                    wr_factor = 1.0 if wr >= 40.0 else max(0.2, wr / 40.0)
-                    pnl_weight = max(0.1, pnl) if pnl > 0 else (pnl / 10.0)
+                        # 3. Điểm đánh giá tổng hợp (Composite Fitness Score):
+                        trade_weight = np.sqrt(closed)
+                        wr_factor = 1.0 if wr >= 40.0 else max(0.2, wr / 40.0)
+                        pnl_weight = max(0.1, pnl) if pnl > 0 else (pnl / 10.0)
 
-                    fitness = capped_pf * trade_weight * pnl_weight * wr_factor
+                        fitness = capped_pf * trade_weight * pnl_weight * wr_factor
 
-                    score = (tier, round(fitness, 4), pnl, capped_pf, closed)
+                        score = (tier, round(fitness, 4), pnl, capped_pf, closed)
 
-                    candidate_data = {
-                        "score": score,
-                        "profitFactor": pf,
-                        "winRate": wr,
-                        "totalTrades": closed,
-                        "winTrades": res.get('win_trades', 0),
-                        "lossTrades": res.get('loss_trades', 0),
-                        "totalPnlPercent": round(pnl, 2),
-                        "grossProfit": round(res.get('gross_profit', 0.0), 2),
-                        "grossLoss": round(res.get('gross_loss', 0.0), 2),
-                        "maPeriod": m,
-                        "tpTarget": tp_t,
-                        "mult2": m2,
-                        "mult3": m3,
-                        "vwapAnchor": clean_anchor,
-                        "allowLong": allow_long,
-                        "allowShort": allow_short
-                    }
-                    all_candidates.append(candidate_data)
-
-                    if best_score is None or score > best_score:
-                        best_score = score
-                        best_combo = {
-                            "ma_period": m,
-                            "tp_target": tp_t,
+                        candidate_data = {
+                            "score": score,
+                            "profitFactor": pf,
+                            "winRate": wr,
+                            "totalTrades": closed,
+                            "winTrades": res.get('win_trades', 0),
+                            "lossTrades": res.get('loss_trades', 0),
+                            "totalPnlPercent": round(pnl, 2),
+                            "grossProfit": round(res.get('gross_profit', 0.0), 2),
+                            "grossLoss": round(res.get('gross_loss', 0.0), 2),
+                            "maPeriod": m,
+                            "tpTarget": tp_t,
                             "mult2": m2,
-                            "mult3": m3
+                            "mult3": m3,
+                            "vwapAnchor": clean_anc,
+                            "allowLong": allow_long,
+                            "allowShort": allow_short
                         }
+                        all_candidates.append(candidate_data)
+
+                        if best_score is None or score > best_score:
+                            best_score = score
+                            best_combo = {
+                                "ma_period": m,
+                                "tp_target": tp_t,
+                                "mult2": m2,
+                                "mult3": m3,
+                                "vwap_anchor": clean_anc
+                            }
 
     top_configs = []
     if all_candidates:
@@ -1187,10 +1233,11 @@ def optimize_strategy_parameters(
 
     if not best_combo:
         best_combo = {
-            "ma_period": DEFAULT_MA_PERIOD,
-            "tp_target": DEFAULT_TP_TARGET,
-            "mult2": DEFAULT_MULT2,
-            "mult3": DEFAULT_MULT3
+            "ma_period": int(current_ma_period or DEFAULT_MA_PERIOD),
+            "tp_target": str(current_tp_target or DEFAULT_TP_TARGET),
+            "mult2": float(current_mult2 or DEFAULT_MULT2),
+            "mult3": float(current_mult3 or DEFAULT_MULT3),
+            "vwap_anchor": str(vwap_anchor or DEFAULT_VWAP_ANCHOR).lower().strip()
         }
 
     # Chạy lại bản chi tiết với combo tối ưu nhất trên TOÀN BỘ tập nến
@@ -1198,7 +1245,7 @@ def optimize_strategy_parameters(
         ticker=ticker,
         countback=len(df),
         ma_period=best_combo["ma_period"],
-        vwap_anchor=clean_anchor,
+        vwap_anchor=best_combo["vwap_anchor"],
         mult1=DEFAULT_MULT1,
         mult2=best_combo["mult2"],
         mult3=best_combo["mult3"],
@@ -1213,7 +1260,7 @@ def optimize_strategy_parameters(
         "tpTarget": best_combo["tp_target"],
         "mult2": best_combo["mult2"],
         "mult3": best_combo["mult3"],
-        "vwapAnchor": clean_anchor,
+        "vwapAnchor": best_combo["vwap_anchor"],
         "allowLong": allow_long,
         "allowShort": allow_short,
         "profitFactor": full_result.get("summary", {}).get("profitFactor", 0.0),
@@ -1370,6 +1417,7 @@ if __name__ == "__main__":
     parser.add_argument("--mult2", type=float, default=DEFAULT_MULT2, help="Hệ số dải 2 (Upper2/Lower2)")
     parser.add_argument("--mult3", type=float, default=DEFAULT_MULT3, help="Hệ số dải 3 (Upper3/Lower3)")
     parser.add_argument("--tp-target", type=str, default=DEFAULT_TP_TARGET, choices=["tp1_vwap", "tp2_upper2", "tp3_upper3"], help="Mục tiêu chốt lời")
+    parser.add_argument("--opt-config", type=str, default="", help="JSON config xác định các tham số được tick để tối ưu")
 
     # Lựa chọn loại lệnh: Long / Short
     parser.add_argument("--allow-long", dest="allow_long", action="store_true", default=True, help="Cho phép mở lệnh Long")
@@ -1381,13 +1429,25 @@ if __name__ == "__main__":
 
     if args.optimize:
         ticker = args.ticker or "VNINDEX"
+        opt_cfg = {}
+        if args.opt_config:
+            try:
+                opt_cfg = json.loads(args.opt_config)
+            except Exception:
+                opt_cfg = {}
+
         res = optimize_strategy_parameters(
             ticker=ticker,
             countback=args.countback,
             allow_long=args.allow_long,
             allow_short=args.allow_short,
             timeframe=args.timeframe,
-            vwap_anchor=args.vwap_anchor
+            vwap_anchor=args.vwap_anchor,
+            current_ma_period=args.ma_period,
+            current_mult2=args.mult2,
+            current_mult3=args.mult3,
+            current_tp_target=args.tp_target,
+            opt_config=opt_cfg
         )
         if args.json:
             print(json.dumps(res, ensure_ascii=False))
