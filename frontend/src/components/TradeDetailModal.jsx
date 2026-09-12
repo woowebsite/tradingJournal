@@ -7,6 +7,7 @@ import { useDispatch } from 'react-redux';
 import { fetchLatestHistory, fetchPagedSymbolHistories } from '../features/marketSlice';
 import { extractTextFromBlocks } from '../utils/textUtils';
 import { calculateTradePnL } from '../utils/tradeCalculations';
+import { buildTradeDetailChartSignals } from '../utils/chartSignals';
 import useEscapeKey from '../hooks/useEscapeKey';
 import TradingViewChart from './TradingViewChart';
 

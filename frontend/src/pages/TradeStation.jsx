@@ -17,6 +17,7 @@ import TechnicalPanel from '../containers/TechnicalPanel';
 import WatchlistSelector from '../components/WatchlistSelector';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
+import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import { Search, RefreshCw, Plus, History, BookmarkCheck, Bot, List, Trash2 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
