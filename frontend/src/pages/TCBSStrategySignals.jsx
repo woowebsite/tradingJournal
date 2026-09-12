@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { RefreshCw, TrendingUp, Loader2, X } from 'lucide-react';
-import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals, getStrategyDetail, syncStrategyDetail, getAllStrategyDetails } from '../services/tcbsStrategy';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Bell, RefreshCw, TrendingUp, Loader2, X } from 'lucide-react';
+import { fetchRecentTcbsStrategySignals, syncTcbsStrategySignals, getTcbsStrategySignals, getStrategyDetail, syncStrategyDetail, getAllStrategyDetails, getBacktestConclusion } from '../services/tcbsStrategy';
+import api from '../services/api';
 
 const DEFAULT_PARAMS = {
     strategyKey: 'price_volume_increase',
@@ -192,6 +194,20 @@ const getBestStrategiesByTicker = (probabilityTotals) => {
     return Array.from(bestByTicker.values()).sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
 };
 
+const unwrapConclusionPayload = (payload) => {
+    if (!payload) return [];
+
+    const data = payload.response?.data ?? payload.data ?? payload.result ?? payload;
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    if (typeof data === 'object') return [data];
+    return [{ message: String(data) }];
+};
+
+const getConclusionMessage = (item) => {
+    return item?.conclusion || '';
+};
+
 const TCBSStrategySignals = () => {
     const [strategyKey, setStrategyKey] = useState(DEFAULT_PARAMS.strategyKey);
     const [ticker, setTicker] = useState(DEFAULT_PARAMS.ticker);
@@ -199,10 +215,17 @@ const TCBSStrategySignals = () => {
     const [signals, setSignals] = useState([]);
     const [recentSignals, setRecentSignals] = useState([]);
     const [bestStrategies, setBestStrategies] = useState([]);
+    const [stockSymbols, setStockSymbols] = useState([]);
+    const [loadingStockSymbols, setLoadingStockSymbols] = useState(false);
     const [strategyProbabilityTotals, setStrategyProbabilityTotals] = useState([]);
+    const [backtestConclusion, setBacktestConclusion] = useState([]);
+    const [loadingConclusion, setLoadingConclusion] = useState(false);
+    const [conclusionError, setConclusionError] = useState(null);
     const [loading, setLoading] = useState(false);
     const [loadingBestStrategies, setLoadingBestStrategies] = useState(false);
     const [error, setError] = useState(null);
+    const [syncingDetailAll, setSyncingDetailAll] = useState(false);
+    const [syncDetailProgress, setSyncDetailProgress] = useState({ current: 0, total: 0 });
     const [syncingAll, setSyncingAll] = useState(false);
     const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
     const selectedStrategy = TCBS_STRATEGIES.find(strategy => strategy.StrategyKey === strategyKey) || TCBS_STRATEGIES[0];
@@ -210,6 +233,49 @@ const TCBSStrategySignals = () => {
     const [detailOpen, setDetailOpen] = useState(false);
     const [loadingDetail, setLoadingDetail] = useState(false);
     const [detailData, setDetailData] = useState(null);
+
+    const tickerOptions = useMemo(() => {
+        const seen = new Set();
+        const result = [];
+
+        stockSymbols.forEach((symbol) => {
+            const name = String(symbol?.Name || '').trim().toUpperCase();
+            if (!name || seen.has(name)) return;
+            seen.add(name);
+            result.push({ ...symbol, Name: name });
+        });
+
+        return result.sort((a, b) => String(a.Name || '').localeCompare(String(b.Name || '')));
+    }, [stockSymbols]);
+
+    useEffect(() => {
+        const loadStockSymbols = async () => {
+            setLoadingStockSymbols(true);
+            setError(null);
+
+            try {
+                const response = await api.get(
+                    '/symbols?populate=market&filters[market][Name][$eq]=Stocks&sort=Name:asc&pagination[pageSize]=1000'
+                );
+                setStockSymbols(response.data.data || []);
+            } catch (err) {
+                console.error('Failed to load stock symbols:', err);
+                setError(err.response?.data?.error?.message || err.message || 'Failed to load stock symbols');
+                setStockSymbols([]);
+            } finally {
+                setLoadingStockSymbols(false);
+            }
+        };
+
+        loadStockSymbols();
+    }, []);
+
+    useEffect(() => {
+        const nextTicker = tickerOptions[0]?.Name || '';
+        if (nextTicker) {
+            setTicker(nextTicker);
+        }
+    }, [tickerOptions]);
 
     const handleOpenDetail = async () => {
         const nextStrategyKey = strategyKey.trim();
@@ -229,6 +295,7 @@ const TCBSStrategySignals = () => {
             let data = await getStrategyDetail(nextStrategyKey, nextTicker);
             if (!data) {
                 data = await syncStrategyDetail(nextStrategyKey, selectedStrategy.StrategyName, nextTicker);
+                await loadRecentSignals(nextTicker);
             }
             setDetailData(data);
         } catch (err) {
@@ -249,11 +316,64 @@ const TCBSStrategySignals = () => {
             const data = await syncStrategyDetail(nextStrategyKey, selectedStrategy.StrategyName, nextTicker);
             setDetailData(data);
             await loadBestStrategies(nextTicker);
+            await loadRecentSignals(nextTicker);
         } catch (err) {
             console.error('Failed to sync strategy details:', err);
             setError(err.response?.data?.error?.message || err.message || 'Failed to sync strategy details');
         } finally {
             setLoadingDetail(false);
+        }
+    };
+
+    const handleSyncAllDetails = async () => {
+        const nextTicker = ticker.trim().toUpperCase();
+
+        if (!nextTicker) {
+            setError('Ticker is required.');
+            return;
+        }
+
+        setSyncingDetailAll(true);
+        setError(null);
+        setSyncDetailProgress({ current: 0, total: TCBS_STRATEGIES.length });
+
+        try {
+            const failedStrategies = [];
+            const currentSelectedStrategy = TCBS_STRATEGIES.find(strategy => strategy.StrategyKey === strategyKey) || TCBS_STRATEGIES[0];
+            let currentSelectedDetail = null;
+
+            for (let i = 0; i < TCBS_STRATEGIES.length; i++) {
+                const strategy = TCBS_STRATEGIES[i];
+                setSyncDetailProgress({ current: i + 1, total: TCBS_STRATEGIES.length });
+
+                try {
+                    const data = await syncStrategyDetail(strategy.StrategyKey, strategy.StrategyName, nextTicker);
+                    if (strategy.StrategyKey === currentSelectedStrategy.StrategyKey) {
+                        currentSelectedDetail = data;
+                    }
+                } catch (err) {
+                    console.error(`Failed to sync strategy detail for ${strategy.StrategyKey}:`, err);
+                    failedStrategies.push(strategy.StrategyKey);
+                }
+            }
+
+            if (currentSelectedDetail) {
+                setDetailData(currentSelectedDetail);
+            } else if (detailOpen) {
+                await handleOpenDetail();
+            }
+
+            await loadBestStrategies(nextTicker);
+            await loadRecentSignals(nextTicker);
+
+            if (failedStrategies.length > 0) {
+                setError(`Failed to sync detail for: ${failedStrategies.join(', ')}`);
+            }
+        } catch (err) {
+            console.error('Failed to sync all strategy details:', err);
+            setError(err.response?.data?.error?.message || err.message || 'Failed to sync all strategy details');
+        } finally {
+            setSyncingDetailAll(false);
         }
     };
 
@@ -263,17 +383,6 @@ const TCBSStrategySignals = () => {
 
         const data = await fetchRecentTcbsStrategySignals(normalizedTicker);
         setRecentSignals(sortSignalsByNewestDate(data).slice(0, 10));
-    };
-
-    const handleTickerBlur = async (nextTicker) => {
-        const normalizedTicker = nextTicker.trim().toUpperCase();
-        if (!normalizedTicker) return;
-
-        setTicker(normalizedTicker);
-        await Promise.all([
-            loadRecentSignals(normalizedTicker),
-            loadBestStrategies(normalizedTicker),
-        ]);
     };
 
     const loadBestStrategies = async (nextTicker = ticker) => {
@@ -294,22 +403,22 @@ const TCBSStrategySignals = () => {
         }
     };
 
-    const loadSignals = async () => {
-        const nextStrategyKey = strategyKey.trim();
-        const nextTicker = ticker.trim().toUpperCase();
+    const loadSignals = async (nextStrategyKey = strategyKey, nextTicker = ticker) => {
+        const normalizedStrategyKey = nextStrategyKey.trim();
+        const normalizedTicker = nextTicker.trim().toUpperCase();
 
-        if (!nextStrategyKey || !nextTicker) {
+        if (!normalizedStrategyKey || !normalizedTicker) {
             setError('Strategy Key and Ticker are required.');
             return;
         }
 
         setLoading(true);
         setError(null);
-        setTicker(nextTicker);
+        setTicker(normalizedTicker);
 
         try {
             // Try loading from database first for performance optimization
-            const existingSignals = await getTcbsStrategySignals(nextStrategyKey, nextTicker);
+            const existingSignals = await getTcbsStrategySignals(normalizedStrategyKey, normalizedTicker);
 
             if (existingSignals && existingSignals.length > 0) {
                 setSignals(sortSignalsByNewestDate(existingSignals));
@@ -318,17 +427,17 @@ const TCBSStrategySignals = () => {
                     created: 0,
                     skipped: 0
                 });
-                await loadRecentSignals(nextTicker);
+                await loadRecentSignals(normalizedTicker);
             } else {
                 // If no signals are in the database, fetch and sync from TCBS
                 const data = await syncTcbsStrategySignals({
-                    strategyKey: nextStrategyKey,
+                    strategyKey: normalizedStrategyKey,
                     strategyName: selectedStrategy.StrategyName,
-                    ticker: nextTicker,
+                    ticker: normalizedTicker,
                 });
                 setSummary(data);
                 setSignals(sortSignalsByNewestDate(data.signals || []));
-                await loadRecentSignals(nextTicker);
+                await loadRecentSignals(normalizedTicker);
             }
         } catch (err) {
             setError(err.response?.data?.error?.message || err.message || 'Failed to sync TCBS signals');
@@ -391,14 +500,37 @@ const TCBSStrategySignals = () => {
         }
     };
 
+    // Load signals when strategyKey or ticker changes
     useEffect(() => {
         if (!syncingAll) {
-            loadSignals();
+            loadSignals(strategyKey, ticker);
         }
-    }, [strategyKey]);
+    }, [strategyKey, ticker]);
+
+    // Load ticker-specific best strategies when ticker changes
+    useEffect(() => {
+        if (!syncingAll) {
+            loadBestStrategies(ticker);
+        }
+    }, [ticker]);
 
     useEffect(() => {
-        loadBestStrategies(ticker);
+        const loadBacktestConclusion = async () => {
+            setLoadingConclusion(true);
+            setConclusionError(null);
+
+            try {
+                const payload = await getBacktestConclusion('All');
+                setBacktestConclusion(unwrapConclusionPayload(payload));
+            } catch (err) {
+                console.error('Failed to load TCBS backtest conclusion:', err);
+                setConclusionError(err.message || 'Failed to load TCBS backtest conclusion');
+            } finally {
+                setLoadingConclusion(false);
+            }
+        };
+
+        loadBacktestConclusion();
     }, []);
 
     return (
@@ -406,15 +538,36 @@ const TCBSStrategySignals = () => {
             <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                 <div>
                     <h2 className="text-3xl font-bold text-white">TCBS Strategy Signals</h2>
-                    <p className="text-gray-400">
-                        {selectedStrategy.StrategyName} · {ticker || DEFAULT_PARAMS.ticker}
-                    </p>
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {/* Ticker Selector */}
+                    <div className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 shadow-lg">
+                        <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider" htmlFor="tcbs-ticker">Ticker</label>
+                        <select
+                            id="tcbs-ticker"
+                            value={ticker}
+                            onChange={(event) => setTicker(event.target.value.toUpperCase())}
+                            className="bg-transparent text-white text-sm font-semibold outline-none cursor-pointer focus:ring-0 focus:border-transparent"
+                            disabled={loading || syncingAll || syncingDetailAll || loadingDetail || loadingStockSymbols || tickerOptions.length === 0}
+                        >
+                            {loadingStockSymbols ? (
+                                <option value="" className="bg-gray-900">Loading stocks...</option>
+                            ) : tickerOptions.length === 0 ? (
+                                <option value="" className="bg-gray-900">No stock symbols</option>
+                            ) : (
+                                tickerOptions.map((symbol) => (
+                                    <option key={symbol.documentId || symbol.id || symbol.Name} value={symbol.Name} className="bg-gray-900">
+                                        {symbol.Name}
+                                    </option>
+                                ))
+                            )}
+                        </select>
+                    </div>
+
                     <button
                         onClick={handleOpenDetail}
-                        disabled={loading || syncingAll || loadingDetail}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
                         className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:cursor-not-allowed text-white rounded-lg transition border border-gray-700 shadow-lg font-semibold"
                     >
                         {loadingDetail ? (
@@ -428,8 +581,26 @@ const TCBSStrategySignals = () => {
                     </button>
 
                     <button
+                        onClick={handleSyncAllDetails}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-emerald-600/20 font-semibold"
+                    >
+                        {syncingDetailAll ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin text-emerald-200" />
+                                <span className="text-emerald-100">{syncDetailProgress.current}/{syncDetailProgress.total}</span>
+                            </>
+                        ) : (
+                            <>
+                                <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                                <span>Sync Detail</span>
+                            </>
+                        )}
+                    </button>
+
+                    <button
                         onClick={handleSyncAll}
-                        disabled={loading || syncingAll}
+                        disabled={loading || syncingAll || syncingDetailAll || loadingDetail || tickerOptions.length === 0}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition shadow-lg shadow-blue-600/20 font-semibold"
                     >
                         {syncingAll ? (
@@ -447,53 +618,44 @@ const TCBSStrategySignals = () => {
                 </div>
             </div>
 
+            <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/30 shadow-lg shadow-amber-950/20 overflow-hidden">
+                <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start">
+
+
+                    <div className="min-w-0 flex-1">
+
+
+                        {loadingConclusion ? (
+                            <p className="mt-2 text-sm text-amber-200/80">Loading latest TCBS conclusion...</p>
+                        ) : conclusionError ? (
+                            <p className="mt-2 text-sm text-red-200">{conclusionError}</p>
+                        ) : backtestConclusion.length === 0 ? (
+                            <p className="mt-2 text-sm text-amber-200/80">No conclusion data available.</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {backtestConclusion.filter(item => getConclusionMessage(item)).map((item, index) => {
+                                    const message = getConclusionMessage(item);
+
+                                    return (
+                                        <div
+                                            key={`${item?.ticker || 'conclusion'}-${index}`}
+                                            className="tcbs-backtest-conclusion text-sm leading-6 text-amber-50/95"
+                                            dangerouslySetInnerHTML={{ __html: message }}
+                                        />
+                                    );
+                                }).filter(Boolean)}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
             {error && (
                 <div className="mb-4 border border-red-700 bg-red-950/40 text-red-200 rounded-lg px-4 py-3">
                     {error}
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <label className="text-sm text-gray-400" htmlFor="tcbs-strategy-key">Strategy Key</label>
-                    <select
-                        id="tcbs-strategy-key"
-                        value={strategyKey}
-                        onChange={(event) => setStrategyKey(event.target.value)}
-                        className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading || syncingAll}
-                    >
-                        {TCBS_STRATEGIES.map(strategy => (
-                            <option key={strategy.StrategyKey} value={strategy.StrategyKey}>
-                                {strategy.StrategyName}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <label className="text-sm text-gray-400" htmlFor="tcbs-ticker">Ticker</label>
-                    <input
-                        id="tcbs-ticker"
-                        value={ticker}
-                        onChange={(event) => setTicker(event.target.value.toUpperCase())}
-                        onBlur={(event) => handleTickerBlur(event.target.value)}
-                        className="mt-2 w-full bg-gray-900 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        disabled={loading || syncingAll}
-                    />
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-400">Sig = 1</p>
-                    <p className="text-blue-400 font-semibold mt-1">{summary?.totalSigOne ?? signals.length}</p>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-400">Created</p>
-                    <p className="text-green-400 font-semibold mt-1">{summary?.created ?? 0}</p>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <p className="text-sm text-gray-400">Skipped</p>
-                    <p className="text-gray-200 font-semibold mt-1">{summary?.skipped ?? 0}</p>
-                </div>
-            </div>
 
             <div id="best-strategy-table" className="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
                 <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
@@ -534,7 +696,14 @@ const TCBSStrategySignals = () => {
 
                                     return (
                                         <tr key={`best-${strategy.ticker}-${strategy.strategyKey}`} className="hover:bg-gray-700/30 transition">
-                                            <td className="px-4 py-4 text-gray-200 font-bold">{strategy.ticker}</td>
+                                            <td className="px-4 py-4 text-gray-200 font-bold">
+                                                <Link
+                                                    to={`/trade-station?symbol=${encodeURIComponent(strategy.ticker || '')}`}
+                                                    className="text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                                                >
+                                                    {strategy.ticker}
+                                                </Link>
+                                            </td>
                                             <td className="px-4 py-4 text-gray-300">
                                                 <div className="font-medium text-white">{strategy.strategyName || getStrategyName(strategy)}</div>
                                                 <div className="text-xs text-gray-500 font-mono">{strategy.strategyKey}</div>
@@ -565,6 +734,133 @@ const TCBSStrategySignals = () => {
                             )}
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+
+
+            <div className="mb-6 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+                <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm h-full">
+                    <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
+                        <TrendingUp size={18} className="text-green-400" />
+                        <span className="font-semibold text-white">Recently Signals</span>
+                        <span className="text-sm text-gray-500">({recentSignals.length})</span>
+                    </div>
+
+                    <div className="max-h-[540px] overflow-auto">
+                        <table className="w-full text-left text-xs">
+                            <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
+                                <tr>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Strategy Name</th>
+                                    <th className="px-6 py-3">Closed Price</th>
+                                    <th className="px-6 py-3">Volume</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {(loading || syncingAll) && recentSignals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                            Loading recent signals...
+                                        </td>
+                                    </tr>
+                                ) : recentSignals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                            No recent signals found.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    recentSignals.map((signal) => (
+                                        <tr key={`recent-${signal.id || signal.documentId || signal.TDate}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
+                                            <td className="px-6 py-4 text-gray-300">{getStrategyName(signal)}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm h-full">
+                    <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                            <TrendingUp size={18} className="text-blue-400" />
+                            <span className="font-semibold text-white">Signals</span>
+                            <span className="text-sm text-gray-500">({signals.length})</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-4">
+                            {/* Strategy Key selector in Signals toolbar */}
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-400 font-semibold" htmlFor="tcbs-strategy-key">Strategy:</label>
+                                <select
+                                    id="tcbs-strategy-key"
+                                    value={strategyKey}
+                                    onChange={(event) => setStrategyKey(event.target.value)}
+                                    className="bg-gray-900 border border-gray-700 text-white text-xs rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[150px]"
+                                    disabled={loading || syncingAll || syncingDetailAll || loadingDetail}
+                                >
+                                    {TCBS_STRATEGIES.map(strategy => (
+                                        <option key={strategy.StrategyKey} value={strategy.StrategyKey}>
+                                            {strategy.StrategyName}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Summary stats pill badges */}
+                            <div className="flex items-center gap-2 text-xs">
+                                <span className="bg-blue-950/50 text-blue-400 border border-blue-800/60 px-2.5 py-1 rounded-md font-medium">
+                                    Sig: <strong className="font-semibold ml-0.5">{summary?.totalSigOne ?? signals.length}</strong>
+                                </span>
+                                <span className="bg-green-950/50 text-green-400 border border-green-800/60 px-2.5 py-1 rounded-md font-medium">
+                                    Created: <strong className="font-semibold ml-0.5">{summary?.created ?? 0}</strong>
+                                </span>
+                                <span className="bg-gray-900/50 text-gray-300 border border-gray-700/60 px-2.5 py-1 rounded-md font-medium">
+                                    Skipped: <strong className="font-semibold ml-0.5">{summary?.skipped ?? 0}</strong>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-h-[540px] overflow-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
+                                <tr>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Close Price</th>
+                                    <th className="px-6 py-3">Volume</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {(loading || syncingAll) && signals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
+                                            Loading TCBS signals...
+                                        </td>
+                                    </tr>
+                                ) : signals.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="3" className="px-6 py-10 text-center text-gray-400">
+                                            No TCBS signals found.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    signals.map((signal) => (
+                                        <tr key={signal.id || `${signal.TDate}-${signal.syncStatus}`} className="hover:bg-gray-700/30 transition">
+                                            <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
+                                            <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -626,316 +922,230 @@ const TCBSStrategySignals = () => {
                 </div>
             </div>
 
-            <div className="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
-                <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
-                    <TrendingUp size={18} className="text-green-400" />
-                    <span className="font-semibold text-white">Recently Signals</span>
-                    <span className="text-sm text-gray-500">({recentSignals.length})</span>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                        <thead className="bg-gray-900/50 text-gray-400 text-[11px] uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Strategy Name</th>
-                                <th className="px-6 py-3">Closed Price</th>
-                                <th className="px-6 py-3">Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {(loading || syncingAll) && recentSignals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                        Loading recent signals...
-                                    </td>
-                                </tr>
-                            ) : recentSignals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                        No recent signals found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                recentSignals.map((signal) => (
-                                    <tr key={`recent-${signal.id || signal.documentId || signal.TDate}`} className="hover:bg-gray-700/30 transition">
-                                        <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
-                                        <td className="px-6 py-4 text-gray-300">{getStrategyName(signal)}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-sm">
-                <div className="p-4 border-b border-gray-700 bg-gray-900/30 flex items-center gap-2">
-                    <TrendingUp size={18} className="text-blue-400" />
-                    <span className="font-semibold text-white">Signals</span>
-                    <span className="text-sm text-gray-500">({signals.length})</span>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Close Price</th>
-                                <th className="px-6 py-3">Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {(loading || syncingAll) && signals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
-                                        Loading TCBS signals...
-                                    </td>
-                                </tr>
-                            ) : signals.length === 0 ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-10 text-center text-gray-400">
-                                        No TCBS signals found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                signals.map((signal) => (
-                                    <tr key={signal.id || `${signal.TDate}-${signal.syncStatus}`} className="hover:bg-gray-700/30 transition">
-                                        <td className="px-6 py-4 text-gray-200 font-medium">{signal.TDate}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.CPrice || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-gray-300">{Number(signal.Volume || 0).toLocaleString()}</td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {detailOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto">
-                    <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col text-gray-200">
-                        {/* Header */}
-                        <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/40">
-                            <div>
-                                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                    <span>Strategy Backtest Details</span>
-                                    <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/25 px-2 py-0.5 rounded font-mono uppercase">{ticker}</span>
-                                </h3>
-                                <p className="text-xs text-gray-400 mt-1">{selectedStrategy.StrategyName} · {selectedStrategy.StrategyKey}</p>
+            {
+                detailOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto">
+                        <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col text-gray-200">
+                            {/* Header */}
+                            <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/40">
+                                <div>
+                                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                        <span>Strategy Backtest Details</span>
+                                        <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/25 px-2 py-0.5 rounded font-mono uppercase">{ticker}</span>
+                                    </h3>
+                                    <p className="text-xs text-gray-400 mt-1">{selectedStrategy.StrategyName} · {selectedStrategy.StrategyKey}</p>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={handleSyncDetailExplicit}
+                                        disabled={loadingDetail || syncingDetailAll}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-xs font-semibold text-gray-300 rounded-lg transition border border-gray-700"
+                                    >
+                                        <RefreshCw size={12} className={loadingDetail ? 'animate-spin' : ''} />
+                                        <span>Sync from TCBS</span>
+                                    </button>
+                                    <button
+                                        onClick={() => setDetailOpen(false)}
+                                        className="p-1.5 hover:bg-gray-800 rounded-lg transition text-gray-400 hover:text-white"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <button
-                                    onClick={handleSyncDetailExplicit}
-                                    disabled={loadingDetail}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-xs font-semibold text-gray-300 rounded-lg transition border border-gray-700"
-                                >
-                                    <RefreshCw size={12} className={loadingDetail ? 'animate-spin' : ''} />
-                                    <span>Sync from TCBS</span>
-                                </button>
+
+                            {/* Content */}
+                            <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                                {loadingDetail ? (
+                                    <div className="py-20 text-center text-gray-400">
+                                        <Loader2 size={40} className="animate-spin mx-auto mb-4 text-blue-500 opacity-50" />
+                                        <p className="text-lg font-medium">Fetching strategy statistics...</p>
+                                        <p className="text-xs text-gray-500 mt-1">Calling TCBS backtest engine & storing results</p>
+                                    </div>
+                                ) : detailData ? (
+                                    <>
+                                        {/* Stats grid */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                            {/* Volatility Stats */}
+                                            <div className="bg-gray-800/40 border border-gray-800 rounded-xl p-4 space-y-3">
+                                                <h4 className="font-bold text-sm uppercase tracking-wider text-orange-400">Volatility Stats</h4>
+                                                <div className="space-y-2 text-sm">
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Best Period</span>
+                                                        <span className="font-bold text-white">{detailData.volaStatistic?.BestPeriod || '-'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">High Score</span>
+                                                        <span className="font-bold text-green-400">
+                                                            {detailData.volaStatistic?.HighPercent !== undefined && detailData.volaStatistic?.HighPercent !== null ? `+${(detailData.volaStatistic.HighPercent * 100).toFixed(1)}%` : '-'}
+                                                            <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.volaStatistic?.High || ''}</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Low Score</span>
+                                                        <span className="font-bold text-red-400">
+                                                            {detailData.volaStatistic?.LowPercent !== undefined && detailData.volaStatistic?.LowPercent !== null ? `${(detailData.volaStatistic.LowPercent * 100).toFixed(1)}%` : '-'}
+                                                            <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.volaStatistic?.Low || ''}</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Probability Stats */}
+                                            <div className="bg-gray-800/40 border border-gray-800 rounded-xl p-4 space-y-3">
+                                                <h4 className="font-bold text-sm uppercase tracking-wider text-green-400">Probability Stats</h4>
+                                                <div className="space-y-2 text-sm">
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Best Period</span>
+                                                        <span className="font-bold text-white">{detailData.probStatistic?.BestPeriod || '-'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">High Success</span>
+                                                        <span className="font-bold text-green-400">
+                                                            {detailData.probStatistic?.HighPercent !== undefined && detailData.probStatistic?.HighPercent !== null ? `${(detailData.probStatistic.HighPercent * 100).toFixed(1)}%` : '-'}
+                                                            <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.probStatistic?.High || ''}</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Low Success</span>
+                                                        <span className="font-bold text-red-400">
+                                                            {detailData.probStatistic?.LowPercent !== undefined && detailData.probStatistic?.LowPercent !== null ? `${(detailData.probStatistic.LowPercent * 100).toFixed(1)}%` : '-'}
+                                                            <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.probStatistic?.Low || ''}</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Probability Period */}
+                                            <div className="bg-gray-800/40 border border-gray-800 rounded-xl p-4 space-y-3">
+                                                <h4 className="font-bold text-sm uppercase tracking-wider text-blue-400">Best Period Summary ({detailData.probByPeriod?.Period || '-'})</h4>
+                                                <div className="space-y-2 text-sm">
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Total Signals</span>
+                                                        <span className="font-bold text-white font-mono">{detailData.probByPeriod?.NoSignal ?? '-'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Profit Rate</span>
+                                                        <span className="font-bold text-green-400">
+                                                            {detailData.probByPeriod?.Profit !== undefined && detailData.probByPeriod?.Profit !== null ? `${(detailData.probByPeriod.Profit * 100).toFixed(1)}%` : '-'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-400">Loss / Draw</span>
+                                                        <span className="font-bold text-red-400">
+                                                            {detailData.probByPeriod?.Loss !== undefined && detailData.probByPeriod?.Loss !== null ? `${(detailData.probByPeriod.Loss * 100).toFixed(1)}%` : '-'}
+                                                            <span className="text-xs text-gray-500 font-normal ml-1">/ {detailData.probByPeriod?.Draw !== undefined && detailData.probByPeriod?.Draw !== null ? `${(detailData.probByPeriod.Draw * 100).toFixed(1)}%` : '0%'}</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Tables Section */}
+                                        <div className="space-y-8">
+                                            {/* VolaPeriodDetail Table */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-md font-bold text-white flex items-center gap-2">
+                                                    <span className="w-1.5 h-4 bg-orange-500 rounded-full" />
+                                                    <span>Volatility Period Detail (VolaPeriodDetail)</span>
+                                                </h4>
+                                                <div className="border border-gray-800 rounded-xl overflow-hidden overflow-x-auto">
+                                                    <table className="w-full text-left border-collapse min-w-[700px]">
+                                                        <thead className="bg-gray-950/60 text-gray-400 text-xs font-mono uppercase">
+                                                            <tr className="border-b border-gray-800">
+                                                                <th className="px-4 py-3 font-bold">Year</th>
+                                                                <th className="px-4 py-3 text-right">T+3</th>
+                                                                <th className="px-4 py-3 text-right">T+5</th>
+                                                                <th className="px-4 py-3 text-right">T+10</th>
+                                                                <th className="px-4 py-3 text-right">T+20</th>
+                                                                <th className="px-4 py-3 text-right">T+60</th>
+                                                                <th className="px-4 py-3 text-right">T+180</th>
+                                                                <th className="px-4 py-3 text-right font-bold text-gray-300">Average (TBC)</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-800 text-sm font-mono">
+                                                            {detailData.volaPeriodDetail?.map((row, idx) => {
+                                                                const isTbc = row.Year === 'TBC';
+                                                                return (
+                                                                    <tr key={`vola-row-${idx}`} className={`hover:bg-gray-800/30 transition-colors ${isTbc ? 'bg-orange-500/5 font-bold text-orange-300' : ''}`}>
+                                                                        <td className="px-4 py-3 text-gray-200">{row.Year}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+3'] > 0 ? 'text-green-400' : row['T+3'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+3'] !== null && row['T+3'] !== undefined ? `${(row['T+3'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+5'] > 0 ? 'text-green-400' : row['T+5'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+5'] !== null && row['T+5'] !== undefined ? `${(row['T+5'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+10'] > 0 ? 'text-green-400' : row['T+10'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+10'] !== null && row['T+10'] !== undefined ? `${(row['T+10'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+20'] > 0 ? 'text-green-400' : row['T+20'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+20'] !== null && row['T+20'] !== undefined ? `${(row['T+20'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+60'] > 0 ? 'text-green-400' : row['T+60'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+60'] !== null && row['T+60'] !== undefined ? `${(row['T+60'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+180'] > 0 ? 'text-green-400' : row['T+180'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+180'] !== null && row['T+180'] !== undefined ? `${(row['T+180'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right font-bold ${row.TBC > 0 ? 'text-green-400' : row.TBC < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row.TBC !== null && row.TBC !== undefined ? `${(row.TBC * 100).toFixed(1)}%` : '-'}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            {/* ProbPeriodDetail Table */}
+                                            <div className="space-y-3">
+                                                <h4 className="text-md font-bold text-white flex items-center gap-2">
+                                                    <span className="w-1.5 h-4 bg-green-500 rounded-full" />
+                                                    <span>Probability Period Detail (ProbPeriodDetail)</span>
+                                                </h4>
+                                                <div className="border border-gray-800 rounded-xl overflow-hidden overflow-x-auto">
+                                                    <table className="w-full text-left border-collapse min-w-[700px]">
+                                                        <thead className="bg-gray-950/60 text-gray-400 text-xs font-mono uppercase">
+                                                            <tr className="border-b border-gray-800">
+                                                                <th className="px-4 py-3 font-bold">Year</th>
+                                                                <th className="px-4 py-3 text-right">T+3</th>
+                                                                <th className="px-4 py-3 text-right">T+5</th>
+                                                                <th className="px-4 py-3 text-right">T+10</th>
+                                                                <th className="px-4 py-3 text-right">T+20</th>
+                                                                <th className="px-4 py-3 text-right">T+60</th>
+                                                                <th className="px-4 py-3 text-right">T+180</th>
+                                                                <th className="px-4 py-3 text-right font-bold text-gray-300">Average (TBC)</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-800 text-sm font-mono">
+                                                            {detailData.probPeriodDetail?.map((row, idx) => {
+                                                                const isTbc = row.Year === 'TBC';
+                                                                return (
+                                                                    <tr key={`prob-row-${idx}`} className={`hover:bg-gray-800/30 transition-colors ${isTbc ? 'bg-green-500/5 font-bold text-green-300' : ''}`}>
+                                                                        <td className="px-4 py-3 text-gray-200">{row.Year}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+3'] >= 0.6 ? 'text-green-400' : row['T+3'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+3'] !== null && row['T+3'] !== undefined ? `${(row['T+3'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+5'] >= 0.6 ? 'text-green-400' : row['T+5'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+5'] !== null && row['T+5'] !== undefined ? `${(row['T+5'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+10'] >= 0.6 ? 'text-green-400' : row['T+10'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+10'] !== null && row['T+10'] !== undefined ? `${(row['T+10'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+20'] >= 0.6 ? 'text-green-400' : row['T+20'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+20'] !== null && row['T+20'] !== undefined ? `${(row['T+20'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+60'] >= 0.6 ? 'text-green-400' : row['T+60'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+60'] !== null && row['T+60'] !== undefined ? `${(row['T+60'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right ${row['T+180'] >= 0.6 ? 'text-green-400' : row['T+180'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+180'] !== null && row['T+180'] !== undefined ? `${(row['T+180'] * 100).toFixed(1)}%` : '-'}</td>
+                                                                        <td className={`px-4 py-3 text-right font-bold ${row.TBC >= 0.6 ? 'text-green-400' : row.TBC < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row.TBC !== null && row.TBC !== undefined ? `${(row.TBC * 100).toFixed(1)}%` : '-'}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="py-20 text-center text-gray-500">
+                                        No detailed strategy metrics available. Click "Sync from TCBS" to import backtest data.
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-6 py-4 border-t border-gray-800 flex items-center justify-end bg-gray-950/20 rounded-b-2xl">
                                 <button
                                     onClick={() => setDetailOpen(false)}
-                                    className="p-1.5 hover:bg-gray-800 rounded-lg transition text-gray-400 hover:text-white"
+                                    className="px-5 py-2 bg-gray-800 hover:bg-gray-700 text-sm font-semibold rounded-xl transition border border-gray-700 text-white"
                                 >
-                                    <X size={20} />
+                                    Close
                                 </button>
                             </div>
                         </div>
-
-                        {/* Content */}
-                        <div className="p-6 overflow-y-auto flex-1 space-y-6">
-                            {loadingDetail ? (
-                                <div className="py-20 text-center text-gray-400">
-                                    <Loader2 size={40} className="animate-spin mx-auto mb-4 text-blue-500 opacity-50" />
-                                    <p className="text-lg font-medium">Fetching strategy statistics...</p>
-                                    <p className="text-xs text-gray-500 mt-1">Calling TCBS backtest engine & storing results</p>
-                                </div>
-                            ) : detailData ? (
-                                <>
-                                    {/* Stats grid */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                        {/* Volatility Stats */}
-                                        <div className="bg-gray-800/40 border border-gray-800 rounded-xl p-4 space-y-3">
-                                            <h4 className="font-bold text-sm uppercase tracking-wider text-orange-400">Volatility Stats</h4>
-                                            <div className="space-y-2 text-sm">
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Best Period</span>
-                                                    <span className="font-bold text-white">{detailData.volaStatistic?.BestPeriod || '-'}</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">High Score</span>
-                                                    <span className="font-bold text-green-400">
-                                                        {detailData.volaStatistic?.HighPercent !== undefined && detailData.volaStatistic?.HighPercent !== null ? `+${(detailData.volaStatistic.HighPercent * 100).toFixed(1)}%` : '-'}
-                                                        <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.volaStatistic?.High || ''}</span>
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Low Score</span>
-                                                    <span className="font-bold text-red-400">
-                                                        {detailData.volaStatistic?.LowPercent !== undefined && detailData.volaStatistic?.LowPercent !== null ? `${(detailData.volaStatistic.LowPercent * 100).toFixed(1)}%` : '-'}
-                                                        <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.volaStatistic?.Low || ''}</span>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Probability Stats */}
-                                        <div className="bg-gray-800/40 border border-gray-800 rounded-xl p-4 space-y-3">
-                                            <h4 className="font-bold text-sm uppercase tracking-wider text-green-400">Probability Stats</h4>
-                                            <div className="space-y-2 text-sm">
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Best Period</span>
-                                                    <span className="font-bold text-white">{detailData.probStatistic?.BestPeriod || '-'}</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">High Success</span>
-                                                    <span className="font-bold text-green-400">
-                                                        {detailData.probStatistic?.HighPercent !== undefined && detailData.probStatistic?.HighPercent !== null ? `${(detailData.probStatistic.HighPercent * 100).toFixed(1)}%` : '-'}
-                                                        <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.probStatistic?.High || ''}</span>
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Low Success</span>
-                                                    <span className="font-bold text-red-400">
-                                                        {detailData.probStatistic?.LowPercent !== undefined && detailData.probStatistic?.LowPercent !== null ? `${(detailData.probStatistic.LowPercent * 100).toFixed(1)}%` : '-'}
-                                                        <span className="text-xs text-gray-400 ml-1 font-normal">{detailData.probStatistic?.Low || ''}</span>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Probability Period */}
-                                        <div className="bg-gray-800/40 border border-gray-800 rounded-xl p-4 space-y-3">
-                                            <h4 className="font-bold text-sm uppercase tracking-wider text-blue-400">Best Period Summary ({detailData.probByPeriod?.Period || '-'})</h4>
-                                            <div className="space-y-2 text-sm">
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Total Signals</span>
-                                                    <span className="font-bold text-white font-mono">{detailData.probByPeriod?.NoSignal ?? '-'}</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Profit Rate</span>
-                                                    <span className="font-bold text-green-400">
-                                                        {detailData.probByPeriod?.Profit !== undefined && detailData.probByPeriod?.Profit !== null ? `${(detailData.probByPeriod.Profit * 100).toFixed(1)}%` : '-'}
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-400">Loss / Draw</span>
-                                                    <span className="font-bold text-red-400">
-                                                        {detailData.probByPeriod?.Loss !== undefined && detailData.probByPeriod?.Loss !== null ? `${(detailData.probByPeriod.Loss * 100).toFixed(1)}%` : '-'}
-                                                        <span className="text-xs text-gray-500 font-normal ml-1">/ {detailData.probByPeriod?.Draw !== undefined && detailData.probByPeriod?.Draw !== null ? `${(detailData.probByPeriod.Draw * 100).toFixed(1)}%` : '0%'}</span>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Tables Section */}
-                                    <div className="space-y-8">
-                                        {/* VolaPeriodDetail Table */}
-                                        <div className="space-y-3">
-                                            <h4 className="text-md font-bold text-white flex items-center gap-2">
-                                                <span className="w-1.5 h-4 bg-orange-500 rounded-full" />
-                                                <span>Volatility Period Detail (VolaPeriodDetail)</span>
-                                            </h4>
-                                            <div className="border border-gray-800 rounded-xl overflow-hidden overflow-x-auto">
-                                                <table className="w-full text-left border-collapse min-w-[700px]">
-                                                    <thead className="bg-gray-950/60 text-gray-400 text-xs font-mono uppercase">
-                                                        <tr className="border-b border-gray-800">
-                                                            <th className="px-4 py-3 font-bold">Year</th>
-                                                            <th className="px-4 py-3 text-right">T+3</th>
-                                                            <th className="px-4 py-3 text-right">T+5</th>
-                                                            <th className="px-4 py-3 text-right">T+10</th>
-                                                            <th className="px-4 py-3 text-right">T+20</th>
-                                                            <th className="px-4 py-3 text-right">T+60</th>
-                                                            <th className="px-4 py-3 text-right">T+180</th>
-                                                            <th className="px-4 py-3 text-right font-bold text-gray-300">Average (TBC)</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-gray-800 text-sm font-mono">
-                                                        {detailData.volaPeriodDetail?.map((row, idx) => {
-                                                            const isTbc = row.Year === 'TBC';
-                                                            return (
-                                                                <tr key={`vola-row-${idx}`} className={`hover:bg-gray-800/30 transition-colors ${isTbc ? 'bg-orange-500/5 font-bold text-orange-300' : ''}`}>
-                                                                    <td className="px-4 py-3 text-gray-200">{row.Year}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+3'] > 0 ? 'text-green-400' : row['T+3'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+3'] !== null && row['T+3'] !== undefined ? `${(row['T+3'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+5'] > 0 ? 'text-green-400' : row['T+5'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+5'] !== null && row['T+5'] !== undefined ? `${(row['T+5'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+10'] > 0 ? 'text-green-400' : row['T+10'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+10'] !== null && row['T+10'] !== undefined ? `${(row['T+10'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+20'] > 0 ? 'text-green-400' : row['T+20'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+20'] !== null && row['T+20'] !== undefined ? `${(row['T+20'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+60'] > 0 ? 'text-green-400' : row['T+60'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+60'] !== null && row['T+60'] !== undefined ? `${(row['T+60'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+180'] > 0 ? 'text-green-400' : row['T+180'] < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+180'] !== null && row['T+180'] !== undefined ? `${(row['T+180'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right font-bold ${row.TBC > 0 ? 'text-green-400' : row.TBC < 0 ? 'text-red-400' : 'text-gray-400'}`}>{row.TBC !== null && row.TBC !== undefined ? `${(row.TBC * 100).toFixed(1)}%` : '-'}</td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-
-                                        {/* ProbPeriodDetail Table */}
-                                        <div className="space-y-3">
-                                            <h4 className="text-md font-bold text-white flex items-center gap-2">
-                                                <span className="w-1.5 h-4 bg-green-500 rounded-full" />
-                                                <span>Probability Period Detail (ProbPeriodDetail)</span>
-                                            </h4>
-                                            <div className="border border-gray-800 rounded-xl overflow-hidden overflow-x-auto">
-                                                <table className="w-full text-left border-collapse min-w-[700px]">
-                                                    <thead className="bg-gray-950/60 text-gray-400 text-xs font-mono uppercase">
-                                                        <tr className="border-b border-gray-800">
-                                                            <th className="px-4 py-3 font-bold">Year</th>
-                                                            <th className="px-4 py-3 text-right">T+3</th>
-                                                            <th className="px-4 py-3 text-right">T+5</th>
-                                                            <th className="px-4 py-3 text-right">T+10</th>
-                                                            <th className="px-4 py-3 text-right">T+20</th>
-                                                            <th className="px-4 py-3 text-right">T+60</th>
-                                                            <th className="px-4 py-3 text-right">T+180</th>
-                                                            <th className="px-4 py-3 text-right font-bold text-gray-300">Average (TBC)</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-gray-800 text-sm font-mono">
-                                                        {detailData.probPeriodDetail?.map((row, idx) => {
-                                                            const isTbc = row.Year === 'TBC';
-                                                            return (
-                                                                <tr key={`prob-row-${idx}`} className={`hover:bg-gray-800/30 transition-colors ${isTbc ? 'bg-green-500/5 font-bold text-green-300' : ''}`}>
-                                                                    <td className="px-4 py-3 text-gray-200">{row.Year}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+3'] >= 0.6 ? 'text-green-400' : row['T+3'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+3'] !== null && row['T+3'] !== undefined ? `${(row['T+3'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+5'] >= 0.6 ? 'text-green-400' : row['T+5'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+5'] !== null && row['T+5'] !== undefined ? `${(row['T+5'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+10'] >= 0.6 ? 'text-green-400' : row['T+10'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+10'] !== null && row['T+10'] !== undefined ? `${(row['T+10'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+20'] >= 0.6 ? 'text-green-400' : row['T+20'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+20'] !== null && row['T+20'] !== undefined ? `${(row['T+20'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+60'] >= 0.6 ? 'text-green-400' : row['T+60'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+60'] !== null && row['T+60'] !== undefined ? `${(row['T+60'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right ${row['T+180'] >= 0.6 ? 'text-green-400' : row['T+180'] < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row['T+180'] !== null && row['T+180'] !== undefined ? `${(row['T+180'] * 100).toFixed(1)}%` : '-'}</td>
-                                                                    <td className={`px-4 py-3 text-right font-bold ${row.TBC >= 0.6 ? 'text-green-400' : row.TBC < 0.4 ? 'text-red-400' : 'text-gray-400'}`}>{row.TBC !== null && row.TBC !== undefined ? `${(row.TBC * 100).toFixed(1)}%` : '-'}</td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="py-20 text-center text-gray-500">
-                                    No detailed strategy metrics available. Click "Sync from TCBS" to import backtest data.
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Footer */}
-                        <div className="px-6 py-4 border-t border-gray-800 flex items-center justify-end bg-gray-950/20 rounded-b-2xl">
-                            <button
-                                onClick={() => setDetailOpen(false)}
-                                className="px-5 py-2 bg-gray-800 hover:bg-gray-700 text-sm font-semibold rounded-xl transition border border-gray-700 text-white"
-                            >
-                                Close
-                            </button>
-                        </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };
 

@@ -1,0 +1,502 @@
+import fs from 'fs';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
+const toBool = (val: any, defaultVal: boolean): boolean => {
+  if (val === undefined || val === null) return defaultVal;
+  if (val === false || val === 'false' || val === 0 || val === '0') return false;
+  if (val === true || val === 'true' || val === 1 || val === '1') return true;
+  return defaultVal;
+};
+
+export default {
+  async list(ctx) {
+    try {
+      const rootDir = path.resolve(process.cwd(), '..');
+      let strategyDir = path.join(rootDir, 'python-strategy');
+      if (!fs.existsSync(strategyDir)) {
+        strategyDir = path.resolve(process.cwd(), 'python-strategy');
+      }
+
+      if (!fs.existsSync(strategyDir)) {
+        return ctx.send({ data: [] });
+      }
+
+      const files = fs.readdirSync(strategyDir);
+      const pythonFiles = files
+        .filter((file) => file.endsWith('.py'))
+        .map((file) => {
+          const name = file
+            .replace(/^strategy_/, '')
+            .replace(/\.py$/, '')
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+          return {
+            fileName: file,
+            name: `${name} Strategy`,
+            path: path.join(strategyDir, file),
+          };
+        });
+
+      return ctx.send({ data: pythonFiles });
+    } catch (error: any) {
+      return ctx.internalServerError(`Failed to list python strategies: ${error?.message || error}`);
+    }
+  },
+
+  async scan(ctx) {
+    try {
+      const {
+        strategyFile = 'strategy_supertrend_ma288.py',
+        ticker = 'VNINDEX',
+        countback = 1000,
+        rr,
+        riskReward,
+        risk_reward,
+        rewardRisk,
+        entryType = 'candle_close',
+        entry_type,
+        stPeriod,
+        st_period,
+        supertrendPeriod,
+        supertrend_period,
+        stMultiplier,
+        st_multiplier,
+        supertrendMultiplier,
+        supertrend_multiplier,
+        maPeriod,
+        ma_period,
+        vwapMaPeriod,
+        vwap_ma_period,
+        tpSupertrend,
+        tp_supertrend,
+        tpRR,
+        tp_rr,
+        allowLong,
+        allow_long,
+        allowShort,
+        allow_short,
+        vwapAnchor,
+        vwap_anchor,
+        mult1,
+        mult2,
+        mult3,
+        tpTarget,
+        tp_target,
+        vwapTpTarget,
+        vwap_tp_target,
+        paEngulfing,
+        pa_engulfing,
+        paBd3bu2,
+        pa_bd3bu2,
+        paIncludeOpposite,
+        pa_include_opposite,
+        paPointUp,
+        pa_point_up,
+        paSwingUp,
+        pa_swing_up,
+        tpType,
+        tp_type,
+        slType,
+        sl_type,
+        customTpVal,
+        custom_tp_val,
+        customSlVal,
+        custom_sl_val,
+        timeframe = 'D1',
+      } = ctx.request.body || {};
+      
+      const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
+      const cleanRR = rr !== undefined ? rr : (riskReward !== undefined ? riskReward : (risk_reward !== undefined ? risk_reward : (rewardRisk !== undefined ? rewardRisk : 1.5)));
+      const cleanEntryType = entry_type || entryType || 'candle_close';
+      const cleanStPeriod = st_period || stPeriod || supertrend_period || supertrendPeriod || 10;
+      const cleanStMultiplier = st_multiplier || stMultiplier || supertrend_multiplier || supertrendMultiplier || 3.0;
+      const cleanMaPeriod = ma_period || maPeriod || 288;
+      const cleanVwapMa = vwapMaPeriod || vwap_ma_period || ma_period || maPeriod || 9;
+      const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
+      const cleanMult1 = mult1 !== undefined ? mult1 : 1.0;
+      const cleanMult2 = mult2 !== undefined ? mult2 : 2.0;
+      const cleanMult3 = mult3 !== undefined ? mult3 : 3.0;
+      const cleanTpTarget = vwapTpTarget || vwap_tp_target || tp_target || tpTarget || 'tp1_vwap';
+      const isTpSupertrend = toBool(tpSupertrend ?? tp_supertrend, true);
+      const isTpRR = toBool(tpRR ?? tp_rr, true);
+      const isAllowLong = toBool(allowLong ?? allow_long, true);
+      const isAllowShort = toBool(allowShort ?? allow_short, true);
+
+      // Price Action flags
+      const isPaEngulfing = toBool(paEngulfing ?? pa_engulfing, true);
+      const isPaBd3bu2 = toBool(paBd3bu2 ?? pa_bd3bu2, true);
+      const isPaIncludeOpposite = toBool(paIncludeOpposite ?? pa_include_opposite, true);
+      const isPaPointUp = toBool(paPointUp ?? pa_point_up, false);
+      const isPaSwingUp = toBool(paSwingUp ?? pa_swing_up, false);
+      const cleanTpType = tpType || tp_type || 'P50';
+      const cleanSlType = slType || sl_type || 'P75';
+      const cleanCustomTp = customTpVal !== undefined ? customTpVal : (custom_tp_val !== undefined ? custom_tp_val : 0.0);
+      const cleanCustomSl = customSlVal !== undefined ? customSlVal : (custom_sl_val !== undefined ? custom_sl_val : 0.0);
+
+      const rootDir = path.resolve(process.cwd(), '..');
+      let strategyDir = path.join(rootDir, 'python-strategy');
+      if (!fs.existsSync(strategyDir)) {
+        strategyDir = path.resolve(process.cwd(), 'python-strategy');
+      }
+
+      const safeFileName = path.basename(strategyFile);
+      const fullScriptPath = path.join(strategyDir, safeFileName);
+      if (!fs.existsSync(fullScriptPath)) {
+        return ctx.badRequest(`Strategy file ${strategyFile} not found.`);
+      }
+
+      const pythonExe = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
+      const cleanTicker = String(ticker || 'VNINDEX').trim().toUpperCase();
+      const isBreakout = safeFileName.toLowerCase().includes('breakout');
+      const isVWAP = !isBreakout && safeFileName.toLowerCase().includes('vwap');
+      const isPriceAction = !isBreakout && (safeFileName.toLowerCase().includes('priceaction') || safeFileName.toLowerCase().includes('price_action'));
+
+      const args = [
+        fullScriptPath,
+        '--ticker', cleanTicker,
+        '--timeframe', cleanTimeframe,
+        '--json',
+        '--countback', String(countback),
+      ];
+
+      if (isBreakout) {
+        args.push(
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--vwap-anchor', String(cleanVwapAnchor),
+          '--indicator-filter', String(ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter || 'st_or_vwap'),
+          '--tp-type', String(cleanTpType),
+          '--sl-type', String(cleanSlType),
+          '--custom-tp-val', String(cleanCustomTp),
+          '--custom-sl-val', String(cleanCustomSl),
+          '--rr', String(cleanRR)
+        );
+
+        const isAllowBreakoutHigh = toBool(ctx.request.body?.allowBreakoutHigh ?? ctx.request.body?.allow_breakout_high, true);
+        const isAllowSweepLow = toBool(ctx.request.body?.allowSweepLow ?? ctx.request.body?.allow_sweep_low, true);
+        if (isAllowBreakoutHigh) args.push('--allow-breakout-high'); else args.push('--no-breakout-high');
+        if (isAllowSweepLow) args.push('--allow-sweep-low'); else args.push('--no-sweep-low');
+
+        if (isTpSupertrend) {
+          args.push('--tp-supertrend');
+        } else {
+          args.push('--no-tp-supertrend');
+        }
+      } else if (isVWAP) {
+        args.push(
+          '--ma-period', String(cleanVwapMa),
+          '--vwap-anchor', String(cleanVwapAnchor),
+          '--mult1', String(cleanMult1),
+          '--mult2', String(cleanMult2),
+          '--mult3', String(cleanMult3),
+          '--tp-target', String(cleanTpTarget)
+        );
+      } else if (isPriceAction) {
+        args.push(
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--tp-type', String(cleanTpType),
+          '--sl-type', String(cleanSlType),
+          '--custom-tp-val', String(cleanCustomTp),
+          '--custom-sl-val', String(cleanCustomSl)
+        );
+
+        if (isPaEngulfing) args.push('--pa-engulfing'); else args.push('--no-pa-engulfing');
+        if (isPaBd3bu2) args.push('--pa-bd3bu2'); else args.push('--no-pa-bd3bu2');
+        if (isPaIncludeOpposite) args.push('--pa-include-opposite'); else args.push('--no-pa-include-opposite');
+        if (isPaPointUp) args.push('--pa-point-up'); else args.push('--no-pa-point-up');
+        if (isPaSwingUp) args.push('--pa-swing-up'); else args.push('--no-pa-swing-up');
+
+        if (isTpSupertrend) {
+          args.push('--tp-supertrend');
+        } else {
+          args.push('--no-tp-supertrend');
+        }
+      } else {
+        args.push(
+          '--rr', String(cleanRR),
+          '--entry-type', String(cleanEntryType),
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--ma-period', String(cleanMaPeriod)
+        );
+
+        // Thêm flags chốt lời theo lựa chọn từ Frontend
+        if (isTpSupertrend) {
+          args.push('--tp-supertrend');
+        } else {
+          args.push('--no-tp-supertrend');
+        }
+
+        if (isTpRR) {
+          args.push('--tp-rr');
+        } else {
+          args.push('--no-tp-rr');
+        }
+      }
+
+      // Thêm flags loại lệnh (Long / Short)
+      if (isAllowLong) {
+        args.push('--allow-long');
+      } else {
+        args.push('--no-long');
+      }
+
+      if (isAllowShort) {
+        args.push('--allow-short');
+      } else {
+        args.push('--no-short');
+      }
+
+      const { stdout, stderr } = await execFileAsync(pythonExe, args, {
+        maxBuffer: 1024 * 1024 * 20,
+        timeout: 45000,
+        env: {
+          ...process.env,
+          PYTHONWARNINGS: 'ignore',
+          PYTHONIOENCODING: 'utf-8',
+          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
+          STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
+        },
+      });
+
+      if (!stdout || stdout.trim().length === 0) {
+        if (stderr) {
+          return ctx.badRequest(`Python execution error: ${stderr}`);
+        }
+        return ctx.badRequest('Empty output from Python strategy.');
+      }
+
+      const jsonStart = stdout.indexOf('{');
+      const jsonEnd = stdout.lastIndexOf('}');
+      if (jsonStart === -1 || jsonEnd === -1) {
+        return ctx.badRequest(`Invalid JSON output from strategy: ${stdout.slice(0, 300)}`);
+      }
+
+      const parsed = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
+      return ctx.send({ data: parsed });
+    } catch (error: any) {
+      const errDetail = error?.stderr || error?.stdout || error?.message || String(error);
+      console.error('Python Strategy Scan Error:', errDetail);
+      return ctx.badRequest(`Scan failed: ${errDetail}`);
+    }
+  },
+
+  async optimize(ctx) {
+    try {
+      const {
+        strategyFile = 'strategy_supertrend_ma288.py',
+        ticker = 'VNINDEX',
+        countback = 50000,
+        allowLong,
+        allow_long,
+        allowShort,
+        allow_short,
+        timeframe = 'D1',
+        vwapAnchor,
+        vwap_anchor,
+        riskReward,
+        rr,
+        entryType,
+        entry_type,
+        stPeriod,
+        st_period,
+        stMultiplier,
+        st_multiplier,
+        maPeriod,
+        ma_period,
+        tpSupertrend,
+        tp_supertrend,
+        tpRR,
+        tp_rr,
+        vwapMaPeriod,
+        vwap_ma_period,
+        vwapTpTarget,
+        vwap_tp_target,
+        mult1,
+        mult2,
+        mult3,
+        paEngulfing,
+        pa_engulfing,
+        paBd3bu2,
+        pa_bd3bu2,
+        paIncludeOpposite,
+        pa_include_opposite,
+        paPointUp,
+        pa_point_up,
+        paSwingUp,
+        pa_swing_up,
+        tpType,
+        tp_type,
+        slType,
+        sl_type,
+        optConfig,
+        opt_config,
+      } = ctx.request.body || {};
+
+      const cleanTimeframe = String(timeframe || 'D1').trim().toUpperCase();
+      const isAllowLong = toBool(allowLong ?? allow_long, true);
+      const isAllowShort = toBool(allowShort ?? allow_short, true);
+
+      const rootDir = path.resolve(process.cwd(), '..');
+      let strategyDir = path.join(rootDir, 'python-strategy');
+      if (!fs.existsSync(strategyDir)) {
+        strategyDir = path.resolve(process.cwd(), 'python-strategy');
+      }
+
+      const safeFileName = path.basename(strategyFile);
+      const fullScriptPath = path.join(strategyDir, safeFileName);
+      if (!fs.existsSync(fullScriptPath)) {
+        return ctx.badRequest(`Strategy file ${strategyFile} not found.`);
+      }
+
+      const pythonExe = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
+      const cleanTicker = String(ticker || 'VNINDEX').trim().toUpperCase();
+      const isVWAP = safeFileName.toLowerCase().includes('vwap');
+
+      const args = [
+        fullScriptPath,
+        '--ticker', cleanTicker,
+        '--timeframe', cleanTimeframe,
+        '--json',
+        '--optimize',
+        '--countback', String(countback),
+      ];
+
+      const safeOptConfig = optConfig || opt_config;
+      if (safeOptConfig && typeof safeOptConfig === 'object') {
+        args.push('--opt-config', JSON.stringify(safeOptConfig));
+      }
+
+      if (stPeriod || st_period) {
+        args.push('--st-period', String(stPeriod || st_period));
+      }
+      if (stMultiplier || st_multiplier) {
+        args.push('--st-multiplier', String(stMultiplier || st_multiplier));
+      }
+      if (maPeriod || ma_period || vwapMaPeriod || vwap_ma_period) {
+        args.push('--ma-period', String(maPeriod || ma_period || vwapMaPeriod || vwap_ma_period));
+      }
+      if (riskReward || rr) {
+        args.push('--rr', String(riskReward || rr));
+      }
+      if (entryType || entry_type) {
+        args.push('--entry-type', String(entryType || entry_type));
+      }
+
+      if (tpSupertrend !== undefined || tp_supertrend !== undefined) {
+        const isTpST = toBool(tpSupertrend ?? tp_supertrend, true);
+        args.push(isTpST ? '--tp-supertrend' : '--no-tp-supertrend');
+      }
+
+      if (tpRR !== undefined || tp_rr !== undefined) {
+        const isTpRiskReward = toBool(tpRR ?? tp_rr, true);
+        args.push(isTpRiskReward ? '--tp-rr' : '--no-tp-rr');
+      }
+
+      if (mult1 !== undefined) args.push('--mult1', String(mult1));
+      if (mult2 !== undefined) args.push('--mult2', String(mult2));
+      if (mult3 !== undefined) args.push('--mult3', String(mult3));
+      if (vwapTpTarget || vwap_tp_target) {
+        args.push('--tp-target', String(vwapTpTarget || vwap_tp_target));
+      }
+
+      if (paEngulfing !== undefined || pa_engulfing !== undefined) {
+        const isEngulf = toBool(paEngulfing ?? pa_engulfing, true);
+        args.push(isEngulf ? '--pa-engulfing' : '--no-pa-engulfing');
+      }
+      if (paBd3bu2 !== undefined || pa_bd3bu2 !== undefined) {
+        const isBd = toBool(paBd3bu2 ?? pa_bd3bu2, true);
+        args.push(isBd ? '--pa-bd3bu2' : '--no-pa-bd3bu2');
+      }
+      if (paIncludeOpposite !== undefined || pa_include_opposite !== undefined) {
+        const isInc = toBool(paIncludeOpposite ?? pa_include_opposite, true);
+        args.push(isInc ? '--pa-include-opposite' : '--no-pa-include-opposite');
+      }
+      if (paPointUp !== undefined || pa_point_up !== undefined) {
+        const isPt = toBool(paPointUp ?? pa_point_up, false);
+        args.push(isPt ? '--pa-point-up' : '--no-pa-point-up');
+      }
+      if (paSwingUp !== undefined || pa_swing_up !== undefined) {
+        const isSw = toBool(paSwingUp ?? pa_swing_up, false);
+        args.push(isSw ? '--pa-swing-up' : '--no-pa-swing-up');
+      }
+
+      if (tpType || tp_type) {
+        args.push('--tp-type', String(tpType || tp_type));
+      }
+      if (slType || sl_type) {
+        args.push('--sl-type', String(slType || sl_type));
+      }
+
+      if (vwap_anchor || vwapAnchor) {
+        const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
+        args.push('--vwap-anchor', String(cleanVwapAnchor));
+      }
+
+      if (ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter) {
+        args.push('--indicator-filter', String(ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter));
+      }
+
+      if (ctx.request.body?.allowBreakoutHigh !== undefined || ctx.request.body?.allow_breakout_high !== undefined) {
+        const isAllowBreakoutHigh = toBool(ctx.request.body?.allowBreakoutHigh ?? ctx.request.body?.allow_breakout_high, true);
+        args.push(isAllowBreakoutHigh ? '--allow-breakout-high' : '--no-breakout-high');
+      }
+
+      if (ctx.request.body?.allowSweepLow !== undefined || ctx.request.body?.allow_sweep_low !== undefined) {
+        const isAllowSweepLow = toBool(ctx.request.body?.allowSweepLow ?? ctx.request.body?.allow_sweep_low, true);
+        args.push(isAllowSweepLow ? '--allow-sweep-low' : '--no-sweep-low');
+      }
+
+      // Thêm flags loại lệnh (Long / Short)
+      if (isAllowLong) {
+        args.push('--allow-long');
+      } else {
+        args.push('--no-long');
+      }
+
+      if (isAllowShort) {
+        args.push('--allow-short');
+      } else {
+        args.push('--no-short');
+      }
+
+      const { stdout, stderr } = await execFileAsync(pythonExe, args, {
+        maxBuffer: 1024 * 1024 * 50,
+        timeout: 180000,
+        env: {
+          ...process.env,
+          PYTHONWARNINGS: 'ignore',
+          PYTHONIOENCODING: 'utf-8',
+          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
+          STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
+        },
+      });
+
+      if (!stdout || stdout.trim().length === 0) {
+        if (stderr) {
+          return ctx.badRequest(`Python optimizer execution error: ${stderr}`);
+        }
+        return ctx.badRequest('Empty output from Python strategy optimizer.');
+      }
+
+      const jsonStart = stdout.indexOf('{');
+      const jsonEnd = stdout.lastIndexOf('}');
+      if (jsonStart === -1 || jsonEnd === -1) {
+        return ctx.badRequest(`Invalid JSON output from strategy optimizer: ${stdout.slice(0, 300)}`);
+      }
+
+      const parsed = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
+      return ctx.send({ data: parsed });
+    } catch (error: any) {
+      const errDetail = error?.stderr || error?.stdout || error?.message || String(error);
+      console.error('Python Strategy Optimize Error:', errDetail);
+      return ctx.badRequest(`Optimization failed: ${errDetail}`);
+    }
+  },
+};
+

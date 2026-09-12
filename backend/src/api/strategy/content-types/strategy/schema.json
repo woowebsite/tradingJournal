@@ -19,6 +19,21 @@
     "description": {
       "type": "text"
     },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "Rules",
+        "Webhook",
+        "Python"
+      ],
+      "default": "Rules"
+    },
+    "strategyFile": {
+      "type": "string"
+    },
+    "template": {
+      "type": "string"
+    },
     "trades": {
       "type": "relation",
       "relation": "oneToMany",
@@ -30,6 +45,32 @@
       "relation": "manyToMany",
       "target": "api::rule.rule",
       "mappedBy": "strategies"
+    },
+    "entryRules": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::rule.rule"
+    },
+    "takeProfitRules": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::rule.rule"
+    },
+    "stoplossRules": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::rule.rule"
+    },
+    "exitRules": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::rule.rule"
+    },
+    "webhook": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::webhook.webhook",
+      "inversedBy": "strategies"
     },
     "account": {
       "type": "relation",

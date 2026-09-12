@@ -1,0 +1,69 @@
+{
+  "kind": "collectionType",
+  "collectionName": "intraday_bid_asks",
+  "info": {
+    "singularName": "intraday-bid-ask",
+    "pluralName": "intraday-bid-asks",
+    "displayName": "IntradayBidAsk"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "ticker": {
+      "type": "string"
+    },
+    "s": {
+      "type": "biginteger"
+    },
+    "t": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "bp": {
+      "type": "float"
+    },
+    "bv": {
+      "type": "float"
+    },
+    "ap": {
+      "type": "float"
+    },
+    "av": {
+      "type": "float"
+    },
+    "bs": {
+      "type": "float"
+    },
+    "oa": {
+      "type": "float"
+    },
+    "obp": {
+      "type": "float"
+    },
+    "osp": {
+      "type": "float"
+    },
+    "aobp": {
+      "type": "float"
+    },
+    "sp": {
+      "type": "float"
+    },
+    "avsp": {
+      "type": "float"
+    },
+    "raw": {
+      "type": "json"
+    },
+    "symbol_history": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol-history.symbol-history",
+      "inversedBy": "intraday_bid_asks"
+    }
+  }
+}

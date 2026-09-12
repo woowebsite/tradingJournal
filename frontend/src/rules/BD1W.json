@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "left": {
+        "type": "field",
+        "value": "close"
+      },
+      "right": {
+        "name": "lowest_weekly",
+        "type": "function",
+        "params": {
+          "field": "low",
+          "offset": 1,
+          "period": 2
+        }
+      },
+      "operator": "<",
+      "identifier": "price_check"
+    }
+  ],
+  "condition": "AND"
+}

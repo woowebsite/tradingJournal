@@ -70,10 +70,8 @@ const ManageRules = () => {
 
     const TypeBadge = ({ type }) => {
         const colors = {
-            entry: 'text-blue-400',
-            takeprofit: 'text-green-400',
-            stoploss: 'text-red-400',
-            exit: 'text-orange-400'
+            priceaction: 'text-blue-400',
+            indicator: 'text-purple-400'
         };
         return (
             <span className={`font-mono uppercase font-bold ${colors[type] || 'text-gray-400'}`}>

@@ -1,149 +1,162 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { Activity } from 'lucide-react';
-import { fetchClosedTrades } from '../../features/tradeSlice';
-import { useAccount } from '../../context/AccountContext';
-import RecentTradeBox from '../../components/RecentTradeBox';
+import React, { useState } from 'react';
+import { Activity, Sparkles, TrendingUp, Bot } from 'lucide-react';
+import RecentTradeBox from '../RecentTradeBox';
+import TCBSRecommendPanel from '../TCBSRecommendPanel';
+import TCBSSignalPanel from '../TCBSSignalPanel';
+import StrategySummary from '../StrategySummary';
+import AutoTradeLogPanel from '../AutoTradeLogPanel';
+import dayjs from 'dayjs';
 
-const StrategyPanel = ({ activeStrategy, allSignals, trades }) => {
+const StrategyPanel = ({
+    activeStrategy,
+    trades,
+    onTradeClick,
+    signals = [],
+    recommendations = [],
+    tcbsSignals = [],
+    loadingTcbsInsights = false,
+    selectedTemplate = null,
+    onAutoTrade = null,
+    autoTrading = false,
+    isAutoTradeEnabled = false,
+    onToggleAutoTrade = () => { },
+    autoTradeLogs = [],
+    isScanningOnCandleClose = false,
+    selectedSymbol = null,
+    timeframe = 'D1',
+    onClearLogs = () => { }
+}) => {
     const [activeTab, setActiveTab] = useState('summary');
-    const dispatch = useDispatch();
-    const { selectedAccount } = useAccount();
-    const { closedTrades, closedTradesLoading } = useSelector(state => state.trades);
-
-    // Filter signals for strategy to calculate Winrate
-    const strategySignals = activeStrategy ? allSignals.filter(signal => {
-        if (!signal.rules || signal.rules.length === 0) return false;
-        const strategyRuleIds = new Set(activeStrategy.rules?.flatMap(r => [r.id?.toString(), r.documentId?.toString()]).filter(Boolean));
-        return signal.rules.some(r => strategyRuleIds.has(r.id?.toString()) || strategyRuleIds.has(r.documentId?.toString()));
-    }) : [];
-
-    let winCount = 0;
-    let lossCount = 0;
-    strategySignals.forEach(signal => {
-        signal.rules?.forEach(rule => {
-            if (rule.Type === 'takeprofit') winCount++;
-            if (rule.Type === 'stoploss') lossCount++;
-        });
-    });
-
-    const totalFinished = winCount + lossCount;
-    const winRate = totalFinished > 0 ? ((winCount / totalFinished) * 100).toFixed(1) : 0;
-
-    useEffect(() => {
-        if (!activeStrategy || !selectedAccount) return;
-        const strategyId = activeStrategy.documentId || activeStrategy.id;
-        const accountId = selectedAccount.documentId || selectedAccount.id;
-
-        dispatch(fetchClosedTrades({ accountId, strategyId }));
-    }, [activeStrategy, selectedAccount, dispatch]);
-
-    const strategyStats = useMemo(() => {
-        if (!closedTrades || closedTrades.length === 0) {
-            return { rewardRisk: 0, avgWin: 0, avgLoss: 0, loading: closedTradesLoading };
-        }
-
-        let wins = 0;
-        let losses = 0;
-        let grossProfit = 0;
-        let grossLoss = 0;
-
-        closedTrades.forEach(trade => {
-            const details = trade.trade_details || [];
-            const sortedDetails = [...details].sort((a, b) => new Date(a.date) - new Date(b.date));
-
-            let pnl = 0;
-            if (sortedDetails && sortedDetails.length > 0) {
-                pnl = sortedDetails.reduce((acc, d) => {
-                    const val = (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0);
-                    return d.type === 'Sell' ? acc + val : acc - val;
-                }, 0);
-            }
-
-            if (trade.trade_status === 'Closed') {
-                if (pnl > 0) {
-                    wins++;
-                    grossProfit += pnl;
-                } else if (pnl < 0) {
-                    losses++;
-                    grossLoss += Math.abs(pnl);
-                }
-            }
-        });
-
-        const avgWin = wins > 0 ? grossProfit / wins : 0;
-        const avgLoss = losses > 0 ? grossLoss / losses : 0;
-        console.log('avgWin', avgWin);
-        console.log('avgLoss', avgLoss);
-        const rewardRisk = avgLoss > 0 ? (avgWin / avgLoss) : (avgWin > 0 ? 99.99 : 0);
-
-        return {
-            rewardRisk: rewardRisk.toFixed(2),
-            avgWin: avgWin.toFixed(2),
-            avgLoss: avgLoss.toFixed(2),
-            loading: closedTradesLoading
-        };
-    }, [closedTrades, closedTradesLoading]);
 
     return (
-        <div className="h-60 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col shrink-0">
+        <div className="h-auto shrink-0 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">
             <div className="flex border-b border-gray-700 bg-gray-900/50">
+                <div className={`flex-1 flex items-center ${activeTab === 'summary' ? 'border-b-2 border-blue-500 bg-gray-800/50' : ''}`}>
+                    <button
+                        onClick={() => setActiveTab('summary')}
+                        className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'summary' ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                        <Activity size={14} className={activeTab === 'summary' ? 'text-purple-400' : 'text-gray-500'} />
+                        Strategy
+                    </button>
+                </div>
                 <button
-                    onClick={() => setActiveTab('summary')}
-                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'summary' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                    onClick={() => setActiveTab('autotrade')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'autotrade' ? 'text-white border-b-2 border-emerald-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
                 >
-                    <Activity size={14} className={activeTab === 'summary' ? 'text-purple-400' : 'text-gray-500'} />
-                    Strategy Summary
+                    <div className="relative">
+                        <Bot size={14} className={isAutoTradeEnabled ? 'text-emerald-400' : activeTab === 'autotrade' ? 'text-emerald-300' : 'text-gray-500'} />
+                        {isAutoTradeEnabled && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                        )}
+                    </div>
+                    <span>Auto Trade ({autoTradeLogs.length})</span>
+                </button>
+                <button
+                    onClick={() => setActiveTab('signals')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'signals' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <Activity size={14} className={activeTab === 'signals' ? 'text-purple-400' : 'text-gray-500'} />
+                    Signals ({signals ? signals.length : 0})
                 </button>
                 <button
                     onClick={() => setActiveTab('trades')}
                     className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'trades' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
                 >
+                    <Activity size={14} className={activeTab === 'trades' ? 'text-blue-400' : 'text-gray-500'} />
                     Recent Trades ({trades ? trades.length : 0})
+                </button>
+                <button
+                    onClick={() => setActiveTab('recommendation')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'recommendation' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <Sparkles size={14} className={activeTab === 'recommendation' ? 'text-amber-300' : 'text-gray-500'} />
+                    Recommends ({recommendations.length})
+                </button>
+                <button
+                    onClick={() => setActiveTab('tcbsSignals')}
+                    className={`flex-1 py-3 px-2 cursor-pointer text-sm font-bold transition flex justify-start items-center gap-2 ${activeTab === 'tcbsSignals' ? 'text-white border-b-2 border-blue-500 bg-gray-800/50' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                    <TrendingUp size={14} className={activeTab === 'tcbsSignals' ? 'text-green-400' : 'text-gray-500'} />
+                    TCB Signals ({tcbsSignals.length})
                 </button>
             </div>
             <div className="p-2 overflow-y-auto custom-scrollbar flex-1 text-sm text-gray-300">
                 {activeTab === 'summary' ? (
-                    activeStrategy ? (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <p className="mb-1"><span className="font-semibold text-gray-400">Name:</span> <span className="text-blue-400 font-medium text-base">{activeStrategy.name}</span></p>
-                                <p className="mb-1"><span className="font-semibold text-gray-400">Description:</span> {activeStrategy.description || 'No description'}</p>
-                                <div className="flex gap-6 mt-3">
-                                    <div>
-                                        <p className="mb-1">
-                                            <span className="font-semibold text-gray-400">Win Rate:</span>{' '}
-                                            <span className={`font-bold text-lg ${winRate >= 50 ? 'text-green-400' : totalFinished === 0 ? 'text-gray-400' : 'text-red-400'}`}>
-                                                {totalFinished > 0 ? `${winRate}%` : 'N/A'}
-                                            </span>
-                                        </p>
-                                        <span className="text-xs text-gray-500">({winCount}W / {lossCount}L) signals</span>
-                                    </div>
-                                    <div>
-                                        <p className="mb-1">
-                                            <span className="font-semibold text-gray-400">Reward/Risk:</span>{' '}
-                                            <span className={`font-bold text-lg ${strategyStats.rewardRisk >= 1 ? 'text-green-400' : strategyStats.rewardRisk == 0 ? 'text-gray-400' : 'text-red-400'}`}>
-                                                {strategyStats.loading ? '...' : strategyStats.rewardRisk > 0 ? strategyStats.rewardRisk : 'N/A'}
-                                            </span>
-                                        </p>
-                                        <span className="text-xs text-gray-500">from closed trades</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div>
-                                <p className="mb-1"><span className="font-semibold text-gray-400">Rules:</span> {activeStrategy.rules?.length || 0} active rules</p>
-                                <div className="mt-2 text-xs">
-                                    {activeStrategy.rules?.map((rule, index) => (
-                                        <p key={index} className="mb-1"><span className="font-semibold text-gray-400">{rule.Name}:</span> {rule.Description || 'No description'}</p>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <p className="text-gray-500 italic mt-2">No active strategy for this account.</p>
-                    )
+                    <StrategySummary
+                        activeStrategy={activeStrategy}
+                        trades={trades}
+                        selectedTemplate={selectedTemplate}
+                        onAutoTrade={onAutoTrade}
+                        autoTrading={autoTrading}
+                        isAutoTradeEnabled={isAutoTradeEnabled}
+                        onToggleAutoTrade={onToggleAutoTrade}
+                        isScanningOnCandleClose={isScanningOnCandleClose}
+                        autoTradeLogsCount={autoTradeLogs.length}
+                        onSwitchToLogs={() => setActiveTab('autotrade')}
+                    />
+                ) : activeTab === 'autotrade' ? (
+                    <AutoTradeLogPanel
+                        isAutoTradeEnabled={isAutoTradeEnabled}
+                        onToggleAutoTrade={onToggleAutoTrade}
+                        logs={autoTradeLogs}
+                        isScanning={isScanningOnCandleClose}
+                        selectedSymbol={selectedSymbol}
+                        selectedTemplate={selectedTemplate}
+                        timeframe={timeframe}
+                        onClearLogs={onClearLogs}
+                    />
+                ) : activeTab === 'signals' ? (
+                    <div className="text-sm text-gray-300 p-1">
+                        {(!signals || signals.length === 0) ? (
+                            <p className="text-gray-500 italic text-center mt-4">Chưa có tín hiệu khớp lệnh (Trade / TradeDetail) nào cho mã này.</p>
+                        ) : (
+                            <ul className="space-y-2">
+                                {signals.map((signal, i) => {
+                                    const isBuy = signal.shape === 'arrowUp' || signal.type === 'entry' && signal.posType === 'Long';
+                                    const isTP = signal.type === 'takeprofit' || signal.action?.toLowerCase().includes('take');
+                                    const isSL = signal.type === 'stoploss' || signal.action?.toLowerCase().includes('stop');
+                                    const badgeColor = isTP ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
+                                        isSL ? 'bg-red-500/20 text-red-300 border-red-500/40' :
+                                            isBuy ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                                                'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                                    return (
+                                        <li key={signal.id || i} className="border-b border-gray-700/50 pb-2 last:border-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${badgeColor}`}>
+                                                        {signal.action || signal.posType || 'Signal'}
+                                                    </span>
+                                                    <span className="font-semibold text-gray-200 text-xs">
+                                                        {signal.text || signal.name || 'Executed Trade'}
+                                                    </span>
+                                                </div>
+                                                {signal.status && (
+                                                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${signal.status === 'Open' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-400'
+                                                        }`}>
+                                                        {signal.status}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center justify-between text-[11px] text-gray-400 mt-1">
+                                                <span>{signal.volume ? `Khối lượng: ${signal.volume}` : ''} {signal.price ? `| Giá: $${signal.price}` : ''}</span>
+                                                {signal.date && <span className="font-mono text-gray-500">{dayjs(signal.date).format('YYYY-MM-DD HH:mm:ss')}</span>}
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+                    </div>
+                ) : activeTab === 'trades' ? (
+                    <RecentTradeBox trades={trades || []} onTradeClick={onTradeClick} />
+                ) : activeTab === 'recommendation' ? (
+                    <TCBSRecommendPanel recommendations={recommendations} loading={loadingTcbsInsights} />
                 ) : (
-                    <RecentTradeBox trades={trades || []} onTradeClick={(trade) => console.log('Clicked trade:', trade)} />
+                    <TCBSSignalPanel signals={tcbsSignals} loading={loadingTcbsInsights} />
                 )}
             </div>
         </div>
@@ -151,3 +164,4 @@ const StrategyPanel = ({ activeStrategy, allSignals, trades }) => {
 };
 
 export default StrategyPanel;
+

@@ -458,6 +458,7 @@ export interface ApiAccountAccount extends Struct.CollectionTypeSchema {
     moneyFormat: Schema.Attribute.String;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    roadmaps: Schema.Attribute.Relation<'oneToMany', 'api::roadmap.roadmap'>;
     setting: Schema.Attribute.Relation<'oneToOne', 'api::setting.setting'>;
     signals: Schema.Attribute.Relation<'oneToMany', 'api::signal.signal'>;
     strategy: Schema.Attribute.Relation<'oneToOne', 'api::strategy.strategy'>;
@@ -496,6 +497,137 @@ export interface ApiIndustryIndustry extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiIntradayBidAskIntradayBidAsk
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'intraday_bid_asks';
+  info: {
+    displayName: 'IntradayBidAsk';
+    pluralName: 'intraday-bid-asks';
+    singularName: 'intraday-bid-ask';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    aobp: Schema.Attribute.Float;
+    ap: Schema.Attribute.Float;
+    av: Schema.Attribute.Float;
+    avsp: Schema.Attribute.Float;
+    bp: Schema.Attribute.Float;
+    bs: Schema.Attribute.Float;
+    bv: Schema.Attribute.Float;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bid-ask.intraday-bid-ask'
+    > &
+      Schema.Attribute.Private;
+    mode: Schema.Attribute.String;
+    oa: Schema.Attribute.Float;
+    obp: Schema.Attribute.Float;
+    osp: Schema.Attribute.Float;
+    publishedAt: Schema.Attribute.DateTime;
+    raw: Schema.Attribute.JSON;
+    s: Schema.Attribute.BigInteger;
+    sp: Schema.Attribute.Float;
+    symbol_history: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::symbol-history.symbol-history'
+    >;
+    t: Schema.Attribute.String;
+    ticker: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiIntradayBsaIntradayBsa extends Struct.CollectionTypeSchema {
+  collectionName: 'intraday_bsas';
+  info: {
+    displayName: 'IntradayBSA';
+    pluralName: 'intraday-bsas';
+    singularName: 'intraday-bsa';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bms: Schema.Attribute.Integer;
+    bsr: Schema.Attribute.Float;
+    bu: Schema.Attribute.Integer;
+    bup: Schema.Attribute.Float;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bsa.intraday-bsa'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    s: Schema.Attribute.BigInteger;
+    sd: Schema.Attribute.Integer;
+    sdp: Schema.Attribute.Float;
+    sms: Schema.Attribute.Integer;
+    symbol_history: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::symbol-history.symbol-history'
+    >;
+    t: Schema.Attribute.String;
+    ticker: Schema.Attribute.String;
+    timeWindow: Schema.Attribute.String;
+    tWindow: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiInvestorInvestor extends Struct.CollectionTypeSchema {
+  collectionName: 'investors';
+  info: {
+    displayName: 'Investor';
+    pluralName: 'investors';
+    singularName: 'investor';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    buyPercent: Schema.Attribute.Decimal;
+    buyVolume: Schema.Attribute.Integer;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    investorType: Schema.Attribute.Enumeration<['CM', 'SG', 'CN']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::investor.investor'
+    > &
+      Schema.Attribute.Private;
+    marketNetBuy: Schema.Attribute.Integer;
+    netBuy: Schema.Attribute.Integer;
+    netBuyAmount: Schema.Attribute.Integer;
+    netShort: Schema.Attribute.Integer;
+    netWeight: Schema.Attribute.Integer;
+    publishedAt: Schema.Attribute.DateTime;
+    sellPercent: Schema.Attribute.Decimal;
+    sellVolume: Schema.Attribute.Integer;
+    sourceDate: Schema.Attribute.String;
+    symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -590,10 +722,204 @@ export interface ApiMarketMarket extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     Name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    scoreds: Schema.Attribute.Relation<'oneToMany', 'api::scored.scored'>;
     symbols: Schema.Attribute.Relation<'oneToMany', 'api::symbol.symbol'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+  };
+}
+
+export interface ApiNewsAnalysisNewsAnalysis
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'news_analyses';
+  info: {
+    displayName: 'News Analysis';
+    pluralName: 'news-analyses';
+    singularName: 'news-analysis';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    articleUrl: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    dayKey: Schema.Attribute.String & Schema.Attribute.Required;
+    excerpt: Schema.Attribute.Text;
+    fetchedAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::news-analysis.news-analysis'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sourceName: Schema.Attribute.String;
+    sourceUrl: Schema.Attribute.String & Schema.Attribute.Required;
+    status: Schema.Attribute.Enumeration<['Unread', 'Read']> &
+      Schema.Attribute.DefaultTo<'Unread'>;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiNewsSummaryNewsSummary extends Struct.CollectionTypeSchema {
+  collectionName: 'news_ai';
+  info: {
+    displayName: 'News Summary';
+    pluralName: 'news-summaries';
+    singularName: 'news-summary';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    content: Schema.Attribute.Text & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    day: Schema.Attribute.String & Schema.Attribute.Required;
+    links: Schema.Attribute.JSON & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::news-summary.news-summary'
+    > &
+      Schema.Attribute.Private;
+    model: Schema.Attribute.String;
+    provider: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    selectedCount: Schema.Attribute.Integer;
+    selectedDays: Schema.Attribute.JSON;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiNewsUrlNewsUrl extends Struct.CollectionTypeSchema {
+  collectionName: 'news_urls';
+  info: {
+    displayName: 'NewsUrl';
+    pluralName: 'news-urls';
+    singularName: 'news-url';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::news-url.news-url'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    type: Schema.Attribute.Enumeration<['source', 'ignore']> &
+      Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    url: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface ApiPlanPlan extends Struct.CollectionTypeSchema {
+  collectionName: 'plans';
+  info: {
+    description: 'Daily and weekly trading plans per account';
+    displayName: 'Plan';
+    pluralName: 'plans';
+    singularName: 'plan';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    accountId: Schema.Attribute.String & Schema.Attribute.Required;
+    accountName: Schema.Attribute.String & Schema.Attribute.Required;
+    checklist: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    entryPlan: Schema.Attribute.Text;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::plan.plan'> &
+      Schema.Attribute.Private;
+    marketContext: Schema.Attribute.Text;
+    maxTrades: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<3>;
+    planDate: Schema.Attribute.Date;
+    publishedAt: Schema.Attribute.DateTime;
+    reviewNotes: Schema.Attribute.Text;
+    riskPlan: Schema.Attribute.Text;
+    scope: Schema.Attribute.Enumeration<['Daily', 'Weekly']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'Daily'>;
+    session: Schema.Attribute.String;
+    status: Schema.Attribute.Enumeration<
+      ['Draft', 'Active', 'Done', 'Skipped']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'Draft'>;
+    symbols: Schema.Attribute.Text;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    weekEnd: Schema.Attribute.Date;
+    weekStart: Schema.Attribute.Date;
+  };
+}
+
+export interface ApiRoadmapRoadmap extends Struct.CollectionTypeSchema {
+  collectionName: 'roadmaps';
+  info: {
+    description: 'Account growth roadmap targets and snapshots';
+    displayName: 'Roadmap';
+    pluralName: 'roadmaps';
+    singularName: 'roadmap';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    account: Schema.Attribute.Relation<'manyToOne', 'api::account.account'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::roadmap.roadmap'
+    > &
+      Schema.Attribute.Private;
+    maxDrawDownPercent: Schema.Attribute.Decimal;
+    plannedTrades: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<25>;
+    profitTarget: Schema.Attribute.Decimal;
+    publishedAt: Schema.Attribute.DateTime;
+    rewardMultiple: Schema.Attribute.Decimal;
+    riskPercent: Schema.Attribute.Decimal;
+    setting: Schema.Attribute.Relation<'manyToOne', 'api::setting.setting'>;
+    snapshot: Schema.Attribute.JSON;
+    startingBalance: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    status: Schema.Attribute.Enumeration<
+      ['unprocess', 'process', 'completed']
+    > &
+      Schema.Attribute.DefaultTo<'unprocess'>;
+    targetBalance: Schema.Attribute.Decimal;
+    targetGrowthPercent: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    winRateEstimate: Schema.Attribute.Decimal;
   };
 }
 
@@ -617,16 +943,55 @@ export interface ApiRuleRule extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::rule.rule'> &
       Schema.Attribute.Private;
     Name: Schema.Attribute.String;
+    percent: Schema.Attribute.Decimal &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 100;
+          min: 0;
+        },
+        number
+      >;
     publishedAt: Schema.Attribute.DateTime;
     Rule: Schema.Attribute.JSON;
     signals: Schema.Attribute.Relation<'manyToMany', 'api::signal.signal'>;
+    signalText: Schema.Attribute.String;
     strategies: Schema.Attribute.Relation<
       'manyToMany',
       'api::strategy.strategy'
     >;
-    Type: Schema.Attribute.Enumeration<
-      ['entry', 'takeprofit', 'stoploss', 'exit']
-    >;
+    Type: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiScoredScored extends Struct.CollectionTypeSchema {
+  collectionName: 'scoreds';
+  info: {
+    description: 'Scored definitions grouped by market';
+    displayName: 'Scored';
+    pluralName: 'scoreds';
+    singularName: 'scored';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    Description: Schema.Attribute.Text;
+    Label: Schema.Attribute.String & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::scored.scored'
+    > &
+      Schema.Attribute.Private;
+    Market: Schema.Attribute.Relation<'manyToOne', 'api::market.market'>;
+    publishedAt: Schema.Attribute.DateTime;
+    trades: Schema.Attribute.Relation<'manyToMany', 'api::trade.trade'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -698,6 +1063,103 @@ export interface ApiSignalSignal extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiStockRatioStockRatio extends Struct.CollectionTypeSchema {
+  collectionName: 'stock_ratios';
+  info: {
+    displayName: 'StockRatio';
+    pluralName: 'stock-ratios';
+    singularName: 'stock-ratio';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    ageOfInventory: Schema.Attribute.Decimal;
+    ageOfReceivable: Schema.Attribute.Decimal;
+    asset: Schema.Attribute.Decimal;
+    badDebtPercentage: Schema.Attribute.Decimal;
+    betaIndex: Schema.Attribute.Decimal;
+    bookValuePerShare: Schema.Attribute.Decimal;
+    capitalize: Schema.Attribute.Decimal;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    creditGrowth: Schema.Attribute.Decimal;
+    customerCredit: Schema.Attribute.Decimal;
+    dividend: Schema.Attribute.Decimal;
+    earningPerShare: Schema.Attribute.Decimal;
+    ebitOnInterest: Schema.Attribute.Decimal;
+    equity: Schema.Attribute.Decimal;
+    liability: Schema.Attribute.Decimal;
+    loanOnDeposit: Schema.Attribute.Decimal;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::stock-ratio.stock-ratio'
+    > &
+      Schema.Attribute.Private;
+    netProfit: Schema.Attribute.Decimal;
+    nonInterestOnToi: Schema.Attribute.Decimal;
+    operationProfit: Schema.Attribute.Decimal;
+    payableOnEbitda: Schema.Attribute.Decimal;
+    payableOnEquity: Schema.Attribute.Decimal;
+    priceToBook: Schema.Attribute.Decimal;
+    priceToEarning: Schema.Attribute.Decimal;
+    profitGrowthAvarage: Schema.Attribute.Decimal;
+    profitMargin: Schema.Attribute.Decimal;
+    provisionOnBadDebt: Schema.Attribute.Decimal;
+    publishedAt: Schema.Attribute.DateTime;
+    revenue: Schema.Attribute.Decimal;
+    roe: Schema.Attribute.Decimal;
+    shortOnLongTermPayable: Schema.Attribute.Decimal;
+    symbol: Schema.Attribute.Relation<'oneToOne', 'api::symbol.symbol'>;
+    ticker: Schema.Attribute.String;
+    tradeVolume: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    valueBeforeEbitda: Schema.Attribute.Decimal;
+  };
+}
+
+export interface ApiStrategyTemplateStrategyTemplate
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'strategy_templates';
+  info: {
+    description: 'Saved strategy configuration templates';
+    displayName: 'StrategyTemplate';
+    pluralName: 'strategy-templates';
+    singularName: 'strategy-template';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    account: Schema.Attribute.Relation<'manyToOne', 'api::account.account'>;
+    config: Schema.Attribute.JSON;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.String;
+    isDefault: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::strategy-template.strategy-template'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    strategyFile: Schema.Attribute.String & Schema.Attribute.Required;
+    symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    symbolName: Schema.Attribute.String;
+    timeframe: Schema.Attribute.String & Schema.Attribute.DefaultTo<'D1'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
   collectionName: 'strategies';
   info: {
@@ -715,6 +1177,8 @@ export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
+    entryRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    exitRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -724,10 +1188,17 @@ export interface ApiStrategyStrategy extends Struct.CollectionTypeSchema {
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     rules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    stoplossRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    strategyFile: Schema.Attribute.String;
+    takeProfitRules: Schema.Attribute.Relation<'manyToMany', 'api::rule.rule'>;
+    template: Schema.Attribute.String;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
+    type: Schema.Attribute.Enumeration<['Rules', 'Webhook', 'Python']> &
+      Schema.Attribute.DefaultTo<'Rules'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    webhook: Schema.Attribute.Relation<'manyToOne', 'api::webhook.webhook'>;
   };
 }
 
@@ -749,6 +1220,14 @@ export interface ApiSymbolHistorySymbolHistory
       Schema.Attribute.Private;
     date: Schema.Attribute.DateTime;
     high: Schema.Attribute.Float;
+    intraday_bid_asks: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bid-ask.intraday-bid-ask'
+    >;
+    intraday_bsas: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::intraday-bsa.intraday-bsa'
+    >;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -759,10 +1238,105 @@ export interface ApiSymbolHistorySymbolHistory
     open: Schema.Attribute.Float;
     publishedAt: Schema.Attribute.DateTime;
     symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    timeframe: Schema.Attribute.String & Schema.Attribute.DefaultTo<'D1'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     volume: Schema.Attribute.Float;
+  };
+}
+
+export interface ApiSymbolInsightSymbolInsight
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'symbol_insights';
+  info: {
+    description: 'Historical strategy insight statistics per symbol';
+    displayName: 'SymbolInsight';
+    pluralName: 'symbol-insights';
+    singularName: 'symbol-insight';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    bestBearDay: Schema.Attribute.String;
+    bestBearHour: Schema.Attribute.String;
+    bestBullDay: Schema.Attribute.String;
+    bestBullHour: Schema.Attribute.String;
+    bestMonth: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    details: Schema.Attribute.JSON;
+    endDate: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::symbol-insight.symbol-insight'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    savedAt: Schema.Attribute.DateTime;
+    spreadAvgPercent: Schema.Attribute.Decimal;
+    spreadAvgPrice: Schema.Attribute.Decimal;
+    spreadMaxPercent: Schema.Attribute.Decimal;
+    spreadMaxPrice: Schema.Attribute.Decimal;
+    spreadMedianPercent: Schema.Attribute.Decimal;
+    spreadMedianPrice: Schema.Attribute.Decimal;
+    spreadMinPercent: Schema.Attribute.Decimal;
+    spreadMinPrice: Schema.Attribute.Decimal;
+    spreadP25Percent: Schema.Attribute.Decimal;
+    spreadP25Price: Schema.Attribute.Decimal;
+    spreadP75Percent: Schema.Attribute.Decimal;
+    spreadP75Price: Schema.Attribute.Decimal;
+    spreadP90Percent: Schema.Attribute.Decimal;
+    spreadP90Price: Schema.Attribute.Decimal;
+    spreadP99Percent: Schema.Attribute.Decimal;
+    spreadP99Price: Schema.Attribute.Decimal;
+    startDate: Schema.Attribute.String;
+    symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
+    timeframe: Schema.Attribute.String & Schema.Attribute.DefaultTo<'D1'>;
+    title: Schema.Attribute.String;
+    totalCandles: Schema.Attribute.Integer;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    worstMonth: Schema.Attribute.String;
+  };
+}
+
+export interface ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'symbol_technical_analyses';
+  info: {
+    displayName: 'SymbolTechnicalAnalysis';
+    pluralName: 'symbol-technical-analyses';
+    singularName: 'symbol-technical-analysis';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    calculatedAt: Schema.Attribute.DateTime;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    k26: Schema.Attribute.Decimal;
+    k78: Schema.Attribute.Decimal;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::symbol-technical-analysis.symbol-technical-analysis'
+    > &
+      Schema.Attribute.Private;
+    ma200: Schema.Attribute.Decimal;
+    publishedAt: Schema.Attribute.DateTime;
+    supertrend: Schema.Attribute.Decimal;
+    supertrendDirection: Schema.Attribute.Integer;
+    symbol: Schema.Attribute.Relation<'oneToOne', 'api::symbol.symbol'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -778,11 +1352,25 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
   };
   attributes: {
     chart_url: Schema.Attribute.String;
+    companyType: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    deltaInMonth: Schema.Attribute.Decimal;
+    deltaInWeek: Schema.Attribute.Decimal;
+    deltaInYear: Schema.Attribute.Decimal;
     Description: Schema.Attribute.String;
+    establishedYear: Schema.Attribute.String;
     exchange: Schema.Attribute.String;
+    foreignPercent: Schema.Attribute.Decimal;
+    industry: Schema.Attribute.String;
+    industryEn: Schema.Attribute.String;
+    industryID: Schema.Attribute.Integer;
+    industryIdLevel2: Schema.Attribute.String;
+    industryIdLevel4: Schema.Attribute.String;
+    industryIDv2: Schema.Attribute.String;
+    investors: Schema.Attribute.Relation<'oneToMany', 'api::investor.investor'>;
+    issueShare: Schema.Attribute.Decimal;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -791,13 +1379,39 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     market: Schema.Attribute.Relation<'manyToOne', 'api::market.market'>;
     Name: Schema.Attribute.String & Schema.Attribute.Unique;
+    noEmployees: Schema.Attribute.Integer;
+    noShareholders: Schema.Attribute.Integer;
+    outstandingShare: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
     sector: Schema.Attribute.String;
+    shortName: Schema.Attribute.String;
     signals: Schema.Attribute.Relation<'oneToMany', 'api::signal.signal'>;
+    stockRating: Schema.Attribute.Decimal;
+    stockRatio: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::stock-ratio.stock-ratio'
+    >;
+    strategy_template: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::strategy-template.strategy-template'
+    >;
+    strategy_templates: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::strategy-template.strategy-template'
+    >;
     symbol_histories: Schema.Attribute.Relation<
       'oneToMany',
       'api::symbol-history.symbol-history'
     >;
+    symbol_insights: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::symbol-insight.symbol-insight'
+    >;
+    technicalAnalysis: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::symbol-technical-analysis.symbol-technical-analysis'
+    >;
+    ticker: Schema.Attribute.String;
     trades: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -806,6 +1420,41 @@ export interface ApiSymbolSymbol extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::watch-list.watch-list'
     >;
+    website: Schema.Attribute.String;
+  };
+}
+
+export interface ApiTcbsRecommenTcbsRecommen
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'tcbs_recommens';
+  info: {
+    displayName: 'TCBSRecommen';
+    pluralName: 'tcbs-recommens';
+    singularName: 'tcbs-recommen';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    d: Schema.Attribute.Date & Schema.Attribute.Required;
+    listHisBuy: Schema.Attribute.JSON;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::tcbs-recommen.tcbs-recommen'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.Text;
+    ticker: Schema.Attribute.String & Schema.Attribute.Required;
+    type: Schema.Attribute.Integer;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    value: Schema.Attribute.Decimal;
   };
 }
 
@@ -978,9 +1627,13 @@ export interface ApiTradeTrade extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::trade.trade'> &
       Schema.Attribute.Private;
+    mode: Schema.Attribute.Enumeration<['Real', 'Demo']> &
+      Schema.Attribute.DefaultTo<'Real'>;
     note: Schema.Attribute.Blocks;
     pnl: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
+    scored: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    scoreds: Schema.Attribute.Relation<'manyToMany', 'api::scored.scored'>;
     strategy: Schema.Attribute.Relation<'manyToOne', 'api::strategy.strategy'>;
     symbol: Schema.Attribute.Relation<'manyToOne', 'api::symbol.symbol'>;
     trade_details: Schema.Attribute.Relation<
@@ -1101,6 +1754,10 @@ export interface ApiWebhookWebhook extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    strategies: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::strategy.strategy'
+    >;
     Title: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1626,15 +2283,29 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::account.account': ApiAccountAccount;
       'api::industry.industry': ApiIndustryIndustry;
+      'api::intraday-bid-ask.intraday-bid-ask': ApiIntradayBidAskIntradayBidAsk;
+      'api::intraday-bsa.intraday-bsa': ApiIntradayBsaIntradayBsa;
+      'api::investor.investor': ApiInvestorInvestor;
       'api::market-analytic.market-analytic': ApiMarketAnalyticMarketAnalytic;
       'api::market-flow.market-flow': ApiMarketFlowMarketFlow;
       'api::market.market': ApiMarketMarket;
+      'api::news-analysis.news-analysis': ApiNewsAnalysisNewsAnalysis;
+      'api::news-summary.news-summary': ApiNewsSummaryNewsSummary;
+      'api::news-url.news-url': ApiNewsUrlNewsUrl;
+      'api::plan.plan': ApiPlanPlan;
+      'api::roadmap.roadmap': ApiRoadmapRoadmap;
       'api::rule.rule': ApiRuleRule;
+      'api::scored.scored': ApiScoredScored;
       'api::setting.setting': ApiSettingSetting;
       'api::signal.signal': ApiSignalSignal;
+      'api::stock-ratio.stock-ratio': ApiStockRatioStockRatio;
+      'api::strategy-template.strategy-template': ApiStrategyTemplateStrategyTemplate;
       'api::strategy.strategy': ApiStrategyStrategy;
       'api::symbol-history.symbol-history': ApiSymbolHistorySymbolHistory;
+      'api::symbol-insight.symbol-insight': ApiSymbolInsightSymbolInsight;
+      'api::symbol-technical-analysis.symbol-technical-analysis': ApiSymbolTechnicalAnalysisSymbolTechnicalAnalysis;
       'api::symbol.symbol': ApiSymbolSymbol;
+      'api::tcbs-recommen.tcbs-recommen': ApiTcbsRecommenTcbsRecommen;
       'api::tcbs-strategy-detail.tcbs-strategy-detail': ApiTcbsStrategyDetailTcbsStrategyDetail;
       'api::tcbs-strategy-signal.tcbs-strategy-signal': ApiTcbsStrategySignalTcbsStrategySignal;
       'api::tcbs-strategy.tcbs-strategy': ApiTcbsStrategyTcbsStrategy;

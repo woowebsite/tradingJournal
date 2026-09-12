@@ -18,13 +18,7 @@
       "type": "string"
     },
     "Type": {
-      "type": "enumeration",
-      "enum": [
-        "entry",
-        "takeprofit",
-        "stoploss",
-        "exit"
-      ]
+      "type": "string"
     },
     "Rule": {
       "type": "json"
@@ -35,6 +29,14 @@
         "Enable",
         "Disable"
       ]
+    },
+    "percent": {
+      "type": "decimal",
+      "min": 0,
+      "max": 100
+    },
+    "signalText": {
+      "type": "string"
     },
     "strategies": {
       "type": "relation",

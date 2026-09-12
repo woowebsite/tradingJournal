@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols } from '../features/symbolSlice';
 import { X, Check } from 'lucide-react';
-import api from '../services/api'; // Ensure this path is correct
 import { useAccount } from '../context/AccountContext';
+import api from '../services/api';
 import { formatNumber } from '../utils/formatNumber';
 import { extractTextFromBlocks } from '../utils/textUtils';
-import { fetchLatestHistory } from '../features/marketSlice';
+import { fetchLatestHistory, fetchBatchLatestMinutePrices } from '../features/marketSlice';
+import useEscapeKey from '../hooks/useEscapeKey';
+import { executeBinanceOrder } from '../services/binanceExecution';
+import CalcVolForm from './CalcVolForm';
 
 const getLocalDateTimeInputValue = (date = new Date()) => {
   const offset = date.getTimezoneOffset();
@@ -14,10 +17,13 @@ const getLocalDateTimeInputValue = (date = new Date()) => {
   return local.toISOString().slice(0, 16);
 };
 
-const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
+const getRelationId = (relation) => relation?.documentId || relation?.id || '';
+const getSymbolId = (symbol) => symbol?.documentId || symbol?.id || '';
+
+const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
   const { selectedAccount } = useAccount();
   const dispatch = useDispatch();
-  const { items: symbols, loading: loadingSymbols } = useSelector(state => state.symbols);
+  const { items: symbols } = useSelector(state => state.symbols);
 
   const [formData, setFormData] = useState({
     symbol: '',
@@ -28,12 +34,38 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     trade_details: [] // List of details
   });
 
-  const [riskSetting, setRiskSetting] = useState(null);
   const [currentPrice, setCurrentPrice] = useState('');
+  const [executingOrder, setExecutingOrder] = useState(false);
+  const [scoredItems, setScoredItems] = useState([]);
+  const [selectedScoredIds, setSelectedScoredIds] = useState([]);
+  const [loadingScoredItems, setLoadingScoredItems] = useState(false);
 
   // Helper to format currency
   const formatPrice = (price) => {
     return price ? formatNumber(price, selectedAccount?.moneyFormat || '#,###.##') : '-';
+  };
+
+  const calculatePositionVolumes = (details) => {
+    return details.reduce((acc, d) => {
+      const volume = parseFloat(d.volume) || 0;
+
+      if (d.type === 'Buy') {
+        acc.totalBuyVol += volume;
+      } else if (d.type === 'Sell') {
+        acc.totalSellVol += volume;
+      }
+
+      return acc;
+    }, { totalBuyVol: 0, totalSellVol: 0 });
+  };
+
+  const calculateOpenVolume = (details, tradeType = 'Long') => {
+    const { totalBuyVol, totalSellVol } = calculatePositionVolumes(details);
+    const openVol = tradeType === 'Short'
+      ? totalSellVol - totalBuyVol
+      : totalBuyVol - totalSellVol;
+
+    return openVol > 0 ? openVol : 0;
   };
 
   // Helper to calculate Realized P&L (closed positions only - TP exits)
@@ -61,48 +93,98 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
   };
 
   // Helper to calculate Unrealized PnL (open positions - entry buys not yet closed)
-  const calculateUnrealizedPnl = (details, currentPrice) => {
+  const calculateUnrealizedPnl = (details, currentPrice, tradeType = 'Long') => {
     const buyDetails = details.filter(d => d.type === 'Buy');
     const sellDetails = details.filter(d => d.type === 'Sell');
-
-    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const openVol = totalBuyVol - totalSellVol;
+    const { totalBuyVol, totalSellVol } = calculatePositionVolumes(details);
+    const openVol = calculateOpenVolume(details, tradeType);
 
     if (!currentPrice || openVol <= 0) return 0;
+
+    if (tradeType === 'Short') {
+      const avgSellPrice = totalSellVol > 0
+        ? sellDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0) / totalSellVol
+        : 0;
+      return openVol * (avgSellPrice - parseFloat(currentPrice));
+    }
+
     const avgBuyPrice = totalBuyVol > 0
       ? buyDetails.reduce((acc, d) => acc + (parseFloat(d.price) || 0) * (parseFloat(d.volume) || 0), 0) / totalBuyVol
       : 0;
     return openVol * (parseFloat(currentPrice) - avgBuyPrice);
   };
 
-  useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const res = await api.get('/settings');
-        const data = res.data.data;
-        if (Array.isArray(data) && data.length > 0) {
-          setRiskSetting(data[0]);
-        }
-      } catch (error) {
-        console.error("Failed to fetch settings for risk calc:", error);
-      }
-    };
-    fetchSettings();
-  }, []);
+  const fetchScoredForMarket = async (marketId) => {
+    if (!marketId) {
+      setScoredItems([]);
+      setSelectedScoredIds(prev => prev.filter(Boolean));
+      return;
+    }
+
+    try {
+      setLoadingScoredItems(true);
+      const res = await api.get(`/scoreds?filters[Market][documentId][$eq]=${marketId}&sort=Label:asc&pagination[pageSize]=1000&populate=Market`);
+      const items = res.data.data || [];
+      setScoredItems(items);
+      setSelectedScoredIds(prev => prev.filter(id => items.some(item => getRelationId(item) === id)));
+    } catch (error) {
+      console.error('Failed to load scored items:', error);
+      setScoredItems([]);
+    } finally {
+      setLoadingScoredItems(false);
+    }
+  };
 
   // Fetch current price when symbol changes
   useEffect(() => {
     if (isOpen && formData.symbol) {
       setCurrentPrice('');
       const symbolId = formData.symbol;
-      dispatch(fetchLatestHistory(symbolId)).then(resultAction => {
-        if (fetchLatestHistory.fulfilled.match(resultAction) && resultAction.payload?.close) {
-          setCurrentPrice(resultAction.payload.close);
-        }
-      });
+      const selectedSymbol = symbols.find(s => String(getSymbolId(s)) === String(symbolId));
+
+      const marketName = selectedSymbol?.market?.Name || selectedSymbol?.market?.name || '';
+      const symbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
+      const isCrypto = /crypto|binance/i.test(marketName)
+          || /^BINANCE:/i.test(symbolName)
+          || /(?:USDT|USDC|BUSD)(?:\.P)?$/i.test(symbolName);
+
+      if (isCrypto && selectedSymbol) {
+        dispatch(fetchBatchLatestMinutePrices([selectedSymbol])).then(resultAction => {
+          if (fetchBatchLatestMinutePrices.fulfilled.match(resultAction)) {
+            const pricesMap = resultAction.payload || {};
+            const realTimePrice = pricesMap[symbolId] ?? pricesMap[selectedSymbol.id] ?? pricesMap[selectedSymbol.documentId];
+            if (realTimePrice !== undefined && realTimePrice !== null) {
+              setCurrentPrice(realTimePrice);
+            }
+          }
+        });
+      } else {
+        dispatch(fetchLatestHistory(symbolId)).then(resultAction => {
+          if (fetchLatestHistory.fulfilled.match(resultAction) && resultAction.payload?.close) {
+            setCurrentPrice(resultAction.payload.close);
+          }
+        });
+      }
     }
-  }, [isOpen, formData.symbol, dispatch]);
+  }, [isOpen, formData.symbol, symbols, dispatch]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (initialData) {
+      setSelectedScoredIds((initialData.scoreds || []).map(item => item.documentId || item.id).filter(Boolean));
+    } else {
+      setSelectedScoredIds([]);
+    }
+  }, [initialData, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const selectedSymbol = symbols.find(s => String(getSymbolId(s)) === String(formData.symbol));
+    const marketId = selectedSymbol?.market?.documentId || selectedSymbol?.market?.id || selectedAccount?.market?.documentId || selectedAccount?.market?.id || '';
+    fetchScoredForMarket(marketId);
+  }, [isOpen, formData.symbol, symbols, selectedAccount]);
 
   useEffect(() => {
     if (isOpen) {
@@ -152,6 +234,8 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     }
   }, [isOpen, initialData, selectedAccount, dispatch]);
 
+  useEscapeKey(onClose, isOpen);
+
   if (!isOpen) return null;
 
   const handleChange = (e) => {
@@ -163,6 +247,14 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     const newDetails = [...formData.trade_details];
     newDetails[index] = { ...newDetails[index], [field]: value };
     setFormData(prev => ({ ...prev, trade_details: newDetails }));
+  };
+
+  const toggleScored = (scoredId) => {
+    setSelectedScoredIds(prev => (
+      prev.includes(scoredId)
+        ? prev.filter(id => id !== scoredId)
+        : [...prev, scoredId]
+    ));
   };
 
   const addDetail = () => {
@@ -193,6 +285,8 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
     const payload = {
       ...formData,
+      mode: initialData?.mode || 'Real',
+      scoreds: selectedScoredIds,
       // Pass details as is, formatted
       trade_details: formData.trade_details.map(d => ({
         ...d,
@@ -213,17 +307,19 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     onClose();
   };
 
+  const handleDelete = () => {
+    if (onDelete) {
+      onDelete();
+    }
+  };
+
   const handleCloseTrade = async () => {
     if (!currentPrice) {
       alert('Current price not available. Please wait for price data.');
       return;
     }
 
-    const sellDetails = formData.trade_details.filter(d => d.type === 'Sell');
-    const buyDetails = formData.trade_details.filter(d => d.type === 'Buy');
-    const totalBuyVol = buyDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const totalSellVol = sellDetails.reduce((acc, d) => acc + (parseFloat(d.volume) || 0), 0);
-    const openVol = totalBuyVol - totalSellVol;
+    const openVol = calculateOpenVolume(formData.trade_details, formData.type);
 
     if (openVol <= 0) {
       alert('No open volume to close.');
@@ -231,13 +327,57 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     }
 
     const closeSignal = formData.type === 'Long' ? 'Sell' : 'Buy';
+    const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
+    const isBinanceAccount = accountName.includes('BINANCE');
+    let noteText = '';
+
+    if (isBinanceAccount) {
+      setExecutingOrder(true);
+      try {
+        const selectedSymbol = symbols.find(s => String(getSymbolId(s)) === String(formData.symbol));
+        const symbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
+        if (!symbolName) {
+          throw new Error('Symbol details not found to place order on Binance.');
+        }
+
+        const symbolUpper = symbolName.toUpperCase();
+        const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
+        const isFutures = symbolUpper.endsWith('.P') || 
+                          symbolUpper.includes('PERP') || 
+                          accountName.includes('FUTURES') || 
+                          accountName.includes('DERIVATIVE') ||
+                          marketName.includes('FUTURES') ||
+                          marketName.includes('DERIVATIVE');
+
+        const binanceOrderResult = await executeBinanceOrder({
+          symbol: symbolName,
+          side: closeSignal.toUpperCase(), // SELL for Long, BUY for Short
+          type: 'MARKET',
+          quantity: openVol,
+          isFutures
+        });
+
+        if (binanceOrderResult && (binanceOrderResult.orderId !== undefined || binanceOrderResult.id !== undefined)) {
+          const orderId = binanceOrderResult.orderId ?? binanceOrderResult.id;
+          noteText = `[Binance Closed] Order ID: ${orderId}`;
+        }
+      } catch (err) {
+        console.error('Binance Exit Order Execution failed:', err);
+        alert(`Failed to close position on Binance: ${err.message || err}`);
+        setExecutingOrder(false);
+        return;
+      } finally {
+        setExecutingOrder(false);
+      }
+    }
+
     const exitDetail = {
       date: getLocalDateTimeInputValue(),
       signal: 'Exit',
       type: closeSignal,
       price: parseFloat(currentPrice),
       volume: openVol,
-      note: ''
+      note: noteText
     };
 
     const newDetails = [...formData.trade_details, exitDetail];
@@ -245,11 +385,13 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
     const payload = {
       ...formData,
+      mode: initialData?.mode || 'Real',
       trade_details: newDetails.map(d => ({
         ...d,
         price: parseFloat(d.price) || 0,
         volume: parseFloat(d.volume) || 0
       })),
+      scoreds: selectedScoredIds,
       trade_status: 'Closed',
       account: selectedAccount.documentId || Number(selectedAccount.id),
       pnl: realizedPnl
@@ -270,8 +412,13 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
     : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
+      <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-6xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
           <h3 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
             {initialData ? 'Edit Trade' : 'New Trade'}
@@ -281,7 +428,9 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1">
+          <div className={initialData ? 'space-y-6' : 'grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6'}>
+            <div className="space-y-6">
           {/* Top Row: Symbol & Type */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -295,7 +444,7 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
               >
                 <option value="">Select Symbol</option>
                 {symbols.map(s => (
-                  <option key={s.id} value={s.documentId}>{s.Name}</option>
+                  <option key={getSymbolId(s)} value={getSymbolId(s)}>{s.Name}</option>
                 ))}
               </select>
             </div>
@@ -350,8 +499,8 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
               </div>
               <div className="bg-gray-900/30 p-3 rounded-lg border border-gray-700/50">
                 <span className="text-gray-400 text-xs block mb-1">Est. Unrealized P&L (open @ {currentPrice || '-'})</span>
-                <span className={`text-lg font-mono font-bold ${currentPrice ? (calculateUnrealizedPnl(formData.trade_details, currentPrice) >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-500'}`}>
-                  {currentPrice ? ((calculateUnrealizedPnl(formData.trade_details, currentPrice) > 0 ? '+' : '') + formatPrice(calculateUnrealizedPnl(formData.trade_details, currentPrice))) : '-'}
+                <span className={`text-lg font-mono font-bold ${currentPrice ? (calculateUnrealizedPnl(formData.trade_details, currentPrice, formData.type) >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-500'}`}>
+                  {currentPrice ? ((calculateUnrealizedPnl(formData.trade_details, currentPrice, formData.type) > 0 ? '+' : '') + formatPrice(calculateUnrealizedPnl(formData.trade_details, currentPrice, formData.type))) : '-'}
                 </span>
               </div>
             </div>
@@ -450,6 +599,47 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
             </div>
           </div>
 
+          {/* Scored Checkboxes */}
+          <div className="pt-1">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider">Scored</h4>
+              <span className="text-xs text-gray-500">
+                {selectedScoredIds.length} selected
+              </span>
+            </div>
+
+            {loadingScoredItems ? (
+              <div className="text-sm text-gray-500">Loading scored items...</div>
+            ) : scoredItems.length === 0 ? (
+              <div className="text-sm text-gray-500">
+                No scored items found for this market.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {scoredItems.map(item => {
+                  const scoredId = getRelationId(item);
+                  const isSelected = selectedScoredIds.includes(scoredId);
+                  return (
+                    <label
+                      key={scoredId}
+                      className={`flex items-start gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition ${isSelected ? 'bg-blue-500/10' : 'bg-gray-800/20 hover:bg-gray-800/35'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleScored(scoredId)}
+                        className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500 focus:ring-blue-500"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-100">{item.Label || item.label || 'Untitled'}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
 
 
           <div>
@@ -466,30 +656,55 @@ const TradeModal = ({ isOpen, onClose, onSubmit, initialData }) => {
 
 
 
-          <div className="pt-2 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition"
-            >
-              Cancel
-            </button>
-            {formData.trade_status !== 'Closed' && (
+          <div className="pt-2 flex items-center gap-3">
+            {initialData && (
               <button
                 type="button"
-                onClick={handleCloseTrade}
-                disabled={!currentPrice}
-                className="px-6 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50"
+                onClick={handleDelete}
+                disabled={executingOrder}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50 mr-auto"
               >
-                Close Trade
+                Delete Trade
               </button>
             )}
-            <button
-              type="submit"
-              className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20"
-            >
-              Save Trade
-            </button>
+            <div className="ml-auto flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition"
+                disabled={executingOrder}
+              >
+                Cancel
+              </button>
+              {formData.trade_status !== 'Closed' && (
+                <button
+                  type="button"
+                  onClick={handleCloseTrade}
+                  disabled={!currentPrice || executingOrder}
+                  className="px-6 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50"
+                >
+                  {executingOrder ? 'Executing Close...' : 'Close Trade'}
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={executingOrder}
+                className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 disabled:opacity-50"
+              >
+                Save Trade
+              </button>
+            </div>
+          </div>
+            </div>
+            {!initialData && (
+              <div className="lg:sticky lg:top-0 lg:self-start">
+                <CalcVolForm
+                  currentPrice={currentPrice}
+                  tradeType={formData.type}
+                  selectedAccount={selectedAccount}
+                />
+              </div>
+            )}
           </div>
         </form>
       </div >

@@ -1,0 +1,125 @@
+{
+  "kind": "collectionType",
+  "collectionName": "roadmaps",
+  "info": {
+    "singularName": "roadmap",
+    "pluralName": "roadmaps",
+    "displayName": "Roadmap",
+    "description": "Account growth roadmap targets and snapshots"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account",
+      "inversedBy": "roadmaps"
+    },
+    "setting": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::setting.setting"
+    },
+    "startingBalance": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      },
+      "required": true
+    },
+    "targetGrowthPercent": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      },
+      "required": true
+    },
+    "plannedTrades": {
+      "type": "integer",
+      "default": 25
+    },
+    "riskPercent": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
+    },
+    "rewardMultiple": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
+    },
+    "maxDrawDownPercent": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": [
+        "unprocess",
+        "process",
+        "completed"
+      ],
+      "default": "unprocess"
+    },
+    "targetBalance": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
+    },
+    "profitTarget": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
+    },
+    "winRateEstimate": {
+      "type": "decimal",
+      "columnType": {
+        "type": "decimal",
+        "args": [
+          20,
+          4
+        ]
+      }
+    },
+    "snapshot": {
+      "type": "json"
+    }
+  }
+}

@@ -19,7 +19,7 @@ export const fetchTrades = createAsyncThunk(
             // If the user passes a raw query string or object, adapting is tricky without 'qs'.
             // Let's implement specific action for Account Detail first: fetchAccountTrades
 
-            let url = '/trades?populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot';
+            let url = '/trades?populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot&populate[3]=scoreds&populate[4]=scoreds.Market&populate[5]=strategy';
             if (params.accountId) {
                 // Determine if documentId or id
                 // Assuming documentId is safer for v5, relying on caller to pass correct ID type
@@ -29,14 +29,22 @@ export const fetchTrades = createAsyncThunk(
                 // Filter by symbol
                 url += `&filters[symbol][documentId][$eq]=${params.symbolId}`;
             }
+            if (params.mode) {
+                url += `&filters[mode][$eq]=${params.mode}`;
+            }
+            if (params.strategyId) {
+                url += `&filters[strategy][documentId][$eq]=${params.strategyId}`;
+            }
+            if (params.tradeStatus) {
+                url += `&filters[trade_status][$eq]=${params.tradeStatus}`;
+            }
             if (params.sort) {
                 url += `&sort=${params.sort}`;
             } else {
                 url += `&sort=date:desc`;
             }
-            if (params.pageSize) {
-                url += `&pagination[pageSize]=${params.pageSize}`;
-            }
+            const pageSize = params.pageSize || 1000;
+            url += `&pagination[pageSize]=${pageSize}`;
 
             const res = await api.get(url);
             return res.data.data;
@@ -50,7 +58,7 @@ export const fetchOpenTrades = createAsyncThunk(
     'trades/fetchOpenTrades',
     async ({ accountId }, { rejectWithValue }) => {
         try {
-            const url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Open&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details`;
+            const url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Open&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot&populate[3]=scoreds&populate[4]=scoreds.Market&populate[5]=strategy`;
             const res = await api.get(url);
             return res.data.data;
         } catch (error) {
@@ -63,7 +71,7 @@ export const fetchClosedTrades = createAsyncThunk(
     'trades/fetchClosedTrades',
     async ({ accountId, strategyId }, { rejectWithValue }) => {
         try {
-            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details`;
+            let url = `/trades?filters[account][documentId][$eq]=${accountId}&filters[trade_status][$eq]=Closed&pagination[pageSize]=1000&populate[0]=symbol&populate[1]=trade_details&populate[2]=trade_details.screenshot&populate[3]=scoreds&populate[4]=scoreds.Market&populate[5]=strategy`;
             // if (strategyId) {
             //     url += `&filters[strategy][documentId][$eq]=${strategyId}`;
             // }
@@ -93,6 +101,7 @@ export const saveTrade = createAsyncThunk(
 
             // Convert Note to Blocks
             tradePayload.note = createBlocksFromText(tradePayload.note);
+            tradePayload.scored = Array.isArray(tradePayload.scoreds) ? tradePayload.scoreds.length : 0;
 
             // 2. Save Parent Trade (Create or Update)
             let savedTradeId;
@@ -114,10 +123,12 @@ export const saveTrade = createAsyncThunk(
 
             // A. Identify Deletions
             if (tradeToEdit && tradeToEdit.trade_details) {
-                const currentIds = formDetails.filter(d => d.id).map(d => d.id);
+                const getDetailId = (detail) => detail?.documentId || detail?.id;
+                const currentIds = formDetails.map(getDetailId).filter(Boolean);
                 const idsToDelete = tradeToEdit.trade_details
-                    .filter(d => !currentIds.includes(d.id))
-                    .map(d => d.id || d.documentId);
+                    .map(getDetailId)
+                    .filter(Boolean)
+                    .filter(id => !currentIds.includes(id));
 
                 await Promise.all(idsToDelete.map(id => api.delete(`/trade-details/${id}`).catch(e => console.warn(`Failed to delete detail ${id}`, e))));
             }
@@ -162,8 +173,9 @@ export const saveTrade = createAsyncThunk(
                 };
 
                 try {
-                    if (detail.documentId) {
-                        await api.put(`/trade-details/${detail.documentId}`, { data: detailPayload });
+                    const detailId = detail.documentId || detail.id;
+                    if (detailId) {
+                        await api.put(`/trade-details/${detailId}`, { data: detailPayload });
                     } else {
                         await api.post('/trade-details', { data: detailPayload });
                     }
@@ -174,6 +186,117 @@ export const saveTrade = createAsyncThunk(
 
             return { savedTradeId };
 
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
+export const deleteTrade = createAsyncThunk(
+    'trades/deleteTrade',
+    async ({ tradeId, tradeDetails = [] }, { rejectWithValue }) => {
+        try {
+            const detailIds = tradeDetails
+                .map(detail => detail.documentId || detail.id)
+                .filter(Boolean);
+
+            await Promise.all(
+                detailIds.map(id =>
+                    api.delete(`/trade-details/${id}`).catch(err => {
+                        console.warn(`Failed to delete trade detail ${id}`, err);
+                    })
+                )
+            );
+
+            await api.delete(`/trades/${tradeId}`);
+
+            return { tradeId, deletedDetailCount: detailIds.length };
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
+export const deleteDemoTradesByStrategy = createAsyncThunk(
+    'trades/deleteDemoTradesByStrategy',
+    async (strategyId, { rejectWithValue }) => {
+        try {
+            if (!strategyId) throw new Error('Strategy ID is required.');
+
+            const trades = [];
+            const pageSize = 100;
+            let page = 1;
+            let pageCount = 1;
+            const strategyFilter = typeof strategyId === 'string' ? 'documentId' : 'id';
+
+            do {
+                const url = `/trades?filters[mode][$eq]=Demo` +
+                    `&filters[strategy][${strategyFilter}][$eq]=${encodeURIComponent(strategyId)}` +
+                    `&populate[0]=trade_details&pagination[page]=${page}&pagination[pageSize]=${pageSize}`;
+                const res = await api.get(url);
+                trades.push(...(res.data?.data || []));
+                pageCount = res.data?.meta?.pagination?.pageCount || 1;
+                page++;
+            } while (page <= pageCount);
+
+            const detailIds = Array.from(new Set(
+                trades.flatMap(trade => trade.trade_details || [])
+                    .map(detail => detail.documentId || detail.id)
+                    .filter(Boolean)
+            ));
+            const tradeIds = trades
+                .map(trade => trade.documentId || trade.id)
+                .filter(Boolean);
+
+            // TradeDetail must be removed first because it owns the relation to Trade.
+            await Promise.all(detailIds.map(id => api.delete(`/trade-details/${id}`)));
+            await Promise.all(tradeIds.map(id => api.delete(`/trades/${id}`)));
+
+            return {
+                deletedTradeCount: tradeIds.length,
+                deletedTradeDetailCount: detailIds.length
+            };
+        } catch (error) {
+            return rejectWithValue(error.response?.data || error.message);
+        }
+    }
+);
+
+export const clearAllDemoTrades = createAsyncThunk(
+    'trades/clearAllDemoTrades',
+    async (_, { rejectWithValue }) => {
+        try {
+            const trades = [];
+            const pageSize = 100;
+            let page = 1;
+            let pageCount = 1;
+
+            do {
+                const url = `/trades?filters[mode][$eq]=Demo` +
+                    `&populate[0]=trade_details&pagination[page]=${page}&pagination[pageSize]=${pageSize}`;
+                const res = await api.get(url);
+                trades.push(...(res.data?.data || []));
+                pageCount = res.data?.meta?.pagination?.pageCount || 1;
+                page++;
+            } while (page <= pageCount);
+
+            const detailIds = Array.from(new Set(
+                trades.flatMap(trade => trade.trade_details || [])
+                    .map(detail => detail.documentId || detail.id)
+                    .filter(Boolean)
+            ));
+            const tradeIds = trades
+                .map(trade => trade.documentId || trade.id)
+                .filter(Boolean);
+
+            // TradeDetail must be removed first because it owns the relation to Trade.
+            await Promise.all(detailIds.map(id => api.delete(`/trade-details/${id}`)));
+            await Promise.all(tradeIds.map(id => api.delete(`/trades/${id}`)));
+
+            return {
+                deletedTradeCount: tradeIds.length,
+                deletedTradeDetailCount: detailIds.length
+            };
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
         }
@@ -233,6 +356,7 @@ export const executeSignalTrade = createAsyncThunk(
                 date: new Date().toISOString(),
                 account: accountId,
                 symbol: symbolId,
+                scored: 0,
             };
 
             const tradeRes = await api.post('/trades', { data: tradePayload });
@@ -345,6 +469,12 @@ const tradeSlice = createSlice({
             .addCase(fetchClosedTrades.rejected, (state, action) => {
                 state.closedTradesLoading = false;
                 console.error("Failed to fetch closed trades:", action.payload);
+            })
+            .addCase(deleteTrade.pending, (state) => {
+                state.error = null;
+            })
+            .addCase(deleteTrade.rejected, (state, action) => {
+                state.error = action.payload;
             })
             // Execute Signal Trade
             .addCase(executeSignalTrade.pending, (state) => {

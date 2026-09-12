@@ -35,13 +35,8 @@ export default {
       });
     });
 
-    // Grant public access to trade, account, strategy endpoints
-    const publicRole = await strapi.db.query('plugin::users-permissions.role').findOne({
-      where: { type: 'public' },
-    });
-
-    if (publicRole) {
-      const permissionsToEnable = [
+    // Grant access to trade, account, strategy endpoints
+    const permissionsToEnable = [
         'api::trade.trade.find',
         'api::trade.trade.findOne',
         'api::trade.trade.create',
@@ -67,16 +62,38 @@ export default {
         'api::tcbs-strategy-signal.tcbs-strategy-signal.create',
         'api::tcbs-strategy-signal.tcbs-strategy-signal.update',
         'api::tcbs-strategy-signal.tcbs-strategy-signal.delete',
+        'api::tcbs-recommen.tcbs-recommen.find',
+        'api::tcbs-recommen.tcbs-recommen.findOne',
         'api::symbol.symbol.find',
         'api::symbol.symbol.findOne',
         'api::symbol.symbol.create',
         'api::symbol.symbol.update',
         'api::symbol.symbol.delete',
+        'api::stock-ratio.stock-ratio.find',
+        'api::stock-ratio.stock-ratio.findOne',
+        'api::stock-ratio.stock-ratio.create',
+        'api::stock-ratio.stock-ratio.update',
+        'api::stock-ratio.stock-ratio.delete',
+        'api::investor.investor.find',
+        'api::investor.investor.findOne',
+        'api::investor.investor.create',
+        'api::investor.investor.update',
+        'api::investor.investor.delete',
+        'api::symbol-technical-analysis.symbol-technical-analysis.find',
+        'api::symbol-technical-analysis.symbol-technical-analysis.findOne',
+        'api::symbol-technical-analysis.symbol-technical-analysis.create',
+        'api::symbol-technical-analysis.symbol-technical-analysis.update',
+        'api::symbol-technical-analysis.symbol-technical-analysis.delete',
         'api::market.market.find',
         'api::market.market.findOne',
         'api::market.market.create',
         'api::market.market.update',
         'api::market.market.delete',
+        'api::scored.scored.find',
+        'api::scored.scored.findOne',
+        'api::scored.scored.create',
+        'api::scored.scored.update',
+        'api::scored.scored.delete',
         'api::webhook-signal.webhook-signal.find',
         'api::webhook-signal.webhook-signal.findOne',
         'api::webhook-signal.webhook-signal.update',
@@ -86,13 +103,37 @@ export default {
         'api::market-flow.market-flow.create',
         'api::industry.industry.find',
         'api::industry.industry.findOne',
-      ];
+        'api::strategy-template.strategy-template.find',
+        'api::strategy-template.strategy-template.findOne',
+        'api::strategy-template.strategy-template.create',
+        'api::strategy-template.strategy-template.update',
+        'api::strategy-template.strategy-template.delete',
+        'api::symbol-history.symbol-history.find',
+        'api::symbol-history.symbol-history.findOne',
+        'api::symbol-history.symbol-history.create',
+        'api::symbol-history.symbol-history.update',
+        'api::symbol-history.symbol-history.delete',
+        'api::symbol-history.symbol-history.clearHistory',
+        'api::symbol-insight.symbol-insight.find',
+        'api::symbol-insight.symbol-insight.findOne',
+        'api::symbol-insight.symbol-insight.create',
+        'api::symbol-insight.symbol-insight.update',
+        'api::symbol-insight.symbol-insight.delete',
+    ];
 
-      // Find permission IDs
+    const rolesToGrant = ['public', 'authenticated'];
+
+    for (const roleType of rolesToGrant) {
+      const role = await strapi.db.query('plugin::users-permissions.role').findOne({
+        where: { type: roleType },
+      });
+
+      if (!role) continue;
+
       const permissions = await strapi.db.query('plugin::users-permissions.permission').findMany({
         where: {
           action: { $in: permissionsToEnable },
-          role: publicRole.id,
+          role: role.id,
         },
       });
 
@@ -100,15 +141,28 @@ export default {
       const newActions = permissionsToEnable.filter(action => !existingActions.includes(action));
 
       if (newActions.length > 0) {
-        await Promise.all(newActions.map(action => {
-          return strapi.db.query('plugin::users-permissions.permission').create({
-            data: {
-              action,
-              role: publicRole.id,
-            },
-          });
-        }));
-        strapi.log.info('Updated public permissions for Trading Journal API');
+        let createdCount = 0;
+
+        // Permission bootstrap can run more than once (for example after a
+        // development restart). Treat an existing permission-role link as a
+        // successful no-op instead of crashing on PostgreSQL's unique key.
+        for (const action of newActions) {
+          try {
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: {
+                action,
+                role: role.id,
+              },
+            });
+            createdCount += 1;
+          } catch (error) {
+            if (error?.code !== '23505') throw error;
+          }
+        }
+
+        if (createdCount > 0) {
+          strapi.log.info(`Updated ${roleType} permissions for Trading Journal API`);
+        }
       }
     }
   },

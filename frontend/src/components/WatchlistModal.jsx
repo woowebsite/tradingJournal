@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols = [] }) => {
     const { selectedAccount } = useAccount();
@@ -98,10 +99,17 @@ const WatchlistModal = ({ isOpen, onClose, onSubmit, initialData = null, symbols
         onSubmit(payload);
     };
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 rounded-2xl shadow-xl w-full max-w-2xl border border-gray-700 flex flex-col max-h-[90vh]">
                 <div className="flex justify-between items-center p-6 border-b border-gray-700">
                     <h2 className="text-xl font-bold text-white">

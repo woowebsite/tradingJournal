@@ -1,3 +1,6 @@
+import { calculateSupertrend } from '../indicators/supertrend';
+import { calculateVWAP } from '../indicators/vwap';
+
 /**
  * Utility to evaluate rules against a dataset (candles).
  */
@@ -82,6 +85,66 @@ const getValue = (candle, field) => {
     return !isNaN(num) ? num : raw;
 };
 
+const getCandleDate = (candle) => {
+    if (!candle) return null;
+    const rawDate = candle.date || candle.createdAt || candle.attributes?.date || candle.attributes?.createdAt || (typeof candle.time === 'number' ? candle.time * 1000 : candle.time);
+    if (!rawDate) return null;
+    const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getWeekStartKey = (date) => {
+    if (!date) return null;
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+};
+
+const getWeeklyBuckets = (history) => {
+    const buckets = new Map();
+
+    history.forEach(candle => {
+        const candleDate = getCandleDate(candle);
+        const weekKey = getWeekStartKey(candleDate);
+        if (!weekKey) return;
+
+        const current = buckets.get(weekKey) || {
+            key: weekKey,
+            candles: [],
+            low: Infinity,
+            high: -Infinity
+        };
+
+        const low = Number(getValue(candle, 'low'));
+        const high = Number(getValue(candle, 'high'));
+
+        if (Number.isFinite(low) && low < current.low) current.low = low;
+        if (Number.isFinite(high) && high > current.high) current.high = high;
+        current.candles.push(candle);
+        buckets.set(weekKey, current);
+    });
+
+    return [...buckets.values()].sort((a, b) => a.key.localeCompare(b.key));
+};
+
+const resolveWeeklyWindow = (history, index, offset, period) => {
+    const currentCandle = history[index];
+    const currentDate = getCandleDate(currentCandle);
+    if (!currentDate) return [];
+
+    const currentWeekStart = getWeekStartKey(currentDate);
+    const weeklyBuckets = getWeeklyBuckets(history);
+    const currentWeekIndex = weeklyBuckets.findIndex(bucket => bucket.key === currentWeekStart);
+    if (currentWeekIndex < 0) return [];
+
+    const startIndex = currentWeekIndex + offset;
+    const endIndex = startIndex + period;
+    return weeklyBuckets.slice(startIndex, endIndex);
+};
+
 const executeFunction = (funcNode, history, index) => {
     const { name, params } = funcNode;
 
@@ -91,7 +154,7 @@ const executeFunction = (funcNode, history, index) => {
     if (name === 'highest') {
         const field = params.field || 'high';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         let maxVal = -Infinity;
         let count = 0;
@@ -109,14 +172,39 @@ const executeFunction = (funcNode, history, index) => {
             }
         }
 
-        if (count === 0) return null;
+        // A "highest N candles" value is undefined until the complete window exists.
+        // Using a partial window can create false signals near the oldest loaded candle.
+        if (count < period) return null;
         return maxVal;
+    }
+
+    if (name === 'highest_weekly') {
+        const period = params.period || 2;
+        const offset = Math.abs(params.offset || 0);
+        const field = params.field || 'high';
+        const weeklyBuckets = resolveWeeklyWindow(history, index, offset, period);
+
+        if (weeklyBuckets.length === 0) return null;
+
+        let maxVal = -Infinity;
+        let count = 0;
+        weeklyBuckets.forEach(bucket => {
+            bucket.candles.forEach(candle => {
+                const val = getValue(candle, field);
+                if (val !== undefined && typeof val === 'number') {
+                    if (val > maxVal) maxVal = val;
+                    count++;
+                }
+            });
+        });
+
+        return count === 0 ? null : maxVal;
     }
 
     if (name === 'lowest') {
         const field = params.field || 'low';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         let minVal = Infinity;
         let count = 0;
@@ -134,14 +222,37 @@ const executeFunction = (funcNode, history, index) => {
             }
         }
 
-        if (count === 0) return null;
+        if (count < period) return null;
         return minVal;
+    }
+
+    if (name === 'lowest_weekly') {
+        const period = params.period || 2;
+        const offset = Math.abs(params.offset || 0);
+        const field = params.field || 'low';
+        const weeklyBuckets = resolveWeeklyWindow(history, index, offset, period);
+
+        if (weeklyBuckets.length === 0) return null;
+
+        let minVal = Infinity;
+        let count = 0;
+        weeklyBuckets.forEach(bucket => {
+            bucket.candles.forEach(candle => {
+                const val = getValue(candle, field);
+                if (val !== undefined && typeof val === 'number') {
+                    if (val < minVal) minVal = val;
+                    count++;
+                }
+            });
+        });
+
+        return count === 0 ? null : minVal;
     }
 
     if (name === 'sma') {
         const field = params.field || 'close';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         let sum = 0;
         let count = 0;
@@ -167,7 +278,7 @@ const executeFunction = (funcNode, history, index) => {
         // For short history (50), we might just calc from end?
         const field = params.field || 'close';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         // Effective index is the point in time we want the value for.
         // Since history is DESC (0 is newest), "index + offset" is the target time.
@@ -203,7 +314,7 @@ const executeFunction = (funcNode, history, index) => {
         const slow = params.slow || 26;
         const sig = params.signal || 9;
         const output = params.output || 'macd'; // 'macd', 'signal', 'hist'
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         // We need to calculate MACD series to get the Signal line (which is EMA of MACD).
         // Target: index + offset.
@@ -273,7 +384,7 @@ const executeFunction = (funcNode, history, index) => {
     if (name === 'rsi') {
         const field = params.field || 'close';
         const period = params.period || 14;
-        const offset = params.offset || 0;
+        const offset = Math.abs(params.offset || 0);
 
         const targetIdx = index + offset;
         // Needs previous date for change.
@@ -346,8 +457,80 @@ const executeFunction = (funcNode, history, index) => {
         return currentRSI;
     }
 
+    if (['close', 'open', 'high', 'low', 'volume'].includes(name)) {
+        const offset = Math.abs(params.offset || 0);
+        const targetIdx = index + offset;
+        const candle = getCandle(targetIdx);
+        if (!candle) return null;
+        return getValue(candle, name);
+    }
+
+    if (name === 'supertrend') {
+        const period = params.period || 10;
+        const multiplier = params.multiplier || 3;
+        const output = params.output || 'supertrend'; // 'supertrend' or 'direction'
+        const offset = Math.abs(params.offset || 0);
+
+        const targetIdx = index + offset;
+        if (targetIdx >= history.length) return null;
+
+        // Start at the oldest loaded candle, matching the chart calculation exactly.
+        // Supertrend is recursive, so an arbitrary rolling initialization point can
+        // produce a different band/direction from the one displayed on the chart.
+        const lookback = history.length - 1;
+        if (lookback - targetIdx < period) return null;
+
+        // Slice and reverse to get ASC (oldest first)
+        const subHistory = history.slice(targetIdx, lookback + 1).reverse();
+
+        const formattedData = subHistory.map(candle => ({
+            open: getValue(candle, 'open'),
+            close: getValue(candle, 'close'),
+            high: getValue(candle, 'high'),
+            low: getValue(candle, 'low')
+        }));
+
+        const results = calculateSupertrend(period, multiplier, formattedData);
+        if (results.length === 0) return null;
+
+        const lastResult = results[results.length - 1];
+        if (output === 'direction') {
+            return lastResult.direction;
+        }
+        return lastResult.value;
+    }
+
+    if (name === 'vwap') {
+        const anchor = params.anchor || 'Day';
+        const priceSource = params.field || params.priceSource || 'typical';
+        const output = params.output || 'value';
+        const offset = Math.abs(params.offset || 0);
+
+        const targetIdx = index + offset;
+        if (targetIdx >= history.length) return null;
+
+        const subHistory = history.slice(targetIdx).reverse();
+
+        const formattedData = subHistory.map(candle => ({
+            date: candle.date || candle.createdAt || candle.attributes?.date || candle.attributes?.createdAt || candle.time,
+            time: candle.time || candle.date || candle.attributes?.date || candle.attributes?.time,
+            open: getValue(candle, 'open'),
+            close: getValue(candle, 'close'),
+            high: getValue(candle, 'high'),
+            low: getValue(candle, 'low'),
+            volume: getValue(candle, 'volume')
+        }));
+
+        const results = calculateVWAP(formattedData, anchor, priceSource);
+        if (results.length === 0) return null;
+
+        const lastResult = results[results.length - 1];
+        return lastResult[output] !== undefined ? lastResult[output] : lastResult.value;
+    }
+
     return null;
 };
+
 
 /**
  * Filter a history array to return only candles that satisfy the rule.

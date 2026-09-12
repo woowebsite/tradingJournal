@@ -1,10 +1,26 @@
 import React from 'react';
-import { Search, Bell, Settings } from 'lucide-react';
+import clsx from 'clsx';
+import { Link, useLocation } from 'react-router-dom';
+import { Search, Bell, Settings, Clock3, NotebookPen, Plus, Workflow, BrainCircuit } from 'lucide-react';
 import GlobalWatchlist from './GlobalWatchlist';
+import { useSidebar } from '../context/SidebarContext';
 
-const Topbar = () => {
+const Topbar = ({ onNewTrade }) => {
+    const location = useLocation();
+    const { isCollapsed } = useSidebar();
+
+    const topNavItems = [
+        { label: 'Today', path: '/today-trades', icon: Clock3 },
+        { label: 'Plan', path: '/journal-plan', icon: NotebookPen },
+        { label: 'Workflow', path: '/journal-workflow', icon: Workflow },
+        { label: 'Python', path: '/python-strategy', icon: BrainCircuit }
+    ];
+
     return (
-        <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 fixed top-0 right-0 left-64 z-20">
+        <div className={clsx(
+            'h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 fixed top-0 right-0 z-20 transition-all duration-300 ease-in-out',
+            isCollapsed ? 'left-16' : 'left-64'
+        )}>
             <div className="flex bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 items-center w-64">
                 <Search size={16} className="text-gray-500 mr-2" />
                 <input
@@ -14,7 +30,40 @@ const Topbar = () => {
                 />
             </div>
 
-            <div className="flex items-center gap-4">
+            <nav className="hidden lg:flex items-center rounded-lg border border-gray-700 bg-gray-900 p-1 shadow-inner shadow-black/10">
+                {topNavItems.map(item => {
+                    const active = location.pathname === item.path;
+                    const Icon = item.icon;
+
+                    return (
+                        <Link
+                            key={item.path}
+                            to={item.path}
+                            className={clsx(
+                                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+                                active
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                            )}
+                        >
+                            <Icon size={14} />
+                            {item.label}
+                        </Link>
+                    );
+                })}
+                <button
+                    type="button"
+                    onClick={onNewTrade}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:bg-gray-800 hover:text-white"
+                >
+                    <Plus size={14} className="text-blue-400" />
+                    New Trade
+                </button>
+            </nav>
+
+            <div className="flex items-center gap-3">
+
+
                 <GlobalWatchlist />
 
                 <div className="h-6 w-[1px] bg-gray-700 mx-1"></div>

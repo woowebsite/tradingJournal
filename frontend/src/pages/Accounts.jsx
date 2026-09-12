@@ -10,7 +10,7 @@ const Accounts = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedAccountToEdit, setSelectedAccountToEdit] = useState(null);
-    const { setSelectedAccount } = useAccount();
+    const { setSelectedAccount, defaultAccountId, setDefaultAccountId } = useAccount();
     const navigate = useNavigate();
 
     const fetchAccounts = async () => {
@@ -18,12 +18,15 @@ const Accounts = () => {
             setLoading(true);
             const res = await api.get('/accounts?populate=*');
             const data = res.data.data || [];
-            setAccounts(data.map(item => ({
+            const formattedAccounts = data.map(item => ({
                 id: item.id || item.documentId,
                 ...item
-            })));
+            }));
+            setAccounts(formattedAccounts);
+            return formattedAccounts;
         } catch (error) {
             console.error('Error fetching accounts:', error);
+            return [];
         } finally {
             setLoading(false);
         }
@@ -41,7 +44,15 @@ const Accounts = () => {
             } else {
                 await api.post('/accounts', { data });
             }
-            fetchAccounts();
+            const refreshedAccounts = await fetchAccounts();
+            if (selectedAccountToEdit) {
+                const updatedAccount = refreshedAccounts.find(account =>
+                    String(account.documentId || account.id) === String(selectedAccountToEdit.documentId || selectedAccountToEdit.id)
+                );
+                if (updatedAccount) {
+                    setSelectedAccount(updatedAccount);
+                }
+            }
             setIsModalOpen(false);
             setSelectedAccountToEdit(null);
         } catch (error) {
@@ -82,13 +93,37 @@ const Accounts = () => {
 
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-3xl font-bold">Accounts</h2>
-                <button
-                    onClick={openCreateModal}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
-                >
-                    <Plus size={18} />
-                    New Account
-                </button>
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                        <span className="whitespace-nowrap">Default Account</span>
+                        <select
+                            value={defaultAccountId}
+                            onChange={(e) => {
+                                const accountId = e.target.value;
+                                const account = accounts.find(item =>
+                                    String(item.documentId || item.id) === accountId
+                                );
+                                setDefaultAccountId(accountId);
+                                if (account) setSelectedAccount(account);
+                            }}
+                            className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">Select account</option>
+                            {accounts.map(account => (
+                                <option key={account.documentId || account.id} value={account.documentId || account.id}>
+                                    {account.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <button
+                        onClick={openCreateModal}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition font-medium text-white shadow-lg shadow-blue-500/20"
+                    >
+                        <Plus size={18} />
+                        New Account
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -126,12 +161,27 @@ const Accounts = () => {
                         </div>
 
                         <h3 className="text-xl font-bold text-white mb-1">{account.name}</h3>
-                        <p className="text-sm text-gray-400 mb-4">{account.market?.Name || account.market?.name || 'Unknown Market'} • {account.currency}</p>
+                        <p className="text-sm text-gray-400 mb-3">{account.market?.Name || account.market?.name || 'Unknown Market'} - {account.currency}</p>
+
+                        <div className="mb-4 grid grid-cols-2 gap-2">
+                            <div>
+                                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Setting Risk</p>
+                                <p className="text-sm font-medium text-emerald-400 truncate">
+                                    {account.setting?.Name || account.setting?.name || 'No linked setting'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Strategy</p>
+                                <p className="text-sm font-medium text-blue-400 truncate">
+                                    {account.strategy?.Name || account.strategy?.name || 'No linked strategy'}
+                                </p>
+                            </div>
+                        </div>
 
                         <div className="pt-4 border-t border-gray-700">
                             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Initial Balance</p>
                             <p className="text-2xl font-bold text-green-400">
-                                ${account.initial_balance?.toLocaleString()}
+                                {account.initial_balance?.toLocaleString()} {account.currency || 'USD'}
                             </p>
                         </div>
                     </div>

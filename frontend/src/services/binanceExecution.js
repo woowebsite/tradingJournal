@@ -6,7 +6,7 @@ async function hmacSHA256(key, message) {
     const encoder = new TextEncoder();
     const keyData = encoder.encode(key);
     const messageData = encoder.encode(message);
-    
+
     // Import the secret key
     const cryptoKey = await window.crypto.subtle.importKey(
         'raw',
@@ -15,14 +15,14 @@ async function hmacSHA256(key, message) {
         false,
         ['sign']
     );
-    
+
     // Sign the message
     const signature = await window.crypto.subtle.sign(
         'HMAC',
         cryptoKey,
         messageData
     );
-    
+
     // Convert signature ArrayBuffer to Hex string
     return Array.from(new Uint8Array(signature))
         .map(b => b.toString(16).padStart(2, '0'))
@@ -39,21 +39,101 @@ export const normalizeBinanceSymbol = (symbol) => {
 };
 
 /**
- * Places a Spot or Futures order on Binance via local Vite proxies.
+ * Formats quantity to comply with Binance LOT_SIZE and MIN_NOTIONAL filters
  */
-export const executeBinanceOrder = async ({ symbol, side, type = 'LIMIT', quantity, price, isFutures = false }) => {
+export const formatBinanceQuantity = (qty, price = 0, isFutures = true) => {
+    let num = Number(qty);
+    if (isNaN(num) || num <= 0) num = 0.001;
+
+    let formatted;
+    if (price >= 1000) {
+        formatted = Math.floor(num * 1000) / 1000;
+    } else if (price >= 100) {
+        formatted = Math.floor(num * 100) / 100;
+    } else if (price >= 1) {
+        formatted = Math.floor(num * 100) / 100;
+    } else {
+        formatted = Math.floor(num);
+    }
+
+    if (formatted <= 0) {
+        if (price >= 1000) formatted = 0.001;
+        else if (price >= 100) formatted = 0.01;
+        else if (price >= 1) formatted = 0.1;
+        else formatted = 1;
+    }
+
+    // Ensure minimum notional value (5.5 USDT for futures, 10 USDT for spot)
+    const minNotional = isFutures ? 5.5 : 10.0;
+    const notional = formatted * (price || 1);
+    if (price > 0 && notional < minNotional) {
+        const needed = (minNotional * 1.05) / price;
+        if (price >= 1000) formatted = Math.ceil(needed * 1000) / 1000;
+        else if (price >= 100) formatted = Math.ceil(needed * 100) / 100;
+        else if (price >= 1) formatted = Math.ceil(needed * 10) / 10;
+        else formatted = Math.ceil(needed);
+    }
+
+    return formatted;
+};
+
+/**
+ * Parses Binance API error code and returns user-friendly diagnostic message
+ */
+function parseBinanceError(data) {
+    if (!data) return 'Lỗi không xác định từ Binance API.';
+    const code = data.code;
+    const msg = data.msg || data.message || JSON.stringify(data);
+
+    switch (code) {
+        case -2015:
+            return `[Mã -2015]: API Key không hợp lệ, bị giới hạn IP hoặc tài khoản CHƯA BẬT QUYỀN 'Enable Futures' trên Binance API Management.`;
+        case -2019:
+        case -2010:
+            return `[Mã -2019 / -2010]: Số dư khả dụng (USDT) trong ví Futures không đủ để mở vị thế. Vui lòng nạp hoặc chuyển USDT vào ví Futures.`;
+        case -1021:
+            return `[Mã -1021]: Lệch thời gian đồng hồ máy tính so với máy chủ Binance (Timestamp out of sync).`;
+        case -1013:
+        case -1111:
+            return `[Mã -1013 / -1111]: Khối lượng đặt lệnh vi phạm bộ lọc LOT_SIZE hoặc MIN_NOTIONAL (${msg}).`;
+        case -4061:
+            return `[Mã -4061]: Chế độ Position Mode (Hedge Mode vs One-way Mode) không khớp với thiết lập tài khoản Binance.`;
+        case -4164:
+            return `[Mã -4164]: Giá trị lệnh tối thiểu (Notional) phải lớn hơn 5 USDT.`;
+        default:
+            return `[Lỗi Binance ${code ? `Mã ${code}` : ''}]: ${msg}`;
+    }
+}
+
+/**
+ * Places a Spot or Futures order on Binance via local Vite proxies.
+ * Computes HMAC-SHA256 signature locally in browser - NEVER exposes API Secret.
+ */
+export const executeBinanceOrder = async ({
+    symbol,
+    side,
+    type = 'MARKET',
+    quantity,
+    price,
+    timeInForce = 'GTC',
+    isFutures = false
+}) => {
     const apiKey = import.meta.env.VITE_BINANCE_API_KEY;
     const apiSecret = import.meta.env.VITE_BINANCE_API_SECRET;
-    const useTestnet = import.meta.env.VITE_BINANCE_USE_TESTNET === 'true';
+    const rawTestnet = import.meta.env.VITE_BINANCE_USE_TESTNET;
+    const useTestnet = String(rawTestnet || '').split('#')[0].trim().toLowerCase() === 'true';
 
     if (!apiKey || !apiSecret) {
-        throw new Error('Binance API Key or Secret API is missing. Please define VITE_BINANCE_API_KEY and VITE_BINANCE_API_SECRET in your .env file.');
+        throw new Error('Binance API Key hoặc Secret Key chưa được cấu hình. Vui lòng định nghĩa VITE_BINANCE_API_KEY và VITE_BINANCE_API_SECRET trong file frontend/.env');
     }
 
     const normalizedSymbol = normalizeBinanceSymbol(symbol);
     if (!normalizedSymbol) {
         throw new Error('Invalid trading symbol provided.');
     }
+
+    const numPrice = price ? Number(price) : 0;
+    const formattedQty = formatBinanceQuantity(quantity, numPrice, isFutures);
 
     // Determine correct endpoint base using the proxies configured in vite.config.js
     let proxyBase = '';
@@ -63,38 +143,30 @@ export const executeBinanceOrder = async ({ symbol, side, type = 'LIMIT', quanti
         proxyBase = useTestnet ? '/api-binance-testnet/api/v3/order' : '/api-binance/api/v3/order';
     }
 
-    const timestamp = Date.now();
+    const sendOrderAttempt = async (positionSide = null) => {
+        const timestamp = Date.now();
+        const params = new URLSearchParams();
+        params.append('symbol', normalizedSymbol);
+        params.append('side', side.toUpperCase()); // BUY or SELL
+        params.append('type', type.toUpperCase()); // LIMIT or MARKET
+        params.append('quantity', String(formattedQty));
 
-    // Construct request parameters as standard URL parameters
-    const params = new URLSearchParams();
-    params.append('symbol', normalizedSymbol);
-    params.append('side', side.toUpperCase()); // BUY or SELL
-    params.append('type', type.toUpperCase()); // LIMIT or MARKET
-    params.append('quantity', String(quantity));
-    
-    if (type.toUpperCase() === 'LIMIT') {
-        params.append('price', String(price));
-        params.append('timeInForce', 'GTC'); // Good 'Til Cancelled
-    }
-    
-    params.append('timestamp', String(timestamp));
-    params.append('recvWindow', '5000'); // Standard receive window in ms
+        if (type.toUpperCase() === 'LIMIT' && price) {
+            params.append('price', String(price));
+            params.append('timeInForce', timeInForce);
+        }
 
-    const queryString = params.toString();
-    
-    // Sign the query string
-    let signature;
-    try {
-        signature = await hmacSHA256(apiSecret, queryString);
-    } catch (err) {
-        console.error('Cryptographic signature failed:', err);
-        throw new Error(`Failed to generate Binance signature: ${err.message}`);
-    }
+        if (positionSide) {
+            params.append('positionSide', positionSide);
+        }
 
-    // Append signature to query string
-    const finalUrl = `${proxyBase}?${queryString}&signature=${signature}`;
+        params.append('timestamp', String(timestamp));
+        params.append('recvWindow', '60000'); // 60s receive window to prevent clock drift
 
-    try {
+        const queryString = params.toString();
+        const signature = await hmacSHA256(apiSecret, queryString);
+        const finalUrl = `${proxyBase}?${queryString}&signature=${signature}`;
+
         const response = await fetch(finalUrl, {
             method: 'POST',
             headers: {
@@ -103,11 +175,25 @@ export const executeBinanceOrder = async ({ symbol, side, type = 'LIMIT', quanti
         });
 
         const data = await response.json();
+        return { response, data };
+    };
+
+    try {
+        let { response, data } = await sendOrderAttempt();
+
+        // If error is -4061 (Hedge mode mismatch on Futures), retry with positionSide
+        if (!response.ok && data?.code === -4061 && isFutures) {
+            const hedgeSide = side.toUpperCase() === 'BUY' ? 'LONG' : 'SHORT';
+            console.log(`[Binance Execution] Retrying with Hedge Mode positionSide: ${hedgeSide}`);
+            const retryRes = await sendOrderAttempt(hedgeSide);
+            response = retryRes.response;
+            data = retryRes.data;
+        }
 
         if (!response.ok) {
             console.error('Binance API returned an error:', data);
-            // Binance typically returns standard errors like { code: -2010, msg: "Account has insufficient balance..." }
-            throw new Error(data.msg || `Binance API error ${response.status}: ${JSON.stringify(data)}`);
+            const friendlyErr = parseBinanceError(data);
+            throw new Error(friendlyErr);
         }
 
         console.log('Binance Order Successfully Placed:', data);

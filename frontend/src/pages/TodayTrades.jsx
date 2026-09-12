@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { fetchOpenTrades, saveTrade } from '../features/tradeSlice';
-import { fetchBatchLatestMinutePrices } from '../features/marketSlice';
+import { fetchOpenTrades, saveTrade, deleteTrade } from '../features/tradeSlice';
+import { fetchBatchLatestMinutePrices, fetchLatestHistory } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { formatNumber } from '../utils/formatNumber';
 import { calculateTradePnL } from '../utils/tradeCalculations';
@@ -16,6 +16,15 @@ const TodayTrades = () => {
     const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
     const [tradeToEdit, setTradeToEdit] = useState(null);
     const [marketPricesMap, setMarketPricesMap] = useState({});
+
+    const isCryptoSymbol = (symbol) => {
+        const symbolName = symbol?.Name || symbol?.name || '';
+        const marketName = symbol?.market?.Name || symbol?.market?.name || '';
+
+        return /crypto|binance/i.test(marketName)
+            || /^BINANCE:/i.test(symbolName)
+            || /(?:USDT|USDC|BUSD)(?:\.P)?$/i.test(symbolName);
+    };
 
     useEffect(() => {
         if (selectedAccount) {
@@ -42,10 +51,42 @@ const TodayTrades = () => {
         const symbols = Object.values(symbolsById);
 
         const refreshMarketPrices = async () => {
-            const result = await dispatch(fetchBatchLatestMinutePrices(symbols));
-            if (fetchBatchLatestMinutePrices.fulfilled.match(result)) {
-                setMarketPricesMap(result.payload || {});
+            const cryptoSymbols = symbols.filter(isCryptoSymbol);
+            const nonCryptoSymbols = symbols.filter(symbol => !isCryptoSymbol(symbol));
+            const nextPricesMap = {};
+
+            if (cryptoSymbols.length > 0) {
+                const cryptoResult = await dispatch(fetchBatchLatestMinutePrices(cryptoSymbols));
+                if (fetchBatchLatestMinutePrices.fulfilled.match(cryptoResult)) {
+                    Object.assign(nextPricesMap, cryptoResult.payload || {});
+                }
             }
+
+            const nonCryptoEntries = await Promise.all(
+                nonCryptoSymbols.map(async (symbol) => {
+                    const symbolId = symbol?.documentId || symbol?.id;
+                    if (!symbolId) return null;
+
+                    try {
+                        const result = await dispatch(fetchLatestHistory(symbolId));
+                        if (fetchLatestHistory.fulfilled.match(result) && result.payload?.symbolId) {
+                            return [String(result.payload.symbolId), result.payload.close];
+                        }
+                    } catch (error) {
+                        console.warn(`Failed to fetch latest history for symbol ${symbolId}:`, error);
+                    }
+
+                    return null;
+                })
+            );
+
+            nonCryptoEntries.forEach(entry => {
+                if (!entry) return;
+                const [symbolId, price] = entry;
+                nextPricesMap[symbolId] = price;
+            });
+
+            setMarketPricesMap(nextPricesMap);
         };
 
         refreshMarketPrices();
@@ -99,6 +140,29 @@ const TodayTrades = () => {
         setSelectedTrade(null);
         setTradeToEdit(trade);
         setIsTradeModalOpen(true);
+    };
+
+    const handleDeleteTrade = async () => {
+        if (!tradeToEdit) return;
+        const tradeId = tradeToEdit.documentId || tradeToEdit.id;
+        if (!window.confirm('Delete this trade and all of its trade details?')) return;
+
+        try {
+            await dispatch(deleteTrade({
+                tradeId,
+                tradeDetails: tradeToEdit.trade_details || []
+            })).unwrap();
+
+            if (selectedAccount) {
+                dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+            }
+
+            setIsTradeModalOpen(false);
+            setTradeToEdit(null);
+        } catch (error) {
+            console.error('Failed to delete trade:', error);
+            alert(`Failed to delete trade: ${error.message || error}`);
+        }
     };
 
     const handleSaveTrade = async (tradeData) => {
@@ -209,6 +273,7 @@ const TodayTrades = () => {
             isOpen={isTradeModalOpen}
             onClose={() => setIsTradeModalOpen(false)}
             onSubmit={handleSaveTrade}
+            onDelete={handleDeleteTrade}
             initialData={tradeToEdit}
         />
         </>

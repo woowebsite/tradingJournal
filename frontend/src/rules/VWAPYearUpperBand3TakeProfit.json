@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "left": {
+        "name": "high",
+        "type": "function",
+        "params": {
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "output": "upper3"
+        }
+      },
+      "operator": ">=",
+      "identifier": "price_at_vwap_year_upper_band_3"
+    },
+    {
+      "left": {
+        "name": "high",
+        "type": "function",
+        "params": {
+          "offset": 1,
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "offset": 1,
+          "output": "upper3"
+        }
+      },
+      "operator": "<"
+    }
+  ],
+  "condition": "AND"
+}

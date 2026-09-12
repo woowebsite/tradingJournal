@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
 import api from '../services/api';
+import useEscapeKey from '../hooks/useEscapeKey';
 
 const SymbolHistoryModal = ({ isOpen, onClose, onSubmit, initialData, symbols: propSymbols }) => {
     const [formData, setFormData] = useState({
@@ -83,10 +84,17 @@ const SymbolHistoryModal = ({ isOpen, onClose, onSubmit, initialData, symbols: p
         onSubmit(payload);
     };
 
+    useEscapeKey(onClose, isOpen);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) onClose?.();
+            }}
+        >
             <div className="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-lg shadow-2xl overflow-hidden">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <h3 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">

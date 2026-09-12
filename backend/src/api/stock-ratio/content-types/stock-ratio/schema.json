@@ -1,0 +1,52 @@
+{
+  "kind": "collectionType",
+  "collectionName": "stock_ratios",
+  "info": {
+    "singularName": "stock-ratio",
+    "pluralName": "stock-ratios",
+    "displayName": "StockRatio"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "capitalize": { "type": "decimal" },
+    "tradeVolume": { "type": "decimal" },
+    "priceToEarning": { "type": "decimal" },
+    "priceToBook": { "type": "decimal" },
+    "valueBeforeEbitda": { "type": "decimal" },
+    "dividend": { "type": "decimal" },
+    "roe": { "type": "decimal" },
+    "profitGrowthAvarage": { "type": "decimal" },
+    "ageOfReceivable": { "type": "decimal" },
+    "ageOfInventory": { "type": "decimal" },
+    "payableOnEquity": { "type": "decimal" },
+    "payableOnEbitda": { "type": "decimal" },
+    "ebitOnInterest": { "type": "decimal" },
+    "shortOnLongTermPayable": { "type": "decimal" },
+    "revenue": { "type": "decimal" },
+    "operationProfit": { "type": "decimal" },
+    "netProfit": { "type": "decimal" },
+    "earningPerShare": { "type": "decimal" },
+    "asset": { "type": "decimal" },
+    "liability": { "type": "decimal" },
+    "equity": { "type": "decimal" },
+    "bookValuePerShare": { "type": "decimal" },
+    "profitMargin": { "type": "decimal" },
+    "nonInterestOnToi": { "type": "decimal" },
+    "loanOnDeposit": { "type": "decimal" },
+    "creditGrowth": { "type": "decimal" },
+    "badDebtPercentage": { "type": "decimal" },
+    "provisionOnBadDebt": { "type": "decimal" },
+    "customerCredit": { "type": "decimal" },
+    "betaIndex": { "type": "decimal" },
+    "ticker": { "type": "string" },
+    "symbol": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "stockRatio"
+    }
+  }
+}

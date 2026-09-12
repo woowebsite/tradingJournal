@@ -19,6 +19,20 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api-tcbs/, ''),
         secure: false,
         ws: true,
+        cookieDomainRewrite: { '*': '' },
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          });
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            if (proxyRes.headers['set-cookie']) {
+              proxyRes.headers['set-cookie'] = proxyRes.headers['set-cookie'].map(cookie =>
+                cookie.replace(/;\s*Domain=[^;]+/gi, '')
+              );
+            }
+          });
+        }
       },
       '/openapi-tcbs': {
         target: 'https://openapi.tcbs.com.vn',
@@ -26,14 +40,28 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/openapi-tcbs/, ''),
         secure: false,
         ws: true,
+        cookieDomainRewrite: { '*': '' },
         configure: (proxy, _options) => {
           proxy.on('proxyReq', (proxyReq, req, _res) => {
             proxyReq.removeHeader('origin');
             proxyReq.removeHeader('referer');
+            proxyReq.removeHeader('sec-fetch-dest');
+            proxyReq.removeHeader('sec-fetch-mode');
+            proxyReq.removeHeader('sec-fetch-site');
+            proxyReq.removeHeader('sec-ch-ua');
+            proxyReq.removeHeader('sec-ch-ua-mobile');
+            proxyReq.removeHeader('sec-ch-ua-platform');
           });
           proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
             proxyReq.removeHeader('origin');
             proxyReq.removeHeader('referer');
+          });
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            if (proxyRes.headers['set-cookie']) {
+              proxyRes.headers['set-cookie'] = proxyRes.headers['set-cookie'].map(cookie =>
+                cookie.replace(/;\s*Domain=[^;]+/gi, '')
+              );
+            }
           });
         }
       },

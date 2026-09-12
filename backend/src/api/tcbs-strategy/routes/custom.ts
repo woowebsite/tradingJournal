@@ -2,6 +2,12 @@ export default {
   routes: [
     {
       method: 'GET',
+      path: '/tcbs-data/:resource',
+      handler: 'tcbs-strategy.tcbsData',
+      config: { auth: false },
+    },
+    {
+      method: 'GET',
       path: '/tcbs-strategies/sync-signal',
       handler: 'tcbs-strategy.syncSignal',
       config: {
@@ -18,8 +24,22 @@ export default {
     },
     {
       method: 'GET',
+      path: '/tcbs-strategies/sync-investor',
+      handler: 'tcbs-strategy.syncInvestor',
+      config: { auth: false },
+    },
+    {
+      method: 'GET',
       path: '/tcbs-strategies/get-detail',
       handler: 'tcbs-strategy.getDetail',
+      config: {
+        auth: false,
+      },
+    },
+    {
+      method: 'POST',
+      path: '/tcbs-strategies/update-token',
+      handler: 'tcbs-strategy.updateToken',
       config: {
         auth: false,
       },

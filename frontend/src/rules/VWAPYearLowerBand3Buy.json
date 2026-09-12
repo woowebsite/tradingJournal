@@ -1,0 +1,44 @@
+{
+  "rules": [
+    {
+      "left": {
+        "name": "low",
+        "type": "function",
+        "params": {
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "output": "lower3"
+        }
+      },
+      "operator": "<=",
+      "identifier": "price_at_vwap_year_lower_band_3"
+    },
+    {
+      "left": {
+        "name": "high",
+        "type": "function",
+        "params": {
+          "output": "price"
+        }
+      },
+      "right": {
+        "name": "vwap",
+        "type": "function",
+        "params": {
+          "field": "typical",
+          "anchor": "Year",
+          "output": "lower3"
+        }
+      },
+      "operator": ">"
+    }
+  ],
+  "condition": "AND"
+}

@@ -1,6 +1,22 @@
 // TCBS External API Service
 import api from './api';
 
+const TCBS_API_BASE = '/tcbs-data';
+
+const getTcbsHeaders = () => {
+    const token = import.meta.env.VITE_TCBS_TOKEN;
+    const isAscii = token && [...token].every(char => char.charCodeAt(0) <= 127);
+    return isAscii ? { 'X-TCBS-Token': token } : {};
+};
+
+const fetchTcbs = async (resource, params = {}) => {
+    const response = await api.get(`${TCBS_API_BASE}/${resource}`, {
+        params,
+        headers: getTcbsHeaders(),
+    });
+    return response.data;
+};
+
 export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') => {
     // Current timestamp for 'to' parameter (approximation for "now" or future to cover all)
     // 1767052800 is roughly year 2026, safe enough.
@@ -10,40 +26,10 @@ export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') 
     // URL: https://apiextaws.tcbs.com.vn/stock-insight/v2/stock/bars-long-term?ticker=GEE&type=stock&resolution=D&to=1767052800&countBack=598
     // URL: https://apiextaws.tcbs.com.vn/stock-insight/v2/stock/bars-long-term?ticker=GEE&type=stock&resolution=D&to=1767052800&countBack=598
     // USE PROXY: /api-tcbs/... to avoid CORS
-    const url = `/api-tcbs/stock-insight/v2/stock/bars-long-term?ticker=${ticker}&type=${type}&resolution=${resolution}&to=${to}&countBack=${countBack}`;
-
-    const token = import.meta.env.VITE_TCBS_TOKEN;
-
-    const headers = {
-        'Accept': 'application/json',
-        'Accept-Language': 'vi',
-        'Content-Type': 'application/json',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-site',
-    };
-
-    if (token) {
-        // Check for non-ASCII characters (often caused by copying truncated '...' tokens)
-        if (/[^\x00-\x7F]/.test(token)) {
-            console.error("TCBS Token contains invalid characters (non-ASCII). You may have copied a truncated token with '…'. Check your .env file.");
-            alert("Error: VITE_TCBS_TOKEN contains invalid characters. Please check your .env file.");
-            return []; // Stop execution
-        }
-        headers['Authorization'] = `Bearer ${token}`;
-    }
+    const url = 'stock-history';
 
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers,
-            // mode: 'cors' // default
-        });
-        console.log(response);
-        if (!response.ok) {
-            throw new Error(`TCBS API Error: ${response.statusText}`);
-        }
-        const jsonData = await response.json();
+        const jsonData = await fetchTcbs(url, { ticker, type, resolution, to, countBack });
 
         // Transform data map if necessary
         // TCBS response example needed? Assuming standard array of objects based on URL params.
@@ -61,48 +47,16 @@ export const getStockHistory = async (ticker, type = 'stock', resolution = 'D') 
     }
 };
 
-export const getFuturesHistory = async (ticker, type = 'derivative', resolution = 'D') => {
-    // Current timestamp for 'to' parameter (approximation for "now" or future to cover all)
-    // 1767052800 is roughly year 2026, safe enough.
-    const to = Math.floor(Date.now() / 1000); // or Math.floor(Date.now() / 1000);
-    const countBack = 301; // Reasonable default, user asked for 598.
+export const getFuturesHistory = async (ticker, type = 'derivative', resolution = '1') => {
+    const to = Math.floor(Date.now() / 1000);
+    const countBack = 598;
 
     // https://apiextaws.tcbs.com.vn/futures-insight/v2/stock/bars?ticker=41I1G4000&type=derivative&resolution=1&to=1774337040&countBack=347
 
-    const url = `/api-tcbs/futures-insight/v2/stock/bars?ticker=${ticker}&type=${type}&resolution=${resolution}&to=${to}&countBack=${countBack}`;
-
-    const token = import.meta.env.VITE_TCBS_TOKEN;
-
-    const headers = {
-        'Accept': 'application/json',
-        'Accept-Language': 'vi',
-        'Content-Type': 'application/json',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-site',
-    };
-
-    if (token) {
-        // Check for non-ASCII characters (often caused by copying truncated '...' tokens)
-        if (/[^\x00-\x7F]/.test(token)) {
-            console.error("TCBS Token contains invalid characters (non-ASCII). You may have copied a truncated token with '…'. Check your .env file.");
-            alert("Error: VITE_TCBS_TOKEN contains invalid characters. Please check your .env file.");
-            return []; // Stop execution
-        }
-        headers['Authorization'] = `Bearer ${token}`;
-    }
+    const url = 'futures-history';
 
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers,
-            // mode: 'cors' // default
-        });
-        console.log(response);
-        if (!response.ok) {
-            throw new Error(`TCBS API Error: ${response.statusText}`);
-        }
-        const jsonData = await response.json();
+        const jsonData = await fetchTcbs(url, { ticker, type, resolution, to, countBack });
 
         // Transform data map if necessary
         // TCBS response example needed? Assuming standard array of objects based on URL params.
@@ -122,24 +76,9 @@ export const getFuturesHistory = async (ticker, type = 'derivative', resolution 
 
 export const getIntradaySnapshots = async (tickers) => {
     // tickers: "BIC,BTP,..."
-    const url = `/api-tcbs/stock-insight/v1/stock/intraday-snapshots?tickers=${tickers}`;
-    const token = import.meta.env.VITE_TCBS_TOKEN;
-
-    const headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-    };
-
-    if (token && [...token].every(char => char.charCodeAt(0) <= 127)) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-
+    const url = 'intraday-snapshots';
     try {
-        const response = await fetch(url, { method: 'GET', headers });
-        if (!response.ok) {
-            throw new Error(`TCBS API Error: ${response.statusText}`);
-        }
-        const jsonData = await response.json();
+        const jsonData = await fetchTcbs(url, { tickers });
         return jsonData.data || [];
     } catch (error) {
         console.error("Failed to fetch snapshots:", error);
@@ -147,27 +86,18 @@ export const getIntradaySnapshots = async (tickers) => {
     }
 };
 
+export const syncInvestorData = async (ticker, wsize = '1M') => {
+    const response = await api.get('/tcbs-strategies/sync-investor', {
+        params: { ticker, wsize },
+        headers: getTcbsHeaders(),
+    });
+    return response.data?.data || response.data;
+};
+
 export const getMarketFlowLeader = async ({ exchange = 'ALL', industry = '2300', type = '1d' } = {}) => {
-    const params = new URLSearchParams({ exchange, industry, type });
-    const url = `/api-tcbs/stock-insight/v1/intraday/flow-market-leader?${params.toString()}`;
-    const token = import.meta.env.VITE_TCBS_TOKEN;
-
-    const headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-    };
-
-    if (token && [...token].every(char => char.charCodeAt(0) <= 127)) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-
+    const url = 'market-flow-leader';
     try {
-        const response = await fetch(url, { method: 'GET', headers });
-        if (!response.ok) {
-            throw new Error(`TCBS Market Flow API Error: ${response.status} ${response.statusText}`);
-        }
-
-        return await response.json();
+        return await fetchTcbs(url, { exchange, industry, type });
     } catch (error) {
         console.error("Failed to fetch market flow:", error);
         throw error;
@@ -176,88 +106,148 @@ export const getMarketFlowLeader = async ({ exchange = 'ALL', industry = '2300',
 
 
 export const getTechnicalIndicators = async (ticker) => {
-    // URL: /api-tcbs/ta/v1/summary/gaugechart/${ticker}?period=D
-    const url = `/api-tcbs/ta/v1/summary/gaugechart/${ticker}?period=D`;
+    const cleanTicker = String(ticker || '')
+        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+        .trim()
+        .toUpperCase();
 
-    const token = import.meta.env.VITE_TCBS_TOKEN;
-    const headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-    };
-
-    if (token) {
-        if (/[^\x00-\x7F]/.test(token)) {
-            console.error("TCBS Token contains invalid characters.");
-            return [];
-        }
-        headers['Authorization'] = `Bearer ${token}`;
+    if (!cleanTicker || /USDT|\.P|BINANCE:/i.test(cleanTicker) || !/^[A-Z0-9]{1,10}$/.test(cleanTicker)) {
+        return null;
     }
 
+    const url = 'technical-indicators';
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers
-        });
-        if (!response.ok) {
-            throw new Error(`TCBS API Error: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
+        const data = await fetchTcbs(url, { ticker: cleanTicker, period: 'D' });
         return data;
     } catch (error) {
-        console.error("Failed to fetch indicators:", error);
-        throw error; // Or return [] if we want to digest error?
+        console.warn("Failed to fetch indicators for", cleanTicker, error);
+        return null;
     }
 };
 
+export const getTickerOverview = async (ticker) => {
+    const normalizedTicker = String(ticker || '')
+        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+        .trim()
+        .toUpperCase();
 
-export const updateMarketInfo = async (ticker, symbolId) => {
-    var symbol = ticker.replace(":HOSE", "");
-    symbol = symbol.replace(":HNX", "");
-    symbol = symbol.replace(":UPCOM", "");
-    // https://apiextaws.tcbs.com.vn/stock-insight/v2/search?key=PDB&type=ALL
-    const url = `/api-tcbs/stock-insight/v2/search?key=${symbol}&type=ALL`;
-    const headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-    };
-    const token = import.meta.env.VITE_TCBS_TOKEN;
-    if (token) {
-        if (/[^\x00-\x7F]/.test(token)) {
-            console.error("TCBS Token contains invalid characters.");
-            return [];
-        }
-        headers['Authorization'] = `Bearer ${token}`;
+    if (!normalizedTicker || /USDT|\.P|BINANCE:/i.test(normalizedTicker) || !/^[A-Z0-9]{1,10}$/.test(normalizedTicker)) {
+        return {};
     }
 
+    const url = 'ticker-overview';
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers
-        });
+        const data = await fetchTcbs(url, { ticker: normalizedTicker });
+        return data?.data || data || {};
+    } catch (error) {
+        return {};
+    }
+};
 
-        if (!response.ok) {
-            throw new Error(`TCBS API Error: ${response.status} ${response.statusText}`);
-        }
+export const getStockRatio = async (ticker) => {
+    const normalizedTicker = String(ticker || '')
+        .replace(/:(HOSE|HNX|UPCOM)$/i, '')
+        .trim()
+        .toUpperCase();
 
-        const data = await response.json();
-        const info = data.data.find(item => item.name === symbol);
+    if (!normalizedTicker || /USDT|\.P|BINANCE:/i.test(normalizedTicker) || !/^[A-Z0-9]{1,10}$/.test(normalizedTicker)) {
+        return {};
+    }
 
-        if (!info) {
-            console.warn(`No metadata found for ${ticker} in TCBS`);
-            return null;
-        }
+    const url = 'stock-ratio';
+    try {
+        const data = await fetchTcbs(url, { ticker: normalizedTicker });
+        return data?.data || data || {};
+    } catch (error) {
+        return {};
+    }
+};
 
+const upsertStockRatio = async (symbolId, ratio) => {
+    const existing = await api.get('/stock-ratios', {
+        params: {
+            'filters[symbol][documentId][$eq]': symbolId,
+            'pagination[pageSize]': 1,
+        },
+    });
+    const existingRatio = existing.data?.data?.[0];
+    const ratioId = existingRatio?.documentId || existingRatio?.id;
+    const payload = { data: { ...ratio, symbol: symbolId } };
+
+    if (ratioId) {
+        const response = await api.put(`/stock-ratios/${ratioId}`, payload);
+        return response.data.data;
+    }
+
+    const response = await api.post('/stock-ratios', payload);
+    return response.data.data;
+};
+
+export const upsertSymbolTechnicalAnalysis = async (symbolId, analysis) => {
+    const existing = await api.get('/symbol-technical-analyses', {
+        params: {
+            'filters[symbol][documentId][$eq]': symbolId,
+            'pagination[pageSize]': 1,
+        },
+    });
+    const existingAnalysis = existing.data?.data?.[0];
+    const analysisId = existingAnalysis?.documentId || existingAnalysis?.id;
+    const payload = { data: { ...analysis, symbol: symbolId } };
+
+    if (analysisId) {
+        const response = await api.put(`/symbol-technical-analyses/${analysisId}`, payload);
+        return response.data.data;
+    }
+
+    const response = await api.post('/symbol-technical-analyses', payload);
+    return response.data.data;
+};
+
+export const updateMarketInfo = async (ticker, symbolId) => {
+    try {
+        const [overview, ratio] = await Promise.all([
+            getTickerOverview(ticker),
+            getStockRatio(ticker),
+        ]);
         const payload = {
             data: {
-                exchange: info.exchange === "0" ? "HOSE" : info.exchange === "1" ? "HNX" : "UPCOM",
-                sector: info.industry // Map industry to sector
+                ...overview,
+                Name: overview.ticker || String(ticker).replace(/:(HOSE|HNX|UPCOM)$/i, ''),
+                sector: overview.industry,
             }
         };
 
         const res = await api.put(`/symbols/${symbolId}`, payload);
+        await upsertStockRatio(symbolId, ratio);
         return res.data.data;
     } catch (error) {
         console.error("Failed to update market info:", error);
+        throw error;
+    }
+};
+
+export const getIntradayBSA = async (ticker, { timeWindow = '5', tWindow = '60m', type = 'all', symbolHistoryId } = {}) => {
+    try {
+        const response = await api.get('/intraday-bsas/sync', {
+            params: { ticker, timeWindow, tWindow, type, symbolHistoryId },
+            headers: getTcbsHeaders(),
+        });
+        return response.data;
+    } catch (error) {
+        console.error(`Failed to fetch Intraday BSA for ${ticker}:`, error);
+        throw error;
+    }
+};
+
+export const getIntradayBidAsk = async (ticker, { mode = 'baAll', symbolHistoryId } = {}) => {
+    try {
+        const response = await api.get('/intraday-bid-asks/sync', {
+            params: { ticker, mode, symbolHistoryId },
+            headers: getTcbsHeaders(),
+        });
+        return response.data;
+    } catch (error) {
+        console.error(`Failed to fetch Intraday Bid-Ask for ${ticker}:`, error);
         throw error;
     }
 };

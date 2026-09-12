@@ -1,5 +1,7 @@
 import api from './api';
 
+const isAsciiToken = token => token && [...token].every(char => char.charCodeAt(0) <= 127);
+
 export const syncTcbsStrategySignals = async ({
     strategyKey = 'price_volume_increase',
     strategyName = 'Bùng nổ khối lượng',
@@ -14,7 +16,7 @@ export const syncTcbsStrategySignals = async ({
     const tcbsToken = import.meta.env.VITE_TCBS_TOKEN;
     const headers = {};
 
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
+    if (isAsciiToken(tcbsToken)) {
         headers['X-TCBS-Token'] = tcbsToken;
     }
 
@@ -85,7 +87,7 @@ export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NN
     const tcbsToken = import.meta.env.VITE_TCBS_TOKEN;
     const headers = {};
 
-    if (tcbsToken && /^[\x00-\x7F]+$/.test(tcbsToken)) {
+    if (isAsciiToken(tcbsToken)) {
         headers['X-TCBS-Token'] = tcbsToken;
     }
 
@@ -97,4 +99,15 @@ export const syncStrategyDetail = async (strategyKey, strategyName, ticker = 'NN
 
     const response = await api.get(`/tcbs-strategies/sync-detail?${params.toString()}`, { headers });
     return response.data.data;
+};
+
+export const getBacktestConclusion = async (ticker = 'All') => {
+    const normalizedTicker = String(ticker || 'All').trim() || 'All';
+    const token = import.meta.env.VITE_TCBS_TOKEN;
+    const headers = isAsciiToken(token) ? { 'X-TCBS-Token': token } : {};
+    const response = await api.get('/tcbs-data/backtest-conclusion', {
+        params: { ticker: normalizedTicker },
+        headers,
+    });
+    return response.data;
 };

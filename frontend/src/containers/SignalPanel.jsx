@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
 import dayjs from 'dayjs';
-import RecentTradeBox from '../components/RecentTradeBox';
+import RecentTradeBox from './RecentTradeBox';
 
 const SignalPanel = ({ trades, signals }) => {
     const [activeTab, setActiveTab] = useState('signals');
@@ -23,7 +23,7 @@ const SignalPanel = ({ trades, signals }) => {
                     title="Recent Trades"
                 >
                     <Activity size={14} />
-                    Recent News
+                    Recent Trades
                 </button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-2">

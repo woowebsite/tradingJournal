@@ -1,0 +1,52 @@
+{
+  "kind": "collectionType",
+  "collectionName": "strategy_templates",
+  "info": {
+    "singularName": "strategy-template",
+    "pluralName": "strategy-templates",
+    "displayName": "StrategyTemplate",
+    "description": "Saved strategy configuration templates"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "strategyFile": {
+      "type": "string",
+      "required": true
+    },
+    "timeframe": {
+      "type": "string",
+      "default": "D1"
+    },
+    "config": {
+      "type": "json"
+    },
+    "isDefault": {
+      "type": "boolean",
+      "default": false
+    },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account"
+    },
+    "symbol": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "strategy_templates"
+    },
+    "symbolName": {
+      "type": "string"
+    }
+  }
+}

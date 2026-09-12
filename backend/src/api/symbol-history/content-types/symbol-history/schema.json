@@ -29,11 +29,27 @@
     "volume": {
       "type": "float"
     },
+    "timeframe": {
+      "type": "string",
+      "default": "D1"
+    },
     "symbol": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::symbol.symbol",
       "inversedBy": "symbol_histories"
+    },
+    "intraday_bsas": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::intraday-bsa.intraday-bsa",
+      "mappedBy": "symbol_history"
+    },
+    "intraday_bid_asks": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::intraday-bid-ask.intraday-bid-ask",
+      "mappedBy": "symbol_history"
     }
   }
 }

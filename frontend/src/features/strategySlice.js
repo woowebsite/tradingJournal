@@ -5,7 +5,7 @@ export const fetchStrategies = createAsyncThunk(
     'strategies/fetchStrategies',
     async (_, { rejectWithValue }) => {
         try {
-            const res = await api.get('/strategies?sort=name:asc&populate=rules');
+            const res = await api.get('/strategies?sort=name:asc&populate=*');
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
@@ -17,7 +17,8 @@ export const createStrategy = createAsyncThunk(
     'strategies/createStrategy',
     async (data, { rejectWithValue }) => {
         try {
-            const res = await api.post('/strategies', { data });
+            const { rulePercents, ...payload } = data || {};
+            const res = await api.post('/strategies', { data: payload });
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);
@@ -29,7 +30,8 @@ export const updateStrategy = createAsyncThunk(
     'strategies/updateStrategy',
     async ({ id, data }, { rejectWithValue }) => {
         try {
-            const res = await api.put(`/strategies/${id}`, { data });
+            const { rulePercents, ...payload } = data || {};
+            const res = await api.put(`/strategies/${id}`, { data: payload });
             return res.data.data;
         } catch (error) {
             return rejectWithValue(error.response?.data || error.message);

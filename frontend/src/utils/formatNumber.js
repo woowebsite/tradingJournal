@@ -10,10 +10,12 @@ export const formatNumber = (value, pattern = '#,###.##') => {
     const num = parseFloat(value);
     if (isNaN(num)) return '-';
 
+    const safePattern = typeof pattern === 'string' && pattern.trim() ? pattern : '#,###.##';
+
     // Determine decimal places from pattern
     let maxDecimals = 0;
-    if (pattern.includes('.')) {
-        const parts = pattern.split('.');
+    if (safePattern.includes('.')) {
+        const parts = safePattern.split('.');
         if (parts.length > 1) {
             maxDecimals = parts[1].length;
         }

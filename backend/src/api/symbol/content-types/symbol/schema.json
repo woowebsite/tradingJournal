@@ -51,11 +51,66 @@
     "exchange": {
       "type": "string"
     },
+    "shortName": { "type": "string" },
+    "industryID": { "type": "integer" },
+    "industryIDv2": { "type": "string" },
+    "industryIdLevel2": { "type": "string" },
+    "industryIdLevel4": { "type": "string" },
+    "industry": { "type": "string" },
+    "industryEn": { "type": "string" },
+    "establishedYear": { "type": "string" },
+    "noEmployees": { "type": "integer" },
+    "noShareholders": { "type": "integer" },
+    "foreignPercent": { "type": "decimal" },
+    "website": { "type": "string" },
+    "stockRating": { "type": "decimal" },
+    "deltaInWeek": { "type": "decimal" },
+    "deltaInMonth": { "type": "decimal" },
+    "deltaInYear": { "type": "decimal" },
+    "outstandingShare": { "type": "decimal" },
+    "issueShare": { "type": "decimal" },
+    "companyType": { "type": "string" },
+    "ticker": { "type": "string" },
+    "stockRatio": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::stock-ratio.stock-ratio",
+      "mappedBy": "symbol"
+    },
+    "technicalAnalysis": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::symbol-technical-analysis.symbol-technical-analysis",
+      "mappedBy": "symbol"
+    },
     "sector": {
       "type": "string"
     },
     "chart_url": {
       "type": "string"
+    },
+    "investors": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::investor.investor",
+      "mappedBy": "symbol"
+    },
+    "strategy_templates": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::strategy-template.strategy-template",
+      "mappedBy": "symbol"
+    },
+    "strategy_template": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::strategy-template.strategy-template"
+    },
+    "symbol_insights": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::symbol-insight.symbol-insight",
+      "mappedBy": "symbol"
     }
   }
 }

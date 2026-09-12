@@ -1,0 +1,60 @@
+{
+    "rules": [
+        {
+            "left": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "right": {
+                "name": "supertrend",
+                "type": "function",
+                "params": {
+                    "field": "close",
+                    "output": "supertrend",
+                    "period": 10,
+                    "multiplier": 3
+                }
+            },
+            "operator": ">"
+        },
+        {
+            "left": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "right": {
+                "name": "high",
+                "type": "function",
+                "params": {
+                    "offset": 1,
+                    "output": "price"
+                }
+            },
+            "operator": ">="
+        },
+        {
+            "left": {
+                "name": "close",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "right": {
+                "name": "open",
+                "type": "function",
+                "params": {
+                    "output": "price"
+                }
+            },
+            "operator": ">"
+        }
+    ],
+    "condition": "AND"
+}

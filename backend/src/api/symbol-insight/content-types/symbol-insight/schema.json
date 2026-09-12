@@ -1,0 +1,110 @@
+{
+  "kind": "collectionType",
+  "collectionName": "symbol_insights",
+  "info": {
+    "singularName": "symbol-insight",
+    "pluralName": "symbol-insights",
+    "displayName": "SymbolInsight",
+    "description": "Historical strategy insight statistics per symbol"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string"
+    },
+    "savedAt": {
+      "type": "datetime"
+    },
+    "startDate": {
+      "type": "string"
+    },
+    "endDate": {
+      "type": "string"
+    },
+    "timeframe": {
+      "type": "string",
+      "default": "D1"
+    },
+    "totalCandles": {
+      "type": "integer"
+    },
+    "spreadMinPrice": {
+      "type": "decimal"
+    },
+    "spreadMinPercent": {
+      "type": "decimal"
+    },
+    "spreadP25Price": {
+      "type": "decimal"
+    },
+    "spreadP25Percent": {
+      "type": "decimal"
+    },
+    "spreadMedianPrice": {
+      "type": "decimal"
+    },
+    "spreadMedianPercent": {
+      "type": "decimal"
+    },
+    "spreadP75Price": {
+      "type": "decimal"
+    },
+    "spreadP75Percent": {
+      "type": "decimal"
+    },
+    "spreadP90Price": {
+      "type": "decimal"
+    },
+    "spreadP90Percent": {
+      "type": "decimal"
+    },
+    "spreadP99Price": {
+      "type": "decimal"
+    },
+    "spreadP99Percent": {
+      "type": "decimal"
+    },
+    "spreadMaxPrice": {
+      "type": "decimal"
+    },
+    "spreadMaxPercent": {
+      "type": "decimal"
+    },
+    "spreadAvgPrice": {
+      "type": "decimal"
+    },
+    "spreadAvgPercent": {
+      "type": "decimal"
+    },
+    "bestBullHour": {
+      "type": "string"
+    },
+    "bestBearHour": {
+      "type": "string"
+    },
+    "bestBullDay": {
+      "type": "string"
+    },
+    "bestBearDay": {
+      "type": "string"
+    },
+    "bestMonth": {
+      "type": "string"
+    },
+    "worstMonth": {
+      "type": "string"
+    },
+    "details": {
+      "type": "json"
+    },
+    "symbol": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::symbol.symbol",
+      "inversedBy": "symbol_insights"
+    }
+  }
+}

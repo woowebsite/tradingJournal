@@ -61,22 +61,47 @@ Sau đó chạy lệnh sau để khởi tạo domain
 npx ngrok http 1337
 ```
 
-## 📚 Learn more
+## 📚 TCBS API
+### Dư mua / Dư bán - limit order
+https://apiextaws.tcbs.com.vn/futures-insight/v1/intraday/41I1G9000/bid-ask?mode=baAll
+```json
+{
+  "avgOBPercent": [
+    {
+      "aobp": 0.509, // Trung bình 5 ngày dư mua % (5-day Average Over-Bid %)
+      "avsp": 0.22,  // Trung bình spread (Average Spread)
+      "t": "09:00"   // Thời gian hiện tại (HH:MM)
+    }
+  ],
+  "overBidAskLog": [
+    {
+      "bs": 17421,  // Khối lượng dư mua (Buy Size / Bid Volume)
+      "oa": 39631,  // Khối lượng dư bán (Over Ask / Ask Volume)
+      "obp": 0.305, // Tỷ lệ dư mua % (Over-Bid %)
+      "osp": 0.695, // Tỷ lệ dư bán % (Over-Ask %)
+      "sp": 0.2,    // Spread giữa giá mua và giá bán (Price Spread)
+      "t": "09:00"   // Thời gian hiện tại (HH:MM)
+    }
+  ],
+  "ticker": "41I1G9000"
+}
+```
+ {
+    n: số lệnh khớp,
+    tv: Khối lượng,
+    p: price
+ }
 
-- [Resource center](https://strapi.io/resource-center) - Strapi resource center.
-- [Strapi documentation](https://docs.strapi.io) - Official Strapi documentation.
-- [Strapi tutorials](https://strapi.io/tutorials) - List of tutorials made by the core team and the community.
-- [Strapi blog](https://strapi.io/blog) - Official Strapi blog containing articles made by the Strapi team and the community.
-- [Changelog](https://strapi.io/changelog) - Find out about the Strapi product updates, new features and general improvements.
-
-Feel free to check out the [Strapi GitHub repository](https://github.com/strapi/strapi). Your feedback and contributions are welcome!
-
-## ✨ Community
-
-- [Discord](https://discord.strapi.io) - Come chat with the Strapi community including the core team.
-- [Forum](https://forum.strapi.io/) - Place to discuss, ask questions and find answers, show your Strapi project and get feedback or just talk with other Community members.
-- [Awesome Strapi](https://github.com/strapi/awesome-strapi) - A curated list of awesome things related to Strapi.
-
----
-
-<sub>🤫 Psst! [Strapi is hiring](https://strapi.io/careers).</sub>
+### Cung cầu - market order
+https://apiextaws.tcbs.com.vn/futures-insight/v1/intraday/41I1G9000/bsa-ext?timeWindow=5&tWindow=60m&type=all
+ {
+    "bu": 699, // Mua chủ động số lệnh,
+    "bms": 699, // Mua chủ động số lệnh,
+    "bup": 0.257, // Mua chủ động %,
+    "sd": 2017, // Bán chủ động số lệnh,
+    "sms": 2017, // Bán chủ động số lệnh,
+    "sdp": 0.743, // Bán chủ động %,
+    "bsr": 0.347, // Tỷ lệ mua/bán,
+    "t": "09:00", // Thời gian hiện tại (HH:MM),
+    "s": 1787882400 // Thời gian hiện tại (Timestamp),
+}

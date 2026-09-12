@@ -1,0 +1,35 @@
+{
+  "kind": "collectionType",
+  "collectionName": "scoreds",
+  "info": {
+    "singularName": "scored",
+    "pluralName": "scoreds",
+    "displayName": "Scored",
+    "description": "Scored definitions grouped by market"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Label": {
+      "type": "string",
+      "required": true
+    },
+    "Description": {
+      "type": "text"
+    },
+    "Market": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::market.market",
+      "inversedBy": "scoreds"
+    },
+    "trades": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::trade.trade",
+      "mappedBy": "scoreds"
+    }
+  }
+}

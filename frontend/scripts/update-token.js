@@ -51,6 +51,27 @@ try {
       console.log(`\x1b[32mSuccessfully updated VITE_TCBS_TOKEN in ${file}\x1b[0m`);
     }
   }
+
+  // 3. Update TCBS_TOKEN in backend/.env
+  const backendRoot = path.join(frontendRoot, '../backend');
+  const backendEnvPath = path.join(backendRoot, '.env');
+
+  if (fs.existsSync(backendEnvPath)) {
+    let backendEnvContent = fs.readFileSync(backendEnvPath, 'utf8');
+    const backendTokenRegex = /^TCBS_TOKEN=.*$/m;
+
+    if (backendTokenRegex.test(backendEnvContent)) {
+      backendEnvContent = backendEnvContent.replace(backendTokenRegex, `TCBS_TOKEN=${authToken}`);
+    } else {
+      // If the file doesn't have TCBS_TOKEN, append it
+      backendEnvContent = backendEnvContent.trim() + `\nTCBS_TOKEN=${authToken}\n`;
+    }
+
+    fs.writeFileSync(backendEnvPath, backendEnvContent, 'utf8');
+    console.log(`\x1b[32mSuccessfully updated TCBS_TOKEN in backend/.env\x1b[0m`);
+  } else {
+    console.warn(`\x1b[33mWarning: backend/.env file not found at ${backendEnvPath}\x1b[0m`);
+  }
 } catch (error) {
   console.error("\x1b[31mAn error occurred while updating the token:\x1b[0m", error.message);
   process.exit(1);

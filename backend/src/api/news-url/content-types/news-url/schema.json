@@ -1,0 +1,27 @@
+{
+  "kind": "collectionType",
+  "collectionName": "news_urls",
+  "info": {
+    "singularName": "news-url",
+    "pluralName": "news-urls",
+    "displayName": "NewsUrl"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "url": {
+      "type": "string",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "source",
+        "ignore"
+      ],
+      "required": true
+    }
+  }
+}

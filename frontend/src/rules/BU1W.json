@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "left": {
+        "type": "field",
+        "value": "close"
+      },
+      "right": {
+        "name": "highest_weekly",
+        "type": "function",
+        "params": {
+          "field": "high",
+          "offset": 1,
+          "period": 2
+        }
+      },
+      "operator": ">",
+      "identifier": "price_check"
+    }
+  ],
+  "condition": "AND"
+}

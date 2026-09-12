@@ -35,6 +35,12 @@
       "relation": "oneToMany",
       "target": "api::webhook-signal.webhook-signal",
       "mappedBy": "webhook"
+    },
+    "strategies": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::strategy.strategy",
+      "mappedBy": "webhook"
     }
   }
 }

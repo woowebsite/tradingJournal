@@ -1,67 +1,84 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchSymbols, createSymbol, updateSymbol, deleteSymbol } from '../features/symbolSlice';
-import { Save, X, Edit2, Trash2, Tag } from 'lucide-react';
+import { Edit2, Trash2, Tag, History, BrainCircuit, Plus, Search, Filter } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import { deleteAllHistories } from '../features/marketSlice';
+import { getStrategyTemplates } from '../services/strategyTemplate';
+import api from '../services/api';
+import SymbolModal from '../components/SymbolModal';
 
 const ManageSymbols = () => {
     const dispatch = useDispatch();
     const { items: symbols, loading } = useSelector(state => state.symbols);
     const { selectedAccount } = useAccount();
 
-    const [formData, setFormData] = useState({
-        Name: '',
-        Description: '',
-        exchange: '',
-        sector: ''
-    });
-    const [editingId, setEditingId] = useState(null); // ID of symbol being edited
+    const [templates, setTemplates] = useState([]);
+    const [markets, setMarkets] = useState([]);
+    const [selectedMarketId, setSelectedMarketId] = useState('');
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingSymbol, setEditingSymbol] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const initializedMarketRef = useRef(false);
 
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
+    // Fetch list of all markets
+    useEffect(() => {
+        api.get('/markets?sort=Name:asc&pagination[pageSize]=1000')
+            .then(res => {
+                const list = res?.data?.data || [];
+                setMarkets(list);
+            })
+            .catch(err => console.error('Failed to load markets:', err));
+    }, []);
 
-    const handleEdit = (symbol) => {
-        setFormData({
-            Name: symbol.Name,
-            Description: symbol.Description || '',
-            exchange: symbol.exchange || '',
-            sector: symbol.sector || ''
-        });
-        setEditingId(symbol.id || symbol.documentId);
-        // Scroll to top
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-
-    const handleCancel = () => {
-        setFormData({ Name: '', Description: '', exchange: '', sector: '' });
-        setEditingId(null);
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-
-        // Suffix-aware duplicate check
-        const cleanName = (name) => name.replace(/:(HOSE|HNX|UPCOM)$/i, "").trim().toUpperCase();
-        const baseInput = cleanName(formData.Name);
-
-        const isDuplicate = symbols.some(s => {
-            // Don't check against the record being edited
-            const symId = s.id || s.documentId;
-            if (editingId && symId === editingId) return false;
-            return cleanName(s.Name) === baseInput;
-        });
-
-        if (isDuplicate) {
-            alert(`Symbol "${baseInput}" (or similar with suffix) already exists in this market.`);
-            return;
+    // Initialize market filter based on current account's market on first load
+    useEffect(() => {
+        if (!initializedMarketRef.current && selectedAccount?.market) {
+            const accMarketId = selectedAccount.market.documentId || selectedAccount.market.id || '';
+            if (accMarketId) {
+                setSelectedMarketId(String(accMarketId));
+                initializedMarketRef.current = true;
+            }
         }
+    }, [selectedAccount?.market]);
 
+    // Fetch symbols based on selected market filter
+    useEffect(() => {
+        dispatch(fetchSymbols(selectedMarketId || null));
+    }, [dispatch, selectedMarketId]);
+
+    // Fetch strategy templates
+    useEffect(() => {
+        getStrategyTemplates()
+            .then(data => setTemplates(data || []))
+            .catch(err => console.error('Failed to load strategy templates:', err));
+    }, []);
+
+    const handleOpenCreate = () => {
+        setEditingSymbol(null);
+        setIsModalOpen(true);
+    };
+
+    const handleOpenEdit = (symbol) => {
+        setEditingSymbol(symbol);
+        setIsModalOpen(true);
+    };
+
+    const handleCloseModal = () => {
+        setIsModalOpen(false);
+        setEditingSymbol(null);
+    };
+
+    const handleModalSubmit = async (payload, editingId) => {
+        setIsSubmitting(true);
         try {
-            const payload = { ...formData };
-            if (selectedAccount?.market) {
-                payload.market = selectedAccount.market.documentId || selectedAccount.market.id;
+            if (!payload.market) {
+                if (selectedMarketId) {
+                    payload.market = selectedMarketId;
+                } else if (selectedAccount?.market) {
+                    payload.market = selectedAccount.market.documentId || selectedAccount.market.id;
+                }
             }
 
             if (editingId) {
@@ -69,15 +86,18 @@ const ManageSymbols = () => {
             } else {
                 await dispatch(createSymbol(payload)).unwrap();
             }
-            handleCancel();
+
+            dispatch(fetchSymbols(selectedMarketId || null));
+            handleCloseModal();
         } catch (err) {
-            // Strapi error structure handling
             const errorMsg = err?.error?.message || err?.message || 'Unknown error';
             if (errorMsg.includes('must be unique')) {
                 alert('Symbol name must be unique. This name is already taken.');
             } else {
                 alert(`Failed to save symbol: ${errorMsg}`);
             }
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -85,158 +105,225 @@ const ManageSymbols = () => {
         if (!window.confirm('Are you sure you want to delete this symbol?')) return;
         try {
             await dispatch(deleteSymbol(id)).unwrap();
-            if (editingId === id) handleCancel();
         } catch (error) {
             alert(`Failed to delete symbol: ${error}`);
         }
     };
 
+    const handleClearHistory = async (symbol) => {
+        const symbolId = symbol.documentId || symbol.id || symbol.Name;
+        if (!symbolId) return;
+        if (!window.confirm(`Are you sure you want to CLEAR ALL history records for ${symbol.Name}? This action cannot be undone.`)) return;
+        try {
+            const count = await dispatch(deleteAllHistories(symbolId)).unwrap();
+            alert(`Successfully cleared ${count} history records for ${symbol.Name}`);
+        } catch (error) {
+            alert(`Failed to clear history: ${error}`);
+        }
+    };
+
+    const getAssignedTemplate = (symbol) => {
+        const assigned = symbol.strategy_template;
+        if (!assigned) return null;
+        if (typeof assigned === 'object' && assigned.name) {
+            return assigned;
+        }
+        const targetId = assigned?.documentId || assigned?.id || assigned;
+        return templates.find(t =>
+            String(t.documentId || t.id) === String(targetId) ||
+            String(t.id) === String(targetId)
+        ) || null;
+    };
+
+    const filteredSymbols = useMemo(() => {
+        return symbols.filter(s => {
+            if (selectedMarketId) {
+                const sMarketId = s.market?.documentId || s.market?.id || (typeof s.market === 'string' || typeof s.market === 'number' ? s.market : '');
+                if (sMarketId && String(sMarketId) !== String(selectedMarketId)) {
+                    return false;
+                }
+            }
+
+            if (!searchTerm.trim()) return true;
+            const q = searchTerm.trim().toLowerCase();
+            const marketName = s.market?.Name || s.market?.name || '';
+            return (
+                (s.Name && s.Name.toLowerCase().includes(q)) ||
+                (s.exchange && s.exchange.toLowerCase().includes(q)) ||
+                (s.sector && s.sector.toLowerCase().includes(q)) ||
+                (s.Description && s.Description.toLowerCase().includes(q)) ||
+                (marketName && marketName.toLowerCase().includes(q))
+            );
+        });
+    }, [symbols, searchTerm, selectedMarketId]);
+
     return (
-        <div className="p-6 max-w-7xl mx-auto space-y-8">
-            {/* Header */}
-            <div>
-                <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                    <Tag className="text-purple-500" size={32} />
-                    Manage Symbols
-                </h1>
-                <p className="text-gray-400 mt-2">Create and manage your trading symbols.</p>
-            </div>
-
-            {/* Form Section */}
-            <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 shadow-lg">
-                <h2 className="text-xl font-bold text-white mb-4">
-                    {editingId ? 'Edit Symbol' : 'Create New Symbol'}
-                </h2>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Name</label>
-                            <input
-                                type="text"
-                                name="Name"
-                                value={formData.Name}
-                                onChange={handleChange}
-                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                                required
-                                placeholder="e.g. BTCUSD"
-                            />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-400 mb-1">Exchange</label>
-                                <input
-                                    type="text"
-                                    name="exchange"
-                                    value={formData.exchange}
-                                    onChange={handleChange}
-                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                                    placeholder="e.g. HOSE, HNX"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-400 mb-1">Sector (Industry)</label>
-                                <input
-                                    type="text"
-                                    name="sector"
-                                    value={formData.sector}
-                                    onChange={handleChange}
-                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                                    placeholder="e.g. Banks"
-                                />
-                            </div>
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Description</label>
-                            <textarea
-                                name="Description"
-                                value={formData.Description}
-                                onChange={handleChange}
-                                rows="2"
-                                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                                placeholder="Optional description"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="flex gap-3 pt-2">
-                        <button
-                            type="submit"
-                            className="flex items-center gap-2 px-6 py-2 bg-purple-600 rounded-lg hover:bg-purple-700 transition font-medium text-white shadow-lg shadow-purple-500/20"
-                        >
-                            <Save size={18} />
-                            {editingId ? 'Update Symbol' : 'Save Symbol'}
-                        </button>
-                        {editingId && (
-                            <button
-                                type="button"
-                                onClick={handleCancel}
-                                className="flex items-center gap-2 px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition font-medium text-gray-300"
-                            >
-                                <X size={18} />
-                                Cancel
-                            </button>
-                        )}
-                    </div>
-                </form>
+        <div className="p-6 max-w-7xl mx-auto space-y-6">
+            {/* Header & Actions */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                        <Tag className="text-purple-500" size={32} />
+                        Manage Symbols
+                    </h1>
+                    <p className="text-gray-400 mt-1">Quản lý danh sách các mã giao dịch và gán Python Strategy Template tương ứng.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={handleOpenCreate}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium rounded-xl shadow-lg shadow-purple-500/25 transition cursor-pointer"
+                    >
+                        <Plus size={18} />
+                        Thêm Symbol Mới
+                    </button>
+                </div>
             </div>
 
             {/* Table Section */}
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg">
-                <div className="p-6 border-b border-gray-700">
-                    <h2 className="text-xl font-bold text-white">Symbol List</h2>
+                <div className="p-4 sm:p-6 border-b border-gray-700 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-white">Symbol List</h2>
+                        <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-700 text-gray-300 font-semibold">
+                            {filteredSymbols.length} {filteredSymbols.length === symbols.length ? 'symbols' : `of ${symbols.length}`}
+                        </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        {/* Market Filter */}
+                        <div className="flex items-center gap-2 bg-gray-900/70 border border-gray-600 rounded-lg px-3 py-1.5 focus-within:border-purple-500 transition">
+                            <Filter size={15} className="text-purple-400 shrink-0" />
+                            <select
+                                value={selectedMarketId}
+                                onChange={(e) => setSelectedMarketId(e.target.value)}
+                                className="bg-transparent text-sm text-white focus:outline-none cursor-pointer pr-2"
+                            >
+                                <option value="" className="bg-gray-800 text-white">-- Tất cả Market --</option>
+                                {markets.map(m => {
+                                    const mId = m.documentId || m.id;
+                                    const mName = m.Name || m.name || 'Unknown Market';
+                                    return (
+                                        <option key={mId} value={mId} className="bg-gray-800 text-white">
+                                            {mName}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+
+                        {/* Search Bar */}
+                        <div className="relative w-full sm:w-64">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <input
+                                type="text"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                placeholder="Tìm kiếm symbol, sàn, ngành..."
+                                className="w-full bg-gray-900/70 border border-gray-600 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition"
+                            />
+                        </div>
+                    </div>
                 </div>
-                <div className="overflow-auto max-h-[600px]">
+
+                <div className="overflow-auto max-h-[650px]">
                     <table className="w-full text-left">
-                        <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase tracking-wider">
+                        <thead className="bg-gray-900/60 text-gray-400 text-xs uppercase tracking-wider sticky top-0 backdrop-blur-sm z-10">
                             <tr>
-                                <th className="px-6 py-3 font-medium">Name</th>
-                                <th className="px-6 py-3 font-medium">Exchange</th>
-                                <th className="px-6 py-3 font-medium">Sector</th>
-                                <th className="px-6 py-3 font-medium">Description</th>
-                                <th className="px-6 py-3 font-medium text-right">Actions</th>
+                                <th className="px-6 py-3.5 font-medium">Name</th>
+                                <th className="px-6 py-3.5 font-medium">Market</th>
+                                <th className="px-6 py-3.5 font-medium">Exchange</th>
+                                <th className="px-6 py-3.5 font-medium">Sector</th>
+                                <th className="px-6 py-3.5 font-medium">Strategy Template</th>
+                                <th className="px-6 py-3.5 font-medium">Description</th>
+                                <th className="px-6 py-3.5 font-medium text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
                             {loading && symbols.length === 0 ? (
                                 <tr>
-                                    <td colSpan="5" className="px-6 py-8 text-center text-gray-500">Loading...</td>
+                                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">Đang tải danh sách symbols...</td>
                                 </tr>
-                            ) : symbols.length === 0 ? (
+                            ) : filteredSymbols.length === 0 ? (
                                 <tr>
-                                    <td colSpan="5" className="px-6 py-8 text-center text-gray-500">No symbols found for this market.</td>
+                                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                                        {searchTerm ? 'Không tìm thấy symbol nào khớp với từ khóa tìm kiếm.' : 'Chưa có symbol nào trong thị trường này.'}
+                                    </td>
                                 </tr>
                             ) : (
-                                symbols.map(symbol => (
-                                    <tr key={symbol.id} className="hover:bg-gray-700/50 transition">
-                                        <td className="px-6 py-4 text-white font-medium">{symbol.Name}</td>
-                                        <td className="px-6 py-4 text-gray-300 text-sm whitespace-nowrap">{symbol.exchange || '-'}</td>
-                                        <td className="px-6 py-4 text-gray-300 text-sm">{symbol.sector || '-'}</td>
-                                        <td className="px-6 py-4 text-gray-400 max-w-xs truncate">{symbol.Description || '-'}</td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex justify-end gap-2">
-                                                <button
-                                                    onClick={() => handleEdit(symbol)}
-                                                    className="p-1.5 text-blue-400 hover:bg-blue-900/30 rounded transition cursor-pointer"
-                                                    title="Edit"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(symbol.id || symbol.documentId)}
-                                                    className="p-1.5 text-red-400 hover:bg-red-900/30 rounded transition cursor-pointer"
-                                                    title="Delete"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
+                                filteredSymbols.map(symbol => {
+                                    const assignedTpl = getAssignedTemplate(symbol);
+                                    return (
+                                        <tr key={symbol.id || symbol.documentId} className="hover:bg-gray-700/50 transition">
+                                            <td className="px-6 py-4 text-white font-medium">{symbol.Name}</td>
+                                            <td className="px-6 py-4 text-sm whitespace-nowrap">
+                                                {symbol.market?.Name || symbol.market?.name ? (
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900/40 text-blue-300 border border-blue-700/40">
+                                                        {symbol.market?.Name || symbol.market?.name}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-500 text-xs italic">-</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-gray-300 text-sm whitespace-nowrap">{symbol.exchange || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 text-sm">{symbol.sector || '-'}</td>
+                                            <td className="px-6 py-4 text-sm">
+                                                {assignedTpl ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-purple-900/50 text-purple-300 border border-purple-700/50">
+                                                        <BrainCircuit size={13} className="text-purple-400 shrink-0" />
+                                                        <span className="truncate max-w-[200px]">{assignedTpl.name}</span>
+                                                        <span className="text-[10px] opacity-75 font-mono">[{assignedTpl.timeframe || 'D1'}]</span>
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-500 text-xs italic">Chưa gắn template</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-gray-400 max-w-xs truncate text-sm">{symbol.Description || '-'}</td>
+                                            <td className="px-6 py-4 text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <button
+                                                        onClick={() => handleOpenEdit(symbol)}
+                                                        className="p-1.5 text-blue-400 hover:bg-blue-900/30 rounded-lg transition cursor-pointer"
+                                                        title="Chỉnh sửa Symbol"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleClearHistory(symbol)}
+                                                        className="p-1.5 text-amber-400 hover:bg-amber-900/30 rounded-lg transition cursor-pointer"
+                                                        title="Xóa lịch sử nến"
+                                                    >
+                                                        <History size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(symbol.id || symbol.documentId)}
+                                                        className="p-1.5 text-red-400 hover:bg-red-900/30 rounded-lg transition cursor-pointer"
+                                                        title="Xóa Symbol"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>
                 </div>
             </div>
+
+            {/* Symbol Create/Edit Modal */}
+            <SymbolModal
+                isOpen={isModalOpen}
+                onClose={handleCloseModal}
+                onSubmit={handleModalSubmit}
+                symbol={editingSymbol}
+                templates={templates}
+                markets={markets}
+                defaultMarketId={selectedMarketId}
+                existingSymbols={symbols}
+                isSubmitting={isSubmitting}
+            />
         </div>
     );
 };

@@ -1,0 +1,35 @@
+{
+  "kind": "collectionType",
+  "collectionName": "tcbs_recommens",
+  "info": {
+    "singularName": "tcbs-recommen",
+    "pluralName": "tcbs-recommens",
+    "displayName": "TCBSRecommen"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "d": {
+      "type": "date",
+      "required": true
+    },
+    "ticker": {
+      "type": "string",
+      "required": true
+    },
+    "type": {
+      "type": "integer"
+    },
+    "value": {
+      "type": "decimal"
+    },
+    "reason": {
+      "type": "text"
+    },
+    "listHisBuy": {
+      "type": "json"
+    }
+  }
+}

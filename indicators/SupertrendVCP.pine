@@ -1,0 +1,1224 @@
+//@version=6
+strategy(
+     title                   = "Supertrend VCP Consolidation Breakout Strategy",
+     shorttitle              = "Supertrend VCP",
+     overlay                 = true,
+     initial_capital         = 1000000,
+     default_qty_type        = strategy.percent_of_equity,
+     default_qty_value       = 10,
+     margin_long             = 0,
+     margin_short            = 0,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.05,
+     process_orders_on_close = true,
+     max_boxes_count         = 500,
+     max_labels_count        = 500,
+     max_lines_count         = 500
+ )
+
+// ==============================================================================
+// 1. INPUTS & SETTINGS
+// ==============================================================================
+
+// --- Group 1: Cấu hình & Tối ưu hóa ---
+grp_st          = "1. Cấu hình & Tối ưu hóa"
+useBestConfig   = input.bool(true, "Quét tìm Best Config (Tối ưu Profit Factor)", group = grp_st, tooltip = "Bật để hệ thống tự động quét qua 16 tổ hợp thông số (Supertrend, VCP, SL, RRR, BE, Volume Filter) và tìm ra cấu hình cho Profit Factor lớn nhất trên biểu đồ hiện tại.")
+autoApplyMode   = input.string("Tự động áp dụng Best Config (Auto Best)", "Chế độ Áp dụng Cấu hình", 
+                     options = [
+                         "Tự động áp dụng Best Config (Auto Best)",
+                         "Thủ công (Dùng thông số các mục bên dưới)",
+                         "Preset 0: Mặc định (ST 10/3, RRR 2.0, No BE)",
+                         "Preset 1: ST 10/3, RRR 1.5, BE 1.0",
+                         "Preset 2: ST 10/3, RRR 2.5, BE 1.5",
+                         "Preset 3: ST 10/3, SL Supertrend, BE 1.5",
+                         "Preset 4: ST 10/3, SL ATR 1.5x, BE 1.5",
+                         "Preset 5: ST 10/2, RRR 2.0, BE 1.5",
+                         "Preset 6: ST 10/2, RRR 1.5, No BE",
+                         "Preset 7: ST 10/2, RRR 2.5, SL Supertrend",
+                         "Preset 8: ST 14/2.5, RRR 2.0, BE 1.5",
+                         "Preset 9: ST 14/2.5, RRR 3.0, SL Supertrend",
+                         "Preset 10: ST 7/1.5 Scalp, RRR 1.5, BE 1.0",
+                         "Preset 11: Chỉ mô hình 2.1 (ATR dưới SMA)",
+                         "Preset 12: Chỉ mô hình 2.2 (Hộp ATR)",
+                         "Preset 13: Chỉ mô hình 2.3 (Nến hẹp liên tiếp)",
+                         "Preset 14: Tắt bộ lọc Volume",
+                         "Preset 15: ST 10/3, RRR 3.0, BE 2.0"
+                     ], 
+                     group = grp_st,
+                     tooltip = "Tự động áp dụng Best Config: Tự động chạy lệnh thực tế trên biểu đồ theo cấu hình tối ưu nhất tìm được sau khi scan mà không cần chỉnh tay.\nThủ công: Chạy theo các input do bạn tự nhập.\nPreset 0..15: Chọn nhanh bất kỳ preset nào.")
+optTablePos     = input.string("Bottom Right", "Vị trí Bảng Best Config", 
+                     options = ["Top Left", "Bottom Left", "Top Right", "Bottom Right", "Middle Right"], 
+                     group = grp_st)
+stAtrPeriod     = input.int(10, "Supertrend ATR Period (Thủ công)", minval = 1, group = grp_st, tooltip = "Chu kỳ tính ATR cho Supertrend khi dùng chế độ Thủ công.")
+stFactor        = input.float(3.0, "Supertrend Factor (Thủ công)", minval = 0.1, step = 0.1, group = grp_st, tooltip = "Hệ số nhân độ lệch dải ATR của Supertrend khi dùng chế độ Thủ công.")
+allowLong       = input.bool(true, "Long Trade", group = grp_st)
+allowShort      = input.bool(true, "Short Trade", group = grp_st)
+
+// --- Group 2.1: Nhận diện theo ATR dưới SMA ---
+grp_vcp_atr     = "2.1 Nhận diện Tích lũy: ATR dưới SMA (ATR vs SMA)"
+useAtrSmaMode   = input.bool(true, "Kích hoạt mô hình ATR dưới SMA", group = grp_vcp_atr, tooltip = "Bật để nhận diện tích lũy khi ATR nén dưới SMA của nó rồi cắt lên kết hợp giá bứt phá đỉnh (Long) hoặc đáy (Short).")
+atrSmaLen_atr   = input.int(6, "Chu kỳ ATR nén (ATR Length)", minval = 1, group = grp_vcp_atr, tooltip = "Chu kỳ ATR đo biến động ngắn hạn (Mặc định: 6).")
+atrSmaLen_sma   = input.int(6, "Chu kỳ SMA của ATR", minval = 1, group = grp_vcp_atr, tooltip = "Chu kỳ đường trung bình SMA của ATR (Mặc định: 6).")
+atrSmaCrossMode = input.string("ATR cắt lên SMA (Crossover)", "Điều kiện bùng nổ ATR", 
+                     options = ["ATR cắt lên SMA (Crossover)", "ATR trước đó < SMA & hiện tại >= SMA"], 
+                     group = grp_vcp_atr,
+                     tooltip = "Crossover: ATR vừa cắt lên SMA trên nến hiện tại.\nTrước đó < SMA: Nến trước ATR dưới SMA và nến này ATR lớn hơn hoặc bằng SMA.")
+atrSmaLookback  = input.int(6, "Số nến tham chiếu đỉnh/đáy (N)", minval = 1, maxval = 30, group = grp_vcp_atr, tooltip = "Số nến trước đó dùng để xác định đỉnh/đáy Breakout và SL.")
+
+// --- Group 2.2: Nhận diện theo Biên độ Hộp ATR ---
+grp_vcp_box     = "2.2 Nhận diện Tích lũy: Biên độ Hộp ATR (Box ATR)"
+useBoxAtrMode   = input.bool(true, "Kích hoạt mô hình Hộp ATR", group = grp_vcp_box, tooltip = "Bật để nhận diện tích lũy khi chiều cao cả vùng N nến <= X * ATR.")
+boxAtrBars      = input.int(3, "Số nến tích lũy trong hộp (N)", minval = 2, maxval = 30, group = grp_vcp_box, tooltip = "Số lượng nến nén trước nến Breakout.")
+boxAtrThreshold = input.float(1.5, "Ngưỡng chiều cao Hộp (x ATR)", minval = 0.2, step = 0.1, group = grp_vcp_box, tooltip = "Chiều cao vùng N nến (Highest High - Lowest Low) <= ATR * Hệ số này.")
+
+// --- Group 2.3: Nhận diện theo Nến hẹp liên tiếp ---
+grp_vcp_narrow  = "2.3 Nhận diện Tích lũy: Nến hẹp liên tiếp (Narrow Bars)"
+useNarrowMode   = input.bool(true, "Kích hoạt mô hình Nến hẹp liên tiếp", group = grp_vcp_narrow, tooltip = "Bật để nhận diện tích lũy khi từng cây nến trong chuỗi N nến đều có biên độ hẹp.")
+narrowBarsCount = input.int(3, "Số nến hẹp liên tiếp (N)", minval = 2, maxval = 30, group = grp_vcp_narrow, tooltip = "Số lượng nến hẹp liên tiếp.")
+barAtrThreshold = input.float(0.85, "Ngưỡng từng nến hẹp (x ATR)", minval = 0.1, step = 0.05, group = grp_vcp_narrow, tooltip = "Biên độ (High - Low) của từng nến <= ATR * Hệ số này.")
+
+// --- Group 2.4: Nhận diện theo Biên độ Phần trăm (%) ---
+grp_vcp_pct     = "2.4 Nhận diện Tích lũy: Biên độ Phần trăm (%)"
+usePctMode      = input.bool(true, "Kích hoạt mô hình Biên độ Phần trăm (%)", group = grp_vcp_pct, tooltip = "Bật để nhận diện tích lũy khi biên độ dao động cả vùng N nến <= X%.")
+pctBars         = input.int(3, "Số nến tích lũy (N)", minval = 2, maxval = 30, group = grp_vcp_pct, tooltip = "Số nến tích lũy.")
+pctThreshold    = input.float(2.0, "Ngưỡng biến động tối đa (%)", minval = 0.1, step = 0.1, group = grp_vcp_pct, tooltip = "Biên độ dao động (Highest - Lowest) / Lowest * 100 <= Ngưỡng này.")
+
+// --- Group 3: Cấu hình Vào lệnh Breakout ---
+grp_entry       = "3. Cấu hình Vào lệnh (Entry Logic)"
+followTrend     = input.bool(true, "Follow Trend (Lọc xu hướng theo SMA)", group = grp_entry, tooltip = "Bật để chỉ Long khi Close > SMA Trend, chỉ Short khi Close < SMA Trend.")
+smaTrendLen     = input.int(288, "Chu kỳ SMA Trend", minval = 1, group = grp_entry, tooltip = "Chu kỳ SMA dùng để xác định xu hướng lớn.")
+breakoutType    = input.string("Đóng cửa vượt đỉnh/đáy (Close)", "Tiêu chuẩn Breakout/Breakdown", 
+                     options = ["Đóng cửa vượt đỉnh/đáy (Close)", "Râu nến vượt đỉnh/đáy (High/Low)"], 
+                     group = grp_entry)
+requireColoredBar = input.bool(true, "Yêu cầu nến thuận chiều (Xanh khi Long / Đỏ khi Short)", group = grp_entry)
+useVolFilter    = input.bool(true, "Kích hoạt bộ lọc Khối lượng (Volume Filter)", group = grp_entry, tooltip = "Bật nếu muốn nến Breakout phải có Volume cao hơn trung bình SMA Volume.")
+volSmaLen       = input.int(10, "Chu kỳ SMA Volume", minval = 1, group = grp_entry)
+volMultiplier   = input.float(1.1, "Hệ số Volume tối thiểu (x SMA Vol)", minval = 0.5, step = 0.1, group = grp_entry)
+
+// --- Group 4: Quản trị rủi ro & Thoát lệnh ---
+grp_exit        = "4. Thoát lệnh & Quản trị rủi ro (Exit & Risk Management)"
+exitOnStFlip    = input.bool(true, "Thoát lệnh khi Supertrend đảo chiều (Primary Exit)", group = grp_exit, tooltip = "Đóng lệnh Long khi Supertrend sang Đỏ, đóng lệnh Short khi Supertrend sang Xanh.")
+useStopLoss     = input.bool(true, "Sử dụng Stop Loss (Cắt lỗ)", group = grp_exit)
+slType          = input.string("Đáy/Đỉnh hộp tích lũy", "Cách tính Stop Loss", 
+                     options = ["Đáy/Đỉnh hộp tích lũy", "Dưới/Trên đường Supertrend", "Theo ATR"], 
+                     group = grp_exit)
+slAtrMultiplier = input.float(1.5, "Hệ số ATR Stop Loss", minval = 0.5, step = 0.1, group = grp_exit, tooltip = "Chỉ dùng khi chọn SL Theo ATR.")
+slBufferTicks   = input.int(2, "Số tick đệm dưới/trên mức SL", minval = 0, group = grp_exit)
+useBreakEven    = input.bool(false, "Dời Stop Loss về Hòa Vốn (Break-Even / BE)", group = grp_exit, tooltip = "Tự động dời Stop Loss về mức giá vào lệnh (Entry Price) sau khi giá đạt tỷ lệ RRR mục tiêu.")
+beRrrTrigger    = input.float(1.5, "Ngưỡng RRR kích hoạt BE", minval = 0.1, step = 0.1, group = grp_exit, tooltip = "Khi giá đạt mức lãi bằng Hệ số RRR này nhân với khoảng cách SL ban đầu, Stop Loss sẽ được dời về mức hòa vốn (Entry).")
+useTakeProfit   = input.bool(false, "Sử dụng Take Profit (Chốt lời cố định)", group = grp_exit)
+tpRrr           = input.float(2.0, "Tỷ lệ Risk : Reward (RRR)", minval = 0.5, step = 0.1, group = grp_exit, tooltip = "Take Profit tính theo khoảng cách rủi ro của Stop Loss.")
+
+// --- Group 5: Hiển thị Đồ họa & Dashboard ---
+grp_visual          = "5. Trực quan hóa & Bảng thống kê (Visuals & Dashboard)"
+showConsolBoxes     = input.bool(true, "Vẽ hộp vùng tích lũy (Consolidation Boxes)", group = grp_visual)
+showTpSlLines       = input.bool(true, "Vẽ đường mục tiêu TP / SL", group = grp_visual)
+showDashboard       = input.bool(true, "Hiển thị bảng Dashboard thông tin", group = grp_visual)
+dashPosInput        = input.string("Top Right", "Vị trí bảng Dashboard", 
+                         options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right"], 
+                         group = grp_visual)
+showEntryStatsTable = input.bool(true, "Hiển thị Bảng thống kê Kiểu Entry", group = grp_visual)
+entryStatsPosInput  = input.string("Bottom Left", "Vị trí Bảng Kiểu Entry", 
+                         options = ["Bottom Left", "Top Left", "Bottom Right", "Top Right", "Middle Right"], 
+                         group = grp_visual)
+
+// ==============================================================================
+// 2. SUPERTREND ENGINE & CÁC BIẾN THỂ TỐI ƯU HÓA
+// ==============================================================================
+
+// Cấu hình Supertrend người dùng nhập thủ công
+[manualStVal, manualStDir] = ta.supertrend(stFactor, stAtrPeriod)
+bool manFlipBear           = ta.change(manualStDir) > 0
+bool manFlipBull           = ta.change(manualStDir) < 0
+
+// Các biến thể Supertrend phục vụ tối ưu hóa Best Config
+[optStVal1, optStDir1] = ta.supertrend(3.0, 10)
+[optStVal2, optStDir2] = ta.supertrend(2.0, 10)
+[optStVal3, optStDir3] = ta.supertrend(2.5, 14)
+[optStVal4, optStDir4] = ta.supertrend(1.5, 7)
+
+bool optFlipBear1 = ta.change(optStDir1) > 0
+bool optFlipBull1 = ta.change(optStDir1) < 0
+bool optFlipBear2 = ta.change(optStDir2) > 0
+bool optFlipBull2 = ta.change(optStDir2) < 0
+bool optFlipBear3 = ta.change(optStDir3) > 0
+bool optFlipBull3 = ta.change(optStDir3) < 0
+bool optFlipBear4 = ta.change(optStDir4) > 0
+bool optFlipBull4 = ta.change(optStDir4) < 0
+
+// Màu sắc Supertrend
+color stColorBull    = #089981 // Xanh lục ngọc
+color stColorBear    = #f23645 // Đỏ coral
+
+// Đường SMA Trend
+float smaTrendVal = ta.sma(close, smaTrendLen)
+plot(followTrend ? smaTrendVal : na, "SMA Trend Line", color = color.new(#ff9800, 20), linewidth = 2)
+
+// ==============================================================================
+// 3. THUẬT TOÁN NHẬN DIỆN TÍCH LŨY (VCP PATTERNS)
+// ==============================================================================
+
+float atr14      = ta.atr(14)
+float volSma     = ta.sma(volume, volSmaLen)
+bool  isVolValid = not useVolFilter or (volume >= volSma * volMultiplier)
+bool  isLongCandleOk  = not requireColoredBar or (close > open)
+bool  isShortCandleOk = not requireColoredBar or (close < open)
+bool  isSmaLongOk     = not followTrend or (close > smaTrendVal)
+bool  isSmaShortOk    = not followTrend or (close < smaTrendVal)
+
+// --- Group 2.1: ATR dưới SMA ---
+float atrVcpVal         = ta.atr(atrSmaLen_atr)
+float atrVcpSmaVal      = ta.sma(atrVcpVal, atrSmaLen_sma)
+bool  atrCrossUp        = ta.crossover(atrVcpVal, atrVcpSmaVal)
+bool  atrWasUnder       = atrVcpVal[1] < atrVcpSmaVal[1] and atrVcpVal >= atrVcpSmaVal
+bool  isAtrSmaExpansion = (atrSmaCrossMode == "ATR cắt lên SMA (Crossover)") ? atrCrossUp : atrWasUnder
+
+float high21 = ta.highest(high[1], atrSmaLookback)
+float low21  = ta.lowest(low[1], atrSmaLookback)
+bool  breakout21  = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high21) : (high > high21)
+bool  breakdown21 = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low21)  : (low < low21)
+bool  triggerLong21  = useAtrSmaMode and isAtrSmaExpansion and breakout21
+bool  triggerShort21 = useAtrSmaMode and isAtrSmaExpansion and breakdown21
+
+// --- Group 2.2: Biên độ Hộp ATR ---
+float high22     = ta.highest(high[1], boxAtrBars)
+float low22      = ta.lowest(low[1], boxAtrBars)
+float boxHeight  = high22 - low22
+bool  isBoxValid = boxHeight <= (atr14[1] * boxAtrThreshold)
+bool  breakout22  = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high22) : (high > high22)
+bool  breakdown22 = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low22)  : (low < low22)
+bool  triggerLong22  = useBoxAtrMode and isBoxValid and breakout22
+bool  triggerShort22 = useBoxAtrMode and isBoxValid and breakdown22
+
+// --- Group 2.3: Nến hẹp liên tiếp ---
+int narrowCount = 0
+for i = 1 to narrowBarsCount
+    if (high[i] - low[i]) <= (atr14[i] * barAtrThreshold)
+        narrowCount += 1
+bool  isNarrowValid = narrowCount == narrowBarsCount
+float high23        = ta.highest(high[1], narrowBarsCount)
+float low23         = ta.lowest(low[1], narrowBarsCount)
+bool  breakout23    = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high23) : (high > high23)
+bool  breakdown23   = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low23)  : (low < low23)
+bool  triggerLong23  = useNarrowMode and isNarrowValid and breakout23
+bool  triggerShort23 = useNarrowMode and isNarrowValid and breakdown23
+
+// --- Group 2.4: Biên độ % ---
+float high24    = ta.highest(high[1], pctBars)
+float low24     = ta.lowest(low[1], pctBars)
+float pctHeight = high24 - low24
+bool  isPctValid = (low24 > 0 ? (pctHeight / low24) * 100.0 : 999.0) <= pctThreshold
+bool  breakout24  = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close > high24) : (high > high24)
+bool  breakdown24 = (breakoutType == "Đóng cửa vượt đỉnh/đáy (Close)") ? (close < low24)  : (low < low24)
+bool  triggerLong24  = usePctMode and isPctValid and breakout24
+bool  triggerShort24 = usePctMode and isPctValid and breakdown24
+
+// --- Tổng hợp tín hiệu LONG mặc định ---
+bool anyLongTrigger = triggerLong21 or triggerLong22 or triggerLong23 or triggerLong24
+float longConsolHigh = 0.0
+float longConsolLow  = 0.0
+int   longBoxBars    = 3
+
+if triggerLong21
+    longConsolHigh := high21
+    longConsolLow  := low21
+    longBoxBars    := atrSmaLookback
+else if triggerLong22
+    longConsolHigh := high22
+    longConsolLow  := low22
+    longBoxBars    := boxAtrBars
+else if triggerLong23
+    longConsolHigh := high23
+    longConsolLow  := low23
+    longBoxBars    := narrowBarsCount
+else if triggerLong24
+    longConsolHigh := high24
+    longConsolLow  := low24
+    longBoxBars    := pctBars
+
+string buyLabelText = ""
+if triggerLong21
+    buyLabelText += (buyLabelText == "" ? "Buy 2.1" : "+2.1")
+if triggerLong22
+    buyLabelText += (buyLabelText == "" ? "Buy 2.2" : "+2.2")
+if triggerLong23
+    buyLabelText += (buyLabelText == "" ? "Buy 2.3" : "+2.3")
+if triggerLong24
+    buyLabelText += (buyLabelText == "" ? "Buy 2.4" : "+2.4")
+if buyLabelText == ""
+    buyLabelText := "Buy Breakout"
+
+// --- Tổng hợp tín hiệu SHORT mặc định ---
+bool anyShortTrigger = triggerShort21 or triggerShort22 or triggerShort23 or triggerShort24
+float shortConsolHigh = 0.0
+float shortConsolLow  = 0.0
+int   shortBoxBars    = 3
+
+if triggerShort21
+    shortConsolHigh := high21
+    shortConsolLow  := low21
+    shortBoxBars    := atrSmaLookback
+else if triggerShort22
+    shortConsolHigh := high22
+    shortConsolLow  := low22
+    shortBoxBars    := boxAtrBars
+else if triggerShort23
+    shortConsolHigh := high23
+    shortConsolLow  := low23
+    shortBoxBars    := narrowBarsCount
+else if triggerShort24
+    shortConsolHigh := high24
+    shortConsolLow  := low24
+    shortBoxBars    := pctBars
+
+string sellLabelText = ""
+if triggerShort21
+    sellLabelText += (sellLabelText == "" ? "Sell 2.1" : "+2.1")
+if triggerShort22
+    sellLabelText += (sellLabelText == "" ? "Sell 2.2" : "+2.2")
+if triggerShort23
+    sellLabelText += (sellLabelText == "" ? "Sell 2.3" : "+2.3")
+if triggerShort24
+    sellLabelText += (sellLabelText == "" ? "Sell 2.4" : "+2.4")
+if sellLabelText == ""
+    sellLabelText := "Sell Breakdown"
+
+// ==============================================================================
+// 4. MÔ PHỎNG & TỐI ƯU HÓA 16 CẤU HÌNH (BEST CONFIG SCANNER)
+// ==============================================================================
+
+var int[]   opt_pos       = array.new_int(16, 0)
+var float[] opt_entry     = array.new_float(16, na)
+var float[] opt_sl        = array.new_float(16, na)
+var float[] opt_tp        = array.new_float(16, na)
+var float[] opt_risk      = array.new_float(16, na)
+var bool[]  opt_isBe      = array.new_bool(16, false)
+var float[] opt_winPts    = array.new_float(16, 0.0)
+var float[] opt_lossPts   = array.new_float(16, 0.0)
+var int[]   opt_winCount  = array.new_int(16, 0)
+var int[]   opt_lossCount = array.new_int(16, 0)
+var int[]   opt_totCount  = array.new_int(16, 0)
+
+// Chạy mô phỏng 16 cấu hình
+if useBestConfig
+    for k = 0 to 15
+        // 1. Supertrend tương ứng
+        float kStVal = optStVal1
+        float kStDir = optStDir1
+        bool  kFlipToBear = optFlipBear1
+        bool  kFlipToBull = optFlipBull1
+
+        if k >= 5 and k <= 7
+            kStVal      := optStVal2
+            kStDir      := optStDir2
+            kFlipToBear := optFlipBear2
+            kFlipToBull := optFlipBull2
+        else if k == 8 or k == 9
+            kStVal      := optStVal3
+            kStDir      := optStDir3
+            kFlipToBear := optFlipBear3
+            kFlipToBull := optFlipBull3
+        else if k == 10
+            kStVal      := optStVal4
+            kStDir      := optStDir4
+            kFlipToBear := optFlipBear4
+            kFlipToBull := optFlipBull4
+
+        bool kIsBull = kStDir < 0
+        bool kIsBear = kStDir > 0
+
+        // 2. Tín hiệu VCP
+        bool  kTrigL = anyLongTrigger
+        bool  kTrigS = anyShortTrigger
+        float kBoxL  = longConsolLow
+        float kBoxH  = shortConsolHigh
+
+        if k == 11
+            kTrigL := triggerLong21
+            kTrigS := triggerShort21
+            kBoxL  := low21
+            kBoxH  := high21
+        else if k == 12
+            kTrigL := triggerLong22
+            kTrigS := triggerShort22
+            kBoxL  := low22
+            kBoxH  := high22
+        else if k == 13
+            kTrigL := triggerLong23
+            kTrigS := triggerShort23
+            kBoxL  := low23
+            kBoxH  := high23
+
+        // 3. Bộ lọc Volume
+        bool kVolOk = (k == 14) ? true : isVolValid
+
+        // 4. Tham số Quản trị Rủi ro (SL Mode: 0=Box, 1=ST, 2=ATR)
+        int   kSlMode = (k == 3 or k == 7 or k == 9) ? 1 : ((k == 4) ? 2 : 0)
+        float kRrr    = (k == 1 or k == 6 or k == 10) ? 1.5 : ((k == 2 or k == 7) ? 2.5 : ((k == 9 or k == 15) ? 3.0 : 2.0))
+        bool  kUseBe  = not (k == 0 or k == 6)
+        float kBeRrr  = (k == 1 or k == 10) ? 1.0 : ((k == 15) ? 2.0 : 1.5)
+
+        // 5. Quản lý lệnh đang mở
+        int curPos = array.get(opt_pos, k)
+
+        if curPos == 1 // LONG
+            float ePr   = array.get(opt_entry, k)
+            float sPr   = array.get(opt_sl, k)
+            float tPr   = array.get(opt_tp, k)
+            float rDist = array.get(opt_risk, k)
+            bool  beAct = array.get(opt_isBe, k)
+
+            // Dời BE
+            if kUseBe and not beAct and not na(ePr) and not na(rDist) and rDist > 0
+                if high >= (ePr + rDist * kBeRrr)
+                    beAct := true
+                    sPr   := math.max(sPr, ePr)
+                    array.set(opt_isBe, k, true)
+                    array.set(opt_sl, k, sPr)
+
+            // Kiểm tra Thoát lệnh
+            bool hitSl = low <= sPr
+            bool hitTp = high >= tPr
+            bool flip  = kFlipToBear
+
+            if hitSl or hitTp or flip
+                float exitPrice = hitSl ? sPr : (hitTp ? tPr : close)
+                float pDiff     = exitPrice - ePr
+                array.set(opt_totCount, k, array.get(opt_totCount, k) + 1)
+                if pDiff > 0
+                    array.set(opt_winPts, k, array.get(opt_winPts, k) + pDiff)
+                    array.set(opt_winCount, k, array.get(opt_winCount, k) + 1)
+                else if pDiff < 0
+                    array.set(opt_lossPts, k, array.get(opt_lossPts, k) + math.abs(pDiff))
+                    array.set(opt_lossCount, k, array.get(opt_lossCount, k) + 1)
+
+                array.set(opt_pos, k, 0)
+                array.set(opt_entry, k, na)
+                array.set(opt_sl, k, na)
+                array.set(opt_tp, k, na)
+                array.set(opt_risk, k, na)
+                array.set(opt_isBe, k, false)
+
+        else if curPos == -1 // SHORT
+            float ePr   = array.get(opt_entry, k)
+            float sPr   = array.get(opt_sl, k)
+            float tPr   = array.get(opt_tp, k)
+            float rDist = array.get(opt_risk, k)
+            bool  beAct = array.get(opt_isBe, k)
+
+            // Dời BE
+            if kUseBe and not beAct and not na(ePr) and not na(rDist) and rDist > 0
+                if low <= (ePr - rDist * kBeRrr)
+                    beAct := true
+                    sPr   := math.min(sPr, ePr)
+                    array.set(opt_isBe, k, true)
+                    array.set(opt_sl, k, sPr)
+
+            // Kiểm tra Thoát lệnh
+            bool hitSl = high >= sPr
+            bool hitTp = low <= tPr
+            bool flip  = kFlipToBull
+
+            if hitSl or hitTp or flip
+                float exitPrice = hitSl ? sPr : (hitTp ? tPr : close)
+                float pDiff     = ePr - exitPrice
+                array.set(opt_totCount, k, array.get(opt_totCount, k) + 1)
+                if pDiff > 0
+                    array.set(opt_winPts, k, array.get(opt_winPts, k) + pDiff)
+                    array.set(opt_winCount, k, array.get(opt_winCount, k) + 1)
+                else if pDiff < 0
+                    array.set(opt_lossPts, k, array.get(opt_lossPts, k) + math.abs(pDiff))
+                    array.set(opt_lossCount, k, array.get(opt_lossCount, k) + 1)
+
+                array.set(opt_pos, k, 0)
+                array.set(opt_entry, k, na)
+                array.set(opt_sl, k, na)
+                array.set(opt_tp, k, na)
+                array.set(opt_risk, k, na)
+                array.set(opt_isBe, k, false)
+
+        // 6. Vào lệnh mới nếu Flat
+        if array.get(opt_pos, k) == 0
+            bool sigLong  = allowLong and kIsBull and isSmaLongOk and kTrigL and isLongCandleOk and kVolOk
+            bool sigShort = allowShort and kIsBear and isSmaShortOk and kTrigS and isShortCandleOk and kVolOk
+
+            if sigLong
+                float sl = na
+                if kSlMode == 0
+                    sl := kBoxL - (slBufferTicks * syminfo.mintick)
+                else if kSlMode == 1
+                    sl := kStVal - (slBufferTicks * syminfo.mintick)
+                else
+                    sl := close - (atr14 * 1.5)
+
+                if na(sl) or sl >= close
+                    sl := close - (atr14 * 1.5)
+
+                float rD = close - sl
+                float tp = close + (rD * kRrr)
+
+                array.set(opt_pos, k, 1)
+                array.set(opt_entry, k, close)
+                array.set(opt_sl, k, sl)
+                array.set(opt_tp, k, tp)
+                array.set(opt_risk, k, rD)
+                array.set(opt_isBe, k, false)
+
+            else if sigShort
+                float sl = na
+                if kSlMode == 0
+                    sl := kBoxH + (slBufferTicks * syminfo.mintick)
+                else if kSlMode == 1
+                    sl := kStVal + (slBufferTicks * syminfo.mintick)
+                else
+                    sl := close + (atr14 * 1.5)
+
+                if na(sl) or sl <= close
+                    sl := close + (atr14 * 1.5)
+
+                float rD = sl - close
+                float tp = close - (rD * kRrr)
+
+                array.set(opt_pos, k, -1)
+                array.set(opt_entry, k, close)
+                array.set(opt_sl, k, sl)
+                array.set(opt_tp, k, tp)
+                array.set(opt_risk, k, rD)
+                array.set(opt_isBe, k, false)
+
+// ==============================================================================
+// 5. CƠ CHẾ TỰ ĐỘNG ÁP DỤNG THÔNG SỐ (AUTO APPLY BEST CONFIG ENGINE)
+// ==============================================================================
+
+// Tìm cấu hình tốt nhất tính đến nến hiện tại
+int   bestRunningK = 0
+float runningMaxPf = -1.0
+if useBestConfig
+    for j = 0 to 15
+        float wP = array.get(opt_winPts, j)
+        float lP = array.get(opt_lossPts, j)
+        int   tC = array.get(opt_totCount, j)
+        float pf = lP > 0 ? (wP / lP) : (wP > 0 ? 99.99 : 0.0)
+        if (pf > runningMaxPf and tC >= 3) or (runningMaxPf < 0 and tC > 0)
+            runningMaxPf := pf
+            bestRunningK := j
+
+// Xác định Preset Index hiệu dụng
+int effPreset = -1
+if autoApplyMode == "Tự động áp dụng Best Config (Auto Best)"
+    effPreset := bestRunningK
+else if autoApplyMode == "Thủ công (Dùng thông số các mục bên dưới)"
+    effPreset := -1
+else if str.contains(autoApplyMode, "Preset 0")
+    effPreset := 0
+else if str.contains(autoApplyMode, "Preset 10")
+    effPreset := 10
+else if str.contains(autoApplyMode, "Preset 11")
+    effPreset := 11
+else if str.contains(autoApplyMode, "Preset 12")
+    effPreset := 12
+else if str.contains(autoApplyMode, "Preset 13")
+    effPreset := 13
+else if str.contains(autoApplyMode, "Preset 14")
+    effPreset := 14
+else if str.contains(autoApplyMode, "Preset 15")
+    effPreset := 15
+else if str.contains(autoApplyMode, "Preset 1")
+    effPreset := 1
+else if str.contains(autoApplyMode, "Preset 2")
+    effPreset := 2
+else if str.contains(autoApplyMode, "Preset 3")
+    effPreset := 3
+else if str.contains(autoApplyMode, "Preset 4")
+    effPreset := 4
+else if str.contains(autoApplyMode, "Preset 5")
+    effPreset := 5
+else if str.contains(autoApplyMode, "Preset 6")
+    effPreset := 6
+else if str.contains(autoApplyMode, "Preset 7")
+    effPreset := 7
+else if str.contains(autoApplyMode, "Preset 8")
+    effPreset := 8
+else if str.contains(autoApplyMode, "Preset 9")
+    effPreset := 9
+
+// Ánh xạ các thông số hiệu dụng vào chiến lược
+float  effStVal       = manualStVal
+float  effStDir       = manualStDir
+bool   effFlipBear    = manFlipBear
+bool   effFlipBull    = manFlipBull
+bool   effLongTrig    = anyLongTrigger
+bool   effShortTrig   = anyShortTrigger
+float  effLongHigh    = longConsolHigh
+float  effLongLow     = longConsolLow
+int    effLongBars    = longBoxBars
+float  effShortHigh   = shortConsolHigh
+float  effShortLow    = shortConsolLow
+int    effShortBars   = shortBoxBars
+bool   effUseVol      = useVolFilter
+string effSlType      = slType
+float  effTpRrr       = tpRrr
+bool   effUseBe       = useBreakEven
+float  effBeRrr       = beRrrTrigger
+string effBuyLabel    = buyLabelText
+string effSellLabel   = sellLabelText
+
+if effPreset >= 0
+    // 1. Supertrend
+    if effPreset >= 5 and effPreset <= 7
+        effStVal    := optStVal2
+        effStDir    := optStDir2
+        effFlipBear := optFlipBear2
+        effFlipBull := optFlipBull2
+    else if effPreset == 8 or effPreset == 9
+        effStVal    := optStVal3
+        effStDir    := optStDir3
+        effFlipBear := optFlipBear3
+        effFlipBull := optFlipBull3
+    else if effPreset == 10
+        effStVal    := optStVal4
+        effStDir    := optStDir4
+        effFlipBear := optFlipBear4
+        effFlipBull := optFlipBull4
+    else
+        effStVal    := optStVal1
+        effStDir    := optStDir1
+        effFlipBear := optFlipBear1
+        effFlipBull := optFlipBull1
+
+    // 2. VCP Pattern Triggers
+    if effPreset == 11
+        effLongTrig  := triggerLong21
+        effShortTrig := triggerShort21
+        effLongHigh  := high21
+        effLongLow   := low21
+        effLongBars  := atrSmaLookback
+        effShortHigh := high21
+        effShortLow  := low21
+        effShortBars := atrSmaLookback
+        effBuyLabel  := "Buy 2.1"
+        effSellLabel := "Sell 2.1"
+    else if effPreset == 12
+        effLongTrig  := triggerLong22
+        effShortTrig := triggerShort22
+        effLongHigh  := high22
+        effLongLow   := low22
+        effLongBars  := boxAtrBars
+        effShortHigh := high22
+        effShortLow  := low22
+        effShortBars := boxAtrBars
+        effBuyLabel  := "Buy 2.2"
+        effSellLabel := "Sell 2.2"
+    else if effPreset == 13
+        effLongTrig  := triggerLong23
+        effShortTrig := triggerShort23
+        effLongHigh  := high23
+        effLongLow   := low23
+        effLongBars  := narrowBarsCount
+        effShortHigh := high23
+        effShortLow  := low23
+        effShortBars := narrowBarsCount
+        effBuyLabel  := "Buy 2.3"
+        effSellLabel := "Sell 2.3"
+
+    // 3. Volume Filter
+    effUseVol := (effPreset != 14)
+
+    // 4. Stop Loss Type
+    effSlType := (effPreset == 3 or effPreset == 7 or effPreset == 9) ? "Dưới/Trên đường Supertrend" : ((effPreset == 4) ? "Theo ATR" : "Đáy/Đỉnh hộp tích lũy")
+
+    // 5. Take Profit RRR
+    effTpRrr  := (effPreset == 1 or effPreset == 6 or effPreset == 10) ? 1.5 : ((effPreset == 2 or effPreset == 7) ? 2.5 : ((effPreset == 9 or effPreset == 15) ? 3.0 : 2.0))
+
+    // 6. Break-Even
+    effUseBe  := not (effPreset == 0 or effPreset == 6)
+    effBeRrr  := (effPreset == 1 or effPreset == 10) ? 1.0 : ((effPreset == 15) ? 2.0 : 1.5)
+
+// Trạng thái Supertrend hiệu dụng
+bool isEffStBullish   = effStDir < 0
+bool isEffStBearish   = effStDir > 0
+bool isEffVolValid    = not effUseVol or (volume >= volSma * volMultiplier)
+bool isPositionFlat   = strategy.position_size == 0
+bool longSignal       = allowLong and isEffStBullish and isSmaLongOk and effLongTrig and isLongCandleOk and isEffVolValid and isPositionFlat
+bool shortSignal      = allowShort and isEffStBearish and isSmaShortOk and effShortTrig and isShortCandleOk and isEffVolValid and isPositionFlat
+
+// Vẽ đường Supertrend hiệu dụng & Vùng mây
+color currentStColor = isEffStBullish ? stColorBull : stColorBear
+p_price = plot(close, "Close Price Reference", display = display.none)
+p_st    = plot(effStVal, "Supertrend Line", color = currentStColor, linewidth = 2)
+fill(p_price, p_st, 
+     color = isEffStBullish ? color.new(stColorBull, 88) : color.new(stColorBear, 88), 
+     title = "Supertrend Cloud Fill")
+
+// ==============================================================================
+// 6. THỰC THI CHIẾN LƯỢC TRÊN BIỂU ĐỒ (STRATEGY EXECUTION)
+// ==============================================================================
+
+var float activeEntry = na
+var float activeSl    = na
+var float activeTp    = na
+var float initialRisk = na
+var bool  isBeActive  = false
+var line  lineEntry   = na
+var line  lineSl      = na
+var line  lineTp      = na
+
+// --------------------------- XỬ LÝ LỆNH LONG ---------------------------
+if longSignal
+    // Tính toán Stop Loss cho Long
+    float slPrice = na
+    if effSlType == "Đáy/Đỉnh hộp tích lũy"
+        slPrice := effLongLow - (slBufferTicks * syminfo.mintick)
+    else if effSlType == "Dưới/Trên đường Supertrend"
+        slPrice := effStVal - (slBufferTicks * syminfo.mintick)
+    else // Theo ATR
+        slPrice := close - (atr14 * slAtrMultiplier)
+
+    if na(slPrice) or slPrice >= close
+        slPrice := close - (atr14 * 1.5)
+
+    float riskDist = close - slPrice
+    float tpPrice  = close + (riskDist * effTpRrr)
+
+    activeEntry := close
+    activeSl    := slPrice
+    activeTp    := tpPrice
+    initialRisk := riskDist
+    isBeActive  := false
+
+    strategy.entry("Long", strategy.long, comment = effBuyLabel)
+
+    // Vẽ Hộp tích lũy Long (Xanh Cyan)
+    if showConsolBoxes and effLongHigh > 0
+        box.new(
+             left         = bar_index - effLongBars,
+             top          = effLongHigh,
+             right        = bar_index,
+             bottom       = effLongLow,
+             border_color = color.new(#00BCD4, 20),
+             border_width = 1,
+             border_style = line.style_solid,
+             bgcolor      = color.new(#00BCD4, 85)
+         )
+
+    // Vẽ đường TP / SL
+    if showTpSlLines
+        if not na(lineEntry)
+            line.delete(lineEntry)
+        if not na(lineSl)
+            line.delete(lineSl)
+        if not na(lineTp)
+            line.delete(lineTp)
+
+        lineEntry := line.new(bar_index, activeEntry, bar_index + 10, activeEntry, color = color.white, style = line.style_dashed, width = 1)
+        if useStopLoss
+            lineSl := line.new(bar_index, activeSl, bar_index + 10, activeSl, color = color.new(#f23645, 20), style = line.style_solid, width = 2)
+        if useTakeProfit or effPreset >= 0
+            lineTp := line.new(bar_index, activeTp, bar_index + 10, activeTp, color = color.new(#089981, 20), style = line.style_solid, width = 2)
+
+// --------------------------- XỬ LÝ LỆNH SHORT ---------------------------
+if shortSignal
+    // Tính toán Stop Loss cho Short
+    float slPriceShort = na
+    if effSlType == "Đáy/Đỉnh hộp tích lũy"
+        slPriceShort := effShortHigh + (slBufferTicks * syminfo.mintick)
+    else if effSlType == "Dưới/Trên đường Supertrend"
+        slPriceShort := effStVal + (slBufferTicks * syminfo.mintick)
+    else // Theo ATR
+        slPriceShort := close + (atr14 * slAtrMultiplier)
+
+    if na(slPriceShort) or slPriceShort <= close
+        slPriceShort := close + (atr14 * 1.5)
+
+    float riskDistShort = slPriceShort - close
+    float tpPriceShort  = close - (riskDistShort * effTpRrr)
+
+    activeEntry := close
+    activeSl    := slPriceShort
+    activeTp    := tpPriceShort
+    initialRisk := riskDistShort
+    isBeActive  := false
+
+    strategy.entry("Short", strategy.short, comment = effSellLabel)
+
+    // Vẽ Hộp tích lũy Short (Đỏ Coral)
+    if showConsolBoxes and effShortHigh > 0
+        box.new(
+             left         = bar_index - effShortBars,
+             top          = effShortHigh,
+             right        = bar_index,
+             bottom       = effShortLow,
+             border_color = color.new(#f23645, 20),
+             border_width = 1,
+             border_style = line.style_solid,
+             bgcolor      = color.new(#f23645, 85)
+         )
+
+    // Vẽ đường TP / SL cho Short
+    if showTpSlLines
+        if not na(lineEntry)
+            line.delete(lineEntry)
+        if not na(lineSl)
+            line.delete(lineSl)
+        if not na(lineTp)
+            line.delete(lineTp)
+
+        lineEntry := line.new(bar_index, activeEntry, bar_index + 10, activeEntry, color = color.white, style = line.style_dashed, width = 1)
+        if useStopLoss
+            lineSl := line.new(bar_index, activeSl, bar_index + 10, activeSl, color = color.new(#f23645, 20), style = line.style_solid, width = 2)
+        if useTakeProfit or effPreset >= 0
+            lineTp := line.new(bar_index, activeTp, bar_index + 10, activeTp, color = color.new(#089981, 20), style = line.style_solid, width = 2)
+
+// Quản lý Dời Stop Loss về Hòa Vốn (BE) khi giữ vị thế LONG
+if strategy.position_size > 0 and effUseBe and not isBeActive and not na(activeEntry) and not na(initialRisk) and initialRisk > 0
+    float beTriggerLong = activeEntry + (initialRisk * effBeRrr)
+    if high >= beTriggerLong
+        isBeActive := true
+        activeSl   := math.max(activeSl, activeEntry)
+        if showTpSlLines and not na(lineSl)
+            line.set_y1(lineSl, activeSl)
+            line.set_y2(lineSl, activeSl)
+            line.set_color(lineSl, color.new(#FFEB3B, 20))
+
+// Quản lý Dời Stop Loss về Hòa Vốn (BE) khi giữ vị thế SHORT
+if strategy.position_size < 0 and effUseBe and not isBeActive and not na(activeEntry) and not na(initialRisk) and initialRisk > 0
+    float beTriggerShort = activeEntry - (initialRisk * effBeRrr)
+    if low <= beTriggerShort
+        isBeActive := true
+        activeSl   := math.min(activeSl, activeEntry)
+        if showTpSlLines and not na(lineSl)
+            line.set_y1(lineSl, activeSl)
+            line.set_y2(lineSl, activeSl)
+            line.set_color(lineSl, color.new(#FFEB3B, 20))
+
+// Quản lý lệnh Thoát SL / TP trong suốt thời gian giữ vị thế LONG
+if strategy.position_size > 0
+    strategy.exit(
+         id             = "Exit Long TP/SL",
+         from_entry     = "Long",
+         stop           = activeSl,
+         limit          = activeTp,
+         comment_loss   = isBeActive ? "BE Hit" : "SL Hit",
+         comment_profit = "TP Hit"
+     )
+
+// Quản lý lệnh Thoát SL / TP trong suốt thời gian giữ vị thế SHORT
+if strategy.position_size < 0
+    strategy.exit(
+         id             = "Exit Short TP/SL",
+         from_entry     = "Short",
+         stop           = activeSl,
+         limit          = activeTp,
+         comment_loss   = isBeActive ? "BE Hit" : "SL Hit",
+         comment_profit = "TP Hit"
+     )
+
+// Thoát lệnh khi Supertrend đảo chiều (Primary Exit)
+if exitOnStFlip and effFlipBear and (strategy.position_size > 0)
+    strategy.close("Long", comment = "Supertrend Flip Exit")
+
+if exitOnStFlip and effFlipBull and (strategy.position_size < 0)
+    strategy.close("Short", comment = "Supertrend Flip Exit")
+
+// Reset trạng thái khi vị thế đóng
+bool justClosed = strategy.position_size[1] != 0 and strategy.position_size == 0
+if justClosed
+    activeEntry := na
+    activeSl    := na
+    activeTp    := na
+    initialRisk := na
+    isBeActive  := false
+
+// ==============================================================================
+// 7. TÍNH TOÁN HIỆU SUẤT & BẢNG THỐNG KÊ (ANALYTICS & DASHBOARDS)
+// ==============================================================================
+
+getTablePosition(string posStr) =>
+    pos = position.top_right
+    if posStr == "Top Right"
+        pos := position.top_right
+    else if posStr == "Bottom Right"
+        pos := position.bottom_right
+    else if posStr == "Top Left"
+        pos := position.top_left
+    else if posStr == "Bottom Left"
+        pos := position.bottom_left
+    else if posStr == "Middle Right"
+        pos := position.middle_right
+    pos
+
+// Tính toán các thông số thống kê khi ở nến cuối cùng (barstate.islast)
+float sumWinPts      = 0.0
+float sumLossPts     = 0.0
+int   winCount       = 0
+int   lossCount      = 0
+int   slCount        = 0
+int   nonSlLossCount = 0
+int   nonSlWinCount  = 0
+float maxRewardPts   = 0.0
+float maxRewardPct   = 0.0
+float maxRiskPts     = 0.0
+float maxRiskPct     = 0.0
+
+int c21_tot = 0, int c21_win = 0, int c21_sl = 0, int c21_nonSlLoss = 0
+int c22_tot = 0, int c22_win = 0, int c22_sl = 0, int c22_nonSlLoss = 0
+int c23_tot = 0, int c23_win = 0, int c23_sl = 0, int c23_nonSlLoss = 0
+int c24_tot = 0, int c24_win = 0, int c24_sl = 0, int c24_nonSlLoss = 0
+
+int totClosed = strategy.closedtrades
+
+if barstate.islast and totClosed > 0
+    for i = 0 to totClosed - 1
+        float  entryPr     = strategy.closedtrades.entry_price(i)
+        float  exitPr      = strategy.closedtrades.exit_price(i)
+        float  sizeVal     = strategy.closedtrades.size(i)
+        string entryComment= strategy.closedtrades.entry_comment(i)
+        string exitComment = strategy.closedtrades.exit_comment(i)
+        float  ptsDiff     = sizeVal >= 0 ? (exitPr - entryPr) : (entryPr - exitPr)
+        float  pctDiff     = entryPr > 0 ? (ptsDiff / entryPr) * 100.0 : 0.0
+        bool   isSlHit     = str.contains(exitComment, "SL")
+
+        if isSlHit
+            slCount += 1
+        else
+            if ptsDiff > 0
+                nonSlWinCount += 1
+            else if ptsDiff < 0
+                nonSlLossCount += 1
+
+        // Phân loại theo 4 kiểu Entry
+        bool is21 = str.contains(entryComment, "2.1")
+        bool is22 = str.contains(entryComment, "2.2")
+        bool is23 = str.contains(entryComment, "2.3")
+        bool is24 = str.contains(entryComment, "2.4")
+
+        if is21
+            c21_tot += 1
+            if isSlHit
+                c21_sl += 1
+            else if ptsDiff > 0
+                c21_win += 1
+            else if ptsDiff < 0
+                c21_nonSlLoss += 1
+
+        if is22
+            c22_tot += 1
+            if isSlHit
+                c22_sl += 1
+            else if ptsDiff > 0
+                c22_win += 1
+            else if ptsDiff < 0
+                c22_nonSlLoss += 1
+
+        if is23
+            c23_tot += 1
+            if isSlHit
+                c23_sl += 1
+            else if ptsDiff > 0
+                c23_win += 1
+            else if ptsDiff < 0
+                c23_nonSlLoss += 1
+
+        if is24
+            c24_tot += 1
+            if isSlHit
+                c24_sl += 1
+            else if ptsDiff > 0
+                c24_win += 1
+            else if ptsDiff < 0
+                c24_nonSlLoss += 1
+
+        if ptsDiff > 0
+            sumWinPts += ptsDiff
+            winCount  += 1
+        else if ptsDiff < 0
+            sumLossPts += math.abs(ptsDiff)
+            lossCount  += 1
+
+        if ptsDiff > maxRewardPts
+            maxRewardPts := ptsDiff
+            maxRewardPct := pctDiff
+        if ptsDiff < maxRiskPts
+            maxRiskPts   := ptsDiff
+            maxRiskPct   := pctDiff
+
+// ------------------------------------------------------------------------------
+// 7.1 BẢNG DASHBOARD THÔNG TIN CHÍNH (TOP RIGHT)
+// ------------------------------------------------------------------------------
+var table dashTable = na
+if showDashboard and barstate.islast
+    if not na(dashTable)
+        table.delete(dashTable)
+    dashTable := table.new(getTablePosition(dashPosInput), 2, 15, 
+                           bgcolor      = color.new(#131722, 10), 
+                           border_color = color.new(#363c4e, 30), 
+                           border_width = 1, 
+                           frame_color  = color.new(#4a5060, 20), 
+                           frame_width  = 1)
+
+    // Tiêu đề Dashboard
+    table.cell(dashTable, 0, 0, "SUPERTREND VCP", bgcolor = color.new(#1e222d, 0), text_color = #00BCD4, text_size = size.small)
+    table.cell(dashTable, 1, 0, "STATUS",         bgcolor = color.new(#1e222d, 0), text_color = #d1d4dc, text_size = size.small)
+
+    // 1. Chế độ cấu hình đang áp dụng
+    string modeText = (effPreset == -1) ? "Thủ công (Manual)" : ("Auto Best (Preset #" + str.tostring(effPreset) + ")")
+    color  modeCol  = (effPreset >= 0) ? #00BCD4 : #FFEB3B
+    table.cell(dashTable, 0, 1, "Cấu hình áp dụng", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 1, modeText,           text_color = modeCol, text_size = size.small)
+
+    // 2. Supertrend Trend
+    string stStatusText  = isEffStBullish ? "BULLISH (TĂNG)" : "BEARISH (GIẢM)"
+    color  stStatusColor = isEffStBullish ? #089981 : #f23645
+    table.cell(dashTable, 0, 2, "Supertrend",       text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 2, stStatusText,       text_color = stStatusColor, text_size = size.small)
+
+    // 3. Trạng thái Tích lũy (VCP)
+    bool   anyVcpActive   = (useAtrSmaMode and isAtrSmaExpansion) or (useBoxAtrMode and isBoxValid) or (useNarrowMode and isNarrowValid) or (usePctMode and isPctValid)
+    string vcpStatusText  = anyVcpActive ? "NÉN & BÙNG NỔ ⚡" : "THEO DÕI ⚪"
+    color  vcpStatusColor = anyVcpActive ? #FFEB3B : #9E9E9E
+    table.cell(dashTable, 0, 3, "VCP Pattern",     text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 3, vcpStatusText,     text_color = vcpStatusColor, text_size = size.small)
+
+    // 4. Vị thế hiện tại (Position)
+    string posText  = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size) + ")" : (strategy.position_size < 0 ? "SHORT (" + str.tostring(strategy.position_size) + ")" : "FLAT (KHÔNG)")
+    color  posColor = strategy.position_size > 0 ? #089981 : (strategy.position_size < 0 ? #f23645 : #9E9E9E)
+    table.cell(dashTable, 0, 4, "Vị thế hiện tại", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 4, posText,           text_color = posColor, text_size = size.small)
+
+    // 5. Tổng số lệnh (Total Trades)
+    table.cell(dashTable, 0, 5, "Tổng số lệnh",    text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 5, str.tostring(totClosed), text_color = #ffffff, text_size = size.small)
+
+    // 6. Tỷ lệ Thắng (Winrate)
+    float winRate = totClosed > 0 ? (strategy.wintrades / totClosed) * 100.0 : 0.0
+    color winRateColor = winRate >= 50.0 ? #089981 : (totClosed > 0 ? #f23645 : #9E9E9E)
+    table.cell(dashTable, 0, 6, "Tỷ lệ thắng (Winrate)", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 6, str.tostring(winRate, "#.##") + "%", text_color = winRateColor, text_size = size.small)
+
+    // 7. Tỷ lệ dính Stop Loss
+    float  slRate  = totClosed > 0 ? (slCount * 100.0 / totClosed) : 0.0
+    string slText  = totClosed > 0 ? (str.tostring(slRate, "#.##") + "% (" + str.tostring(slCount) + ")") : "N/A"
+    color  slColor = slCount > 0 ? #f23645 : #9E9E9E
+    table.cell(dashTable, 0, 7, "Tỷ lệ dính Stoploss", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 7, slText,                 text_color = slColor, text_size = size.small)
+
+    // 8. Tỷ lệ Exit (không phải SL) có lời
+    float  nonSlWinRate  = totClosed > 0 ? (nonSlWinCount * 100.0 / totClosed) : 0.0
+    string nonSlWinText  = totClosed > 0 ? (str.tostring(nonSlWinRate, "#.##") + "% (" + str.tostring(nonSlWinCount) + ")") : "N/A"
+    color  nonSlWinColor = nonSlWinCount > 0 ? #089981 : #9E9E9E
+    table.cell(dashTable, 0, 8, "Exit (Lời)",           text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 8, nonSlWinText,           text_color = nonSlWinColor, text_size = size.small)
+
+    // 9. Tỷ lệ Exit (không phải SL) bị lỗ
+    float  nonSlLossRate  = totClosed > 0 ? (nonSlLossCount * 100.0 / totClosed) : 0.0
+    string nonSlLossText  = totClosed > 0 ? (str.tostring(nonSlLossRate, "#.##") + "% (" + str.tostring(nonSlLossCount) + ")") : "N/A"
+    color  nonSlLossColor = nonSlLossCount > 0 ? #FF9800 : #9E9E9E
+    table.cell(dashTable, 0, 9, "Exit (Lỗ)",            text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 9, nonSlLossText,          text_color = nonSlLossColor, text_size = size.small)
+
+    // 10. Tỷ lệ Reward / Risk
+    float  avgWinPts  = winCount > 0 ? sumWinPts / winCount : 0.0
+    float  avgLossPts = lossCount > 0 ? sumLossPts / lossCount : 0.0
+    float  rrRatio    = avgLossPts > 0 ? (avgWinPts / avgLossPts) : (avgWinPts > 0 ? 99.99 : 0.0)
+    string rrText     = totClosed > 0 ? ("1 : " + str.tostring(rrRatio, "#.##")) : "N/A"
+    color  rrColor    = totClosed == 0 ? #9E9E9E : (rrRatio >= 1.5 ? #089981 : (rrRatio >= 1.0 ? #FFEB3B : #f23645))
+    table.cell(dashTable, 0, 10, "Tỷ lệ Reward / Risk", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 10, rrText,                 text_color = rrColor, text_size = size.small)
+
+    // 11. Max Reward (Lệnh lãi lớn nhất theo bước giá)
+    string maxRewardText  = maxRewardPts > 0 ? ("+" + str.tostring(maxRewardPts, "#.##") + " pts (+" + str.tostring(maxRewardPct, "#.##") + "%)") : (totClosed > 0 ? "0.00 pts (0.00%)" : "N/A")
+    color  maxRewardColor = maxRewardPts > 0 ? #089981 : #9E9E9E
+    table.cell(dashTable, 0, 11, "Max Reward (Lãi max)", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 11, maxRewardText,           text_color = maxRewardColor, text_size = size.small)
+
+    // 12. Max Risk (Lệnh lỗ lớn nhất theo bước giá)
+    string maxRiskText  = maxRiskPts < 0 ? (str.tostring(maxRiskPts, "#.##") + " pts (" + str.tostring(maxRiskPct, "#.##") + "%)") : (totClosed > 0 ? "0.00 pts (0.00%)" : "N/A")
+    color  maxRiskColor = maxRiskPts < 0 ? #f23645 : #9E9E9E
+    table.cell(dashTable, 0, 12, "Max Risk (Lỗ max)",     text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 12, maxRiskText,             text_color = maxRiskColor, text_size = size.small)
+
+    // 13. Lợi nhuận ròng (Net Profit)
+    float netProfit      = strategy.netprofit
+    color netProfitColor = netProfit > 0 ? #089981 : (netProfit < 0 ? #f23645 : #9E9E9E)
+    table.cell(dashTable, 0, 13, "Lợi nhuận ròng",       text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 13, str.tostring(netProfit, "#.##") + " (" + str.tostring(strategy.netprofit_percent, "#.##") + "%)", text_color = netProfitColor, text_size = size.small)
+
+    // 14. Max Drawdown (Sụt giảm tối đa)
+    float  maxDd      = strategy.max_drawdown
+    float  maxDdPct   = strategy.max_drawdown_percent
+    string maxDdText  = maxDd > 0 ? ("-" + str.tostring(maxDd, "#.##") + " (-" + str.tostring(maxDdPct, "#.##") + "%)") : (totClosed > 0 ? "0.00 (0.00%)" : "N/A")
+    color  maxDdColor = maxDd > 0 ? #f23645 : #9E9E9E
+    table.cell(dashTable, 0, 14, "Max Drawdown (Sụt giảm)", text_color = #d1d4dc, text_size = size.small)
+    table.cell(dashTable, 1, 14, maxDdText,                 text_color = maxDdColor, text_size = size.small)
+
+else if not na(dashTable)
+    table.delete(dashTable)
+    dashTable := na
+
+// ------------------------------------------------------------------------------
+// 7.2 BẢNG THỐNG KÊ CHI TIẾT THEO KIỂU ENTRY (BOTTOM LEFT)
+// ------------------------------------------------------------------------------
+var table entryTable = na
+if showEntryStatsTable and barstate.islast
+    if not na(entryTable)
+        table.delete(entryTable)
+    entryTable := table.new(getTablePosition(entryStatsPosInput), 6, 6, 
+                            bgcolor      = color.new(#131722, 10), 
+                            border_color = color.new(#363c4e, 30), 
+                            border_width = 1, 
+                            frame_color  = color.new(#4a5060, 20), 
+                            frame_width  = 1)
+
+    // Headers Dòng 0
+    table.cell(entryTable, 0, 0, "Kiểu Entry (Pattern)", bgcolor = color.new(#1e222d, 0), text_color = #00BCD4, text_size = size.small, text_halign = text.align_left)
+    table.cell(entryTable, 1, 0, "Tổng",                 bgcolor = color.new(#1e222d, 0), text_color = #d1d4dc, text_size = size.small, text_halign = text.align_center)
+    table.cell(entryTable, 2, 0, "Có lời (Win)",         bgcolor = color.new(#1e222d, 0), text_color = #089981, text_size = size.small, text_halign = text.align_center)
+    table.cell(entryTable, 3, 0, "Bị Stoploss",          bgcolor = color.new(#1e222d, 0), text_color = #f23645, text_size = size.small, text_halign = text.align_center)
+    table.cell(entryTable, 4, 0, "Exit Lỗ (Non-SL)",     bgcolor = color.new(#1e222d, 0), text_color = #FF9800, text_size = size.small, text_halign = text.align_center)
+    table.cell(entryTable, 5, 0, "Tỷ lệ Thắng",          bgcolor = color.new(#1e222d, 0), text_color = #d1d4dc, text_size = size.small, text_halign = text.align_center)
+
+    // Dữ liệu 4 kiểu entry
+    pNames = array.from("2.1 ATR dưới SMA", "2.2 Hộp ATR", "2.3 Nến hẹp", "2.4 Biên độ %")
+    pTots  = array.from(c21_tot, c22_tot, c23_tot, c24_tot)
+    pWins  = array.from(c21_win, c22_win, c23_win, c24_win)
+    pSls   = array.from(c21_sl, c22_sl, c23_sl, c24_sl)
+    pLoss  = array.from(c21_nonSlLoss, c22_nonSlLoss, c23_nonSlLoss, c24_nonSlLoss)
+
+    for p = 0 to 3
+        rIdx   = p + 1
+        pTot   = array.get(pTots, p)
+        pWin   = array.get(pWins, p)
+        pSl    = array.get(pSls, p)
+        pL     = array.get(pLoss, p)
+        pWr    = pTot > 0 ? (pWin * 100.0 / pTot) : 0.0
+        pWrCol = pTot == 0 ? #9E9E9E : (pWr >= 50.0 ? #089981 : #f23645)
+
+        table.cell(entryTable, 0, rIdx, array.get(pNames, p), text_color = #d1d4dc, text_size = size.small, text_halign = text.align_left)
+        table.cell(entryTable, 1, rIdx, str.tostring(pTot),   text_color = color.white, text_size = size.small, text_halign = text.align_center)
+        
+        winCellText = pTot > 0 ? (str.tostring(pWin) + " (" + str.tostring(pWin * 100.0 / pTot, "#.#") + "%)") : "0 (0.0%)"
+        table.cell(entryTable, 2, rIdx, winCellText, text_color = pWin > 0 ? #089981 : #9E9E9E, text_size = size.small, text_halign = text.align_center)
+
+        slCellText = pTot > 0 ? (str.tostring(pSl) + " (" + str.tostring(pSl * 100.0 / pTot, "#.#") + "%)") : "0 (0.0%)"
+        table.cell(entryTable, 3, rIdx, slCellText, text_color = pSl > 0 ? #f23645 : #9E9E9E, text_size = size.small, text_halign = text.align_center)
+
+        lossCellText = pTot > 0 ? (str.tostring(pL) + " (" + str.tostring(pL * 100.0 / pTot, "#.#") + "%)") : "0 (0.0%)"
+        table.cell(entryTable, 4, rIdx, lossCellText, text_color = pL > 0 ? #FF9800 : #9E9E9E, text_size = size.small, text_halign = text.align_center)
+
+        table.cell(entryTable, 5, rIdx, pTot > 0 ? (str.tostring(pWr, "#.#") + "%") : "-", text_color = pWrCol, text_size = size.small, text_halign = text.align_center)
+
+    // Dòng 5: Tổng cộng (Total)
+    sumTot   = totClosed
+    sumWin   = nonSlWinCount
+    sumSl    = slCount
+    sumLoss  = nonSlLossCount
+    sumWr    = sumTot > 0 ? (sumWin * 100.0 / sumTot) : 0.0
+    sumWrCol = sumTot == 0 ? #9E9E9E : (sumWr >= 50.0 ? #089981 : #f23645)
+
+    table.cell(entryTable, 0, 5, "Tổng cộng (Total)", bgcolor = color.new(#1e222d, 30), text_color = color.white, text_size = size.small, text_halign = text.align_left)
+    table.cell(entryTable, 1, 5, str.tostring(sumTot), bgcolor = color.new(#1e222d, 30), text_color = color.white, text_size = size.small, text_halign = text.align_center)
+    
+    sumWinText = sumTot > 0 ? (str.tostring(sumWin) + " (" + str.tostring(sumWin * 100.0 / sumTot, "#.#") + "%)") : "0 (0.0%)"
+    table.cell(entryTable, 2, 5, sumWinText, bgcolor = color.new(#1e222d, 30), text_color = sumWin > 0 ? #089981 : color.white, text_size = size.small, text_halign = text.align_center)
+
+    sumSlText = sumTot > 0 ? (str.tostring(sumSl) + " (" + str.tostring(sumSl * 100.0 / sumTot, "#.#") + "%)") : "0 (0.0%)"
+    table.cell(entryTable, 3, 5, sumSlText, bgcolor = color.new(#1e222d, 30), text_color = sumSl > 0 ? #f23645 : color.white, text_size = size.small, text_halign = text.align_center)
+
+    sumLossText = sumTot > 0 ? (str.tostring(sumLoss) + " (" + str.tostring(sumLoss * 100.0 / sumTot, "#.#") + "%)") : "0 (0.0%)"
+    table.cell(entryTable, 4, 5, sumLossText, bgcolor = color.new(#1e222d, 30), text_color = sumLoss > 0 ? #FF9800 : color.white, text_size = size.small, text_halign = text.align_center)
+
+    table.cell(entryTable, 5, 5, sumTot > 0 ? (str.tostring(sumWr, "#.#") + "%") : "-", bgcolor = color.new(#1e222d, 30), text_color = sumWrCol, text_size = size.small, text_halign = text.align_center)
+
+else if not na(entryTable)
+    table.delete(entryTable)
+    entryTable := na
+
+// ------------------------------------------------------------------------------
+// 7.3 BẢNG BEST CONFIG OPTIMIZER (MAX PROFIT FACTOR)
+// ------------------------------------------------------------------------------
+var table optTable = na
+if useBestConfig and barstate.islast
+    if not na(optTable)
+        table.delete(optTable)
+
+    // Tìm cấu hình có Profit Factor lớn nhất trên toàn bộ dữ liệu
+    int   bestK       = 0
+    float maxPf       = -1.0
+    float bestWinPts  = 0.0
+    float bestLossPts = 0.0
+    int   bestTrades  = 0
+    int   bestWins    = 0
+
+    for k = 0 to 15
+        float wP = array.get(opt_winPts, k)
+        float lP = array.get(opt_lossPts, k)
+        int   tC = array.get(opt_totCount, k)
+        int   wC = array.get(opt_winCount, k)
+
+        float pf = lP > 0 ? (wP / lP) : (wP > 0 ? 99.99 : 0.0)
+        if (pf > maxPf and tC >= 3) or (maxPf < 0 and tC > 0)
+            maxPf       := pf
+            bestK       := k
+            bestWinPts  := wP
+            bestLossPts := lP
+            bestTrades  := tC
+            bestWins    := wC
+
+    // Chi tiết cấu hình tối ưu
+    string optStText   = (bestK >= 5 and bestK <= 7) ? "ATR 10, Factor 2.0" : ((bestK == 8 or bestK == 9) ? "ATR 14, Factor 2.5" : ((bestK == 10) ? "ATR 7, Factor 1.5" : "ATR 10, Factor 3.0"))
+    string optVcpText  = (bestK == 11) ? "2.1 ATR dưới SMA" : ((bestK == 12) ? "2.2 Hộp ATR" : ((bestK == 13) ? "2.3 Nến hẹp" : "Tất cả mô hình (2.1 - 2.4)"))
+    string optSlText   = (bestK == 3 or bestK == 7 or bestK == 9) ? "Đường Supertrend" : ((bestK == 4) ? "Theo ATR (1.5x)" : "Đáy/Đỉnh hộp tích lũy")
+    string optRrrText  = "1 : " + str.tostring((bestK == 1 or bestK == 6 or bestK == 10) ? 1.5 : ((bestK == 2 or bestK == 7) ? 2.5 : ((bestK == 9 or bestK == 15) ? 3.0 : 2.0)), "#.#")
+    string optBeText   = (bestK == 0 or bestK == 6) ? "Tắt" : ("Bật (RRR " + str.tostring((bestK == 1 or bestK == 10) ? 1.0 : ((bestK == 15) ? 2.0 : 1.5), "#.#") + ")")
+    string optVolText  = (bestK == 14) ? "Tắt" : "Bật (x1.1 SMA Vol)"
+
+    float bestWr     = bestTrades > 0 ? (bestWins * 100.0 / bestTrades) : 0.0
+    float bestNetPts = bestWinPts - bestLossPts
+
+    optTable := table.new(getTablePosition(optTablePos), 2, 11, 
+                          bgcolor      = color.new(#131722, 10), 
+                          border_color = color.new(#363c4e, 30), 
+                          border_width = 1, 
+                          frame_color  = color.new(#FFD700, 30), 
+                          frame_width  = 1)
+
+    // Tiêu đề bảng Best Config
+    table.cell(optTable, 0, 0, "🏆 BEST CONFIG OPTIMIZER", bgcolor = color.new(#1e222d, 0), text_color = #FFD700, text_size = size.small)
+    table.cell(optTable, 1, 0, "PRESET #" + str.tostring(bestK), bgcolor = color.new(#1e222d, 0), text_color = #00BCD4, text_size = size.small)
+
+    table.cell(optTable, 0, 1, "Supertrend (ATR, Factor)", text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 1, optStText,                  text_color = color.white, text_size = size.small)
+
+    table.cell(optTable, 0, 2, "Mô hình Tích lũy (VCP)",   text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 2, optVcpText,                 text_color = color.white, text_size = size.small)
+
+    table.cell(optTable, 0, 3, "Cách tính Stop Loss",      text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 3, optSlText,                  text_color = color.white, text_size = size.small)
+
+    table.cell(optTable, 0, 4, "Tỷ lệ RRR (Take Profit)",  text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 4, optRrrText,                 text_color = color.white, text_size = size.small)
+
+    table.cell(optTable, 0, 5, "Dời SL về Hòa Vốn (BE)",   text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 5, optBeText,                  text_color = color.white, text_size = size.small)
+
+    table.cell(optTable, 0, 6, "Bộ lọc Khối lượng (Vol)",  text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 6, optVolText,                 text_color = color.white, text_size = size.small)
+
+    table.cell(optTable, 0, 7, "⭐ Profit Factor Đạt được", text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 7, str.tostring(maxPf > 0 ? maxPf : 0.0, "#.##"), text_color = #089981, text_size = size.small)
+
+    table.cell(optTable, 0, 8, "🎯 Tỷ lệ Thắng (Winrate)", text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 8, str.tostring(bestWr, "#.#") + "%", text_color = bestWr >= 50.0 ? #089981 : #f23645, text_size = size.small)
+
+    table.cell(optTable, 0, 9, "📊 Số lệnh & Lãi ròng",    text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 9, str.tostring(bestTrades) + " lệnh (" + str.tostring(bestNetPts, "+#.##") + " pts)", text_color = bestNetPts >= 0 ? #089981 : #f23645, text_size = size.small)
+
+    // Trạng thái áp dụng vào chiến lược
+    string applyStatusText = (autoApplyMode == "Tự động áp dụng Best Config (Auto Best)") ? "⚡ ĐÃ TỰ ĐỘNG ÁP DỤNG" : "ℹ️ Chọn 'Auto Best' ở Group 1"
+    color  applyStatusCol  = (autoApplyMode == "Tự động áp dụng Best Config (Auto Best)") ? #089981 : #FFEB3B
+    table.cell(optTable, 0, 10, "Trạng thái Chiến lược", text_color = #d1d4dc, text_size = size.small)
+    table.cell(optTable, 1, 10, applyStatusText,          text_color = applyStatusCol, text_size = size.small)
+
+else if not na(optTable)
+    table.delete(optTable)
+    optTable := na
