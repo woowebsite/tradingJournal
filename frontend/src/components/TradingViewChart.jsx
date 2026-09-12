@@ -21,6 +21,7 @@ const TradingViewChart = ({
     supertrendPeriod = 10,
     supertrendMultiplier = 3,
     maPeriod = 288,
+    showMA = true,
     timeframe = 'D1',
     onLoadMore = null,
     isLoadingMore = false,
@@ -330,7 +331,9 @@ const TradingViewChart = ({
         } else {
             const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, candleData);
             drawSupertrend(chart, LineSeries, supertrendData);
-            drawMA(chart, LineSeries, candleData, maPeriod || 288);
+            if (showMA !== false && maPeriod) {
+                drawMA(chart, LineSeries, candleData, maPeriod || 288);
+            }
         }
 
         // Volume Series 
