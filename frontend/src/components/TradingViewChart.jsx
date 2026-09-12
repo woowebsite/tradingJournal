@@ -5,6 +5,7 @@ import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimoku';
 import { calculateVWAP, drawVWAP } from '../indicators/vwap';
 import { RefreshCw } from 'lucide-react';
+import { formatPriceDisplay, getSignalMarkerConfig } from '../utils/chartSignals';
 
 const getRuleId = (rule) => rule?.documentId || rule?.id || '';
 
@@ -20,8 +21,10 @@ const TradingViewChart = ({
     vwapAnchor = 'Year',
     supertrendPeriod = 10,
     supertrendMultiplier = 3,
-    maPeriod = 288,
-    showMA = true,
+    maPeriod = null,
+    showMA = false,
+    showVWAP = false,
+    showSupertrend = true,
     timeframe = 'D1',
     onLoadMore = null,
     isLoadingMore = false,
@@ -197,11 +200,19 @@ const TradingViewChart = ({
 
             const list = map.get(matchedTime) || [];
             list.push({
-                name: (rule.signalText || rule.signal_text)?.trim() || rule.Name || sig.text || sig.action || 'Executed Trade',
+                name: sig.name || (rule.signalText || rule.signal_text)?.trim() || rule.Name || sig.text || sig.action || 'Executed Trade',
                 type,
                 date: matchedTime,
                 color: sig.color || colors[type] || colors.unknown,
-                price: sig.price,
+                price: sig.price ?? rule.price,
+                entry: sig.entry ?? rule.entry,
+                exitPrice: sig.exitPrice ?? sig.exit_price ?? rule.exitPrice,
+                stopLoss: sig.stopLoss ?? sig.stop_loss ?? rule.stopLoss ?? rule.stop_loss,
+                takeProfit: sig.takeProfit ?? sig.take_profit ?? rule.takeProfit ?? rule.take_profit,
+                pnlPercent: sig.pnlPercent ?? sig.pnl_percent ?? rule.pnlPercent ?? rule.pnl_percent,
+                pnlAmount: sig.pnlAmount ?? sig.pnl_amount ?? rule.pnlAmount ?? rule.pnl_amount,
+                posType: sig.posType ?? sig.pos_type ?? rule.posType,
+                action: sig.action,
                 volume: sig.volume,
                 status: sig.status,
                 rule
@@ -316,23 +327,43 @@ const TradingViewChart = ({
         candlestickSeries.setData(candleData);
         candlestickSeriesRef.current = candlestickSeries;
 
-        if (template === 'Ichimoku') {
+        const tmpl = String(template || '').toLowerCase();
+        const hasIchimoku = tmpl.includes('ichimoku');
+        const hasVWAP = Boolean(showVWAP || tmpl === 'vwap' || tmpl.includes('supertrend_vwap') || tmpl.includes('breakout'));
+        const isVwapOnly = tmpl === 'vwap';
+        const hasSupertrend = showSupertrend === true || (showSupertrend !== false && !isVwapOnly && !hasIchimoku);
+        
+        // MA is drawn ONLY IF maPeriod is valid AND (showMA is true OR template is Supertrend_MA, VWAP, Ichimoku) AND showMA is not false
+        const shouldDrawMA = Boolean(maPeriod) && showMA !== false && (
+            showMA === true ||
+            tmpl === 'supertrend_ma' ||
+            tmpl === 'vwap' ||
+            tmpl.includes('ma') ||
+            hasIchimoku
+        );
+
+        if (hasIchimoku) {
             // Ichimoku Cloud (9, 26, 52, displacement 26)
             const ichimokuData = calculateIchimoku(candleData, {
                 conversionPeriod: 26,
                 basePeriod: 78,
             });
             drawIchimoku78(chart, LineSeries, ichimokuData, chartContainerRef.current, candlestickSeries);
-            drawMA(chart, LineSeries, candleData, maPeriod || 78);
-        } else if (template === 'VWAP') {
-            const vwapData = calculateVWAP(candleData, vwapAnchor || 'Year');
-            drawVWAP(chart, LineSeries, vwapData);
-            drawMA(chart, LineSeries, candleData, maPeriod || 9, { lineWidth: 1.5, color: '#f59e0b' });
+            if (shouldDrawMA) {
+                drawMA(chart, LineSeries, candleData, maPeriod || 78);
+            }
         } else {
-            const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, candleData);
-            drawSupertrend(chart, LineSeries, supertrendData);
-            if (showMA !== false && maPeriod) {
-                drawMA(chart, LineSeries, candleData, maPeriod || 288);
+            if (hasSupertrend) {
+                const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, candleData);
+                drawSupertrend(chart, LineSeries, supertrendData);
+            }
+            if (hasVWAP) {
+                const vwapData = calculateVWAP(candleData, vwapAnchor || 'Year');
+                drawVWAP(chart, LineSeries, vwapData);
+            }
+            if (shouldDrawMA) {
+                const maOpts = tmpl === 'vwap' ? { lineWidth: 1.5, color: '#f59e0b' } : {};
+                drawMA(chart, LineSeries, candleData, maPeriod, maOpts);
             }
         }
 
@@ -365,54 +396,25 @@ const TradingViewChart = ({
                 const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
                 const ruleId = String(getRuleId(rule));
                 const rawType = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'entry';
-                const lowerType = String(rawType).toLowerCase();
-                const posType = String(sig.posType || sig.pos_type || sig.type || rule.Name || '').toLowerCase();
-                const isShort = posType.includes('short') || sig.type === 'Short' || sig.pos_type === 'Short';
+                const posType = sig.posType || sig.pos_type || rule.posType || (String(sig.type || '').includes('short') ? 'Short' : 'Long');
 
-                let color = '#10b981'; // Green
-                let shape = 'arrowUp';
-                let position = 'belowBar';
-                let text = sig.text || '';
+                const cfg = getSignalMarkerConfig({
+                    type: rawType,
+                    posType,
+                    action: sig.action
+                });
 
-                if (lowerType === 'takeprofit' || lowerType.includes('take') || lowerType.includes('tp')) {
-                    color = '#3b82f6';
-                    if (isShort) {
-                        position = 'belowBar';
-                        shape = 'arrowUp';
-                    } else {
-                        position = 'aboveBar';
-                        shape = 'arrowDown';
-                    }
-                } else if (lowerType === 'stoploss' || lowerType.includes('stop') || lowerType.includes('sl')) {
-                    color = '#ef4444';
-                    shape = 'circle';
-                    position = isShort ? 'aboveBar' : 'belowBar';
-                } else if (lowerType === 'exit' || lowerType.includes('exit') || lowerType.includes('close')) {
-                    color = '#fb923c';
-                    shape = isShort ? 'arrowUp' : 'arrowDown';
-                    position = isShort ? 'belowBar' : 'aboveBar';
-                } else if (isShort) {
-                    color = '#ef4444';
-                    shape = 'arrowDown';
-                    position = 'aboveBar';
-                } else {
-                    color = '#10b981';
-                    shape = 'arrowUp';
-                    position = 'belowBar';
-                }
-
-                // Cho phép override nếu sig có chỉ định trực tiếp hợp lệ
-                if (sig.color) color = sig.color;
-                if (sig.shape && ['arrowUp', 'arrowDown', 'circle', 'square'].includes(sig.shape)) shape = sig.shape;
-                if (sig.position && ['aboveBar', 'belowBar', 'inBar'].includes(sig.position)) position = sig.position;
-                if (sig.text !== undefined && sig.text !== '') text = sig.text;
+                const color = sig.color || cfg.color;
+                const shape = sig.shape && ['arrowUp', 'arrowDown', 'circle', 'square'].includes(sig.shape) ? sig.shape : cfg.shape;
+                const position = sig.position && ['aboveBar', 'belowBar', 'inBar'].includes(sig.position) ? sig.position : cfg.position;
+                const text = sig.text !== undefined && sig.text !== '' ? sig.text : cfg.shortLabel;
 
                 return {
                     time: matchedTime,
                     position,
                     color,
                     shape,
-                    text,
+                    text, // On chart: ONLY "Long", "Short", "TP", "SL", "Exit"
                     size: 2
                 };
             }).filter(Boolean);
@@ -663,30 +665,118 @@ const TradingViewChart = ({
             {/* Hover Tooltip for Signal markers */}
             {hoverTooltip && hoverTooltip.signals && hoverTooltip.signals.length > 0 && (
                 <div
-                    className="absolute z-30 pointer-events-none bg-gray-900/95 border border-gray-700 rounded-lg p-2.5 shadow-2xl text-xs text-white space-y-1.5 min-w-[150px]"
+                    className="absolute z-30 pointer-events-none bg-gray-900/95 border border-gray-700/80 rounded-xl p-3 shadow-2xl text-xs text-white space-y-2 min-w-[220px] max-w-[340px] backdrop-blur-md"
                     style={{
-                        left: Math.min(hoverTooltip.x + 15, hoverTooltip.chartWidth - 170),
-                        top: Math.max(10, Math.min(hoverTooltip.y - 10, hoverTooltip.chartHeight - 100))
+                        left: Math.min(hoverTooltip.x + 15, hoverTooltip.chartWidth - 240),
+                        top: Math.max(10, Math.min(hoverTooltip.y - 10, hoverTooltip.chartHeight - 180))
                     }}
                 >
-                    <div className="text-[11px] text-gray-400 font-semibold border-b border-gray-700/60 pb-1 flex justify-between items-center">
+                    <div className="text-[11px] text-gray-400 font-semibold border-b border-gray-700/60 pb-1.5 flex justify-between items-center">
                         <span>📅 {hoverTooltip.date}</span>
-                        <span className="text-[10px] text-blue-400 font-mono font-bold">SIGNAL</span>
+                        <span className="text-[10px] text-blue-400 font-mono font-bold uppercase bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
+                            {hoverTooltip.signals.length} SIGNAL{hoverTooltip.signals.length > 1 ? 'S' : ''}
+                        </span>
                     </div>
-                    {hoverTooltip.signals.map((sig, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                            <span
-                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                style={{ backgroundColor: sig.color }}
-                            />
-                            <div className="flex flex-col">
-                                <span className="font-semibold text-gray-100">{sig.name}</span>
-                                <span className="text-[10px] uppercase font-bold" style={{ color: sig.color }}>
-                                    {sig.type}
-                                </span>
-                            </div>
-                        </div>
-                    ))}
+                    <div className="space-y-2">
+                        {hoverTooltip.signals.map((sig, idx) => {
+                            const isEntry = sig.type === 'entry';
+                            const isTP = sig.type === 'takeprofit';
+                            const isSL = sig.type === 'stoploss';
+                            const isExit = sig.type === 'exit';
+                            const isLong = String(sig.posType || '').toLowerCase() === 'long';
+                            const pnl = sig.pnlPercent !== undefined ? sig.pnlPercent : sig.pnl_percent;
+                            const pnlAmt = sig.pnlAmount !== undefined ? sig.pnlAmount : sig.pnl_amount;
+                            const execPrice = sig.price ?? (isEntry ? sig.entry : sig.exitPrice);
+                            const entryPrice = sig.entry ?? (isEntry ? sig.price : null);
+                            const slPrice = sig.stopLoss ?? sig.stop_loss;
+                            const tpPrice = sig.takeProfit ?? sig.take_profit;
+
+                            return (
+                                <div key={idx} className="bg-gray-800/90 p-2.5 rounded-lg border border-gray-700/60 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-1.5">
+                                        <div className="flex items-center gap-1.5 font-bold text-xs">
+                                            <span
+                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                style={{ backgroundColor: sig.color }}
+                                            />
+                                            <span style={{ color: sig.color }}>
+                                                {isEntry ? (isLong ? '🟢 Long Entry' : '🔴 Short Entry') :
+                                                 isTP ? '🎯 Take Profit' :
+                                                 isSL ? '🛑 Stop Loss' :
+                                                 isExit ? '🏁 Exit' : (sig.action || 'Signal')}
+                                            </span>
+                                        </div>
+                                        {pnl !== undefined && pnl !== null && (
+                                            <span className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                                                Number(pnl) >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                            }`}>
+                                                {Number(pnl) >= 0 ? '+' : ''}{Number(pnl).toFixed(2)}%
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Setup / Signal Description */}
+                                    {sig.name && (
+                                        <div className="text-[11px] text-gray-300 font-medium leading-tight">
+                                            {sig.name}
+                                        </div>
+                                    )}
+
+                                    {/* Price Details Grid */}
+                                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] pt-1.5 border-t border-gray-700/50">
+                                        {execPrice !== undefined && execPrice !== null && (
+                                            <div>
+                                                <span className="text-gray-400 text-[10px] block">Giá thực thi</span>
+                                                <span className="font-mono font-bold text-gray-100">
+                                                    ${formatPriceDisplay(execPrice)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {!isEntry && entryPrice !== undefined && entryPrice !== null && (
+                                            <div>
+                                                <span className="text-gray-400 text-[10px] block">Giá Entry</span>
+                                                <span className="font-mono text-gray-300">
+                                                    ${formatPriceDisplay(entryPrice)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {slPrice !== undefined && slPrice !== null && (
+                                            <div>
+                                                <span className="text-rose-400/90 text-[10px] block">Stop Loss (SL)</span>
+                                                <span className="font-mono font-medium text-rose-300">
+                                                    ${formatPriceDisplay(slPrice)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {tpPrice !== undefined && tpPrice !== null && (
+                                            <div>
+                                                <span className="text-emerald-400/90 text-[10px] block">Take Profit (TP)</span>
+                                                <span className="font-mono font-medium text-emerald-300">
+                                                    ${formatPriceDisplay(tpPrice)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {pnlAmt !== undefined && pnlAmt !== null && pnlAmt !== 0 && (
+                                            <div>
+                                                <span className="text-gray-400 text-[10px] block">PnL Amount</span>
+                                                <span className={`font-mono font-medium ${Number(pnlAmt) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {Number(pnlAmt) >= 0 ? '+' : ''}${formatPriceDisplay(pnlAmt)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {sig.volume && (
+                                            <div>
+                                                <span className="text-gray-400 text-[10px] block">Khối lượng</span>
+                                                <span className="font-mono text-gray-300">
+                                                    {formatPriceDisplay(sig.volume)}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
 

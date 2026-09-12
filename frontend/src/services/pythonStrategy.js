@@ -13,6 +13,10 @@ export const DEFAULT_PYTHON_STRATEGIES = [
     {
         fileName: 'strategy_supertrend_priceaction.py',
         name: 'Supertrend Price Action Strategy'
+    },
+    {
+        fileName: 'strategy_breakout_st_vwap.py',
+        name: 'Breakout ST & VWAP Strategy'
     }
 ];
 

@@ -153,6 +153,9 @@ export const vwapMa9Strategy = {
     getChartProps: (params) => ({
         template: 'VWAP',
         vwapAnchor: params.vwapAnchor || 'year',
+        showSupertrend: false,
+        showVWAP: true,
+        showMA: true,
         maPeriod: parseInt(params.vwapMaPeriod) || 9,
     }),
 

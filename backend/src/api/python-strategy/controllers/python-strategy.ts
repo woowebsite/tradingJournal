@@ -151,8 +151,9 @@ export default {
 
       const pythonExe = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
       const cleanTicker = String(ticker || 'VNINDEX').trim().toUpperCase();
-      const isVWAP = safeFileName.toLowerCase().includes('vwap');
-      const isPriceAction = safeFileName.toLowerCase().includes('priceaction') || safeFileName.toLowerCase().includes('price_action');
+      const isBreakout = safeFileName.toLowerCase().includes('breakout');
+      const isVWAP = !isBreakout && safeFileName.toLowerCase().includes('vwap');
+      const isPriceAction = !isBreakout && (safeFileName.toLowerCase().includes('priceaction') || safeFileName.toLowerCase().includes('price_action'));
 
       const args = [
         fullScriptPath,
@@ -162,7 +163,30 @@ export default {
         '--countback', String(countback),
       ];
 
-      if (isVWAP) {
+      if (isBreakout) {
+        args.push(
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--vwap-anchor', String(cleanVwapAnchor),
+          '--indicator-filter', String(ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter || 'st_or_vwap'),
+          '--tp-type', String(cleanTpType),
+          '--sl-type', String(cleanSlType),
+          '--custom-tp-val', String(cleanCustomTp),
+          '--custom-sl-val', String(cleanCustomSl),
+          '--rr', String(cleanRR)
+        );
+
+        const isAllowBreakoutHigh = toBool(ctx.request.body?.allowBreakoutHigh ?? ctx.request.body?.allow_breakout_high, true);
+        const isAllowSweepLow = toBool(ctx.request.body?.allowSweepLow ?? ctx.request.body?.allow_sweep_low, true);
+        if (isAllowBreakoutHigh) args.push('--allow-breakout-high'); else args.push('--no-breakout-high');
+        if (isAllowSweepLow) args.push('--allow-sweep-low'); else args.push('--no-sweep-low');
+
+        if (isTpSupertrend) {
+          args.push('--tp-supertrend');
+        } else {
+          args.push('--no-tp-supertrend');
+        }
+      } else if (isVWAP) {
         args.push(
           '--ma-period', String(cleanVwapMa),
           '--vwap-anchor', String(cleanVwapAnchor),
@@ -409,9 +433,23 @@ export default {
         args.push('--sl-type', String(slType || sl_type));
       }
 
-      if (isVWAP) {
+      if (vwap_anchor || vwapAnchor) {
         const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
         args.push('--vwap-anchor', String(cleanVwapAnchor));
+      }
+
+      if (ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter) {
+        args.push('--indicator-filter', String(ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter));
+      }
+
+      if (ctx.request.body?.allowBreakoutHigh !== undefined || ctx.request.body?.allow_breakout_high !== undefined) {
+        const isAllowBreakoutHigh = toBool(ctx.request.body?.allowBreakoutHigh ?? ctx.request.body?.allow_breakout_high, true);
+        args.push(isAllowBreakoutHigh ? '--allow-breakout-high' : '--no-breakout-high');
+      }
+
+      if (ctx.request.body?.allowSweepLow !== undefined || ctx.request.body?.allow_sweep_low !== undefined) {
+        const isAllowSweepLow = toBool(ctx.request.body?.allowSweepLow ?? ctx.request.body?.allow_sweep_low, true);
+        args.push(isAllowSweepLow ? '--allow-sweep-low' : '--no-sweep-low');
       }
 
       // Thêm flags loại lệnh (Long / Short)

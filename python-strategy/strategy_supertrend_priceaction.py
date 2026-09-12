@@ -793,6 +793,8 @@ def scan_symbol_json(
     gross_loss = abs(sum(t.get("pnl_percent", 0) for t in loss_trades))
     profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.9 if gross_profit > 0 else 0.0)
 
+    active_trade = trades[-1] if (trades and trades[-1].get("status") == "Open") else None
+
     return {
         "ticker": ticker,
         "timeframe": timeframe,
@@ -813,7 +815,8 @@ def scan_symbol_json(
             "grossProfit": round(gross_profit, 2),
             "grossLoss": round(gross_loss, 2),
             "tpType": tp_type,
-            "slType": sl_type
+            "slType": sl_type,
+            "activeTrade": active_trade
         },
         "strategyParams": {
             "stPeriod": st_period,

@@ -53,8 +53,9 @@ const DynamicStrategyForm = ({
     const col1Fields = useMemo(() => fields.filter(f => f.column === 1), [fields]);
     const col2Fields = useMemo(() => fields.filter(f => f.column === 2), [fields]);
 
-    const isVWAP = selectedStrategyFile?.toLowerCase().includes('vwap');
-    const isPriceAction = selectedStrategyFile?.toLowerCase().includes('priceaction') || selectedStrategyFile?.toLowerCase().includes('price_action');
+    const isBreakout = selectedStrategyFile?.toLowerCase().includes('breakout');
+    const isVWAP = !isBreakout && selectedStrategyFile?.toLowerCase().includes('vwap');
+    const isPriceAction = !isBreakout && (selectedStrategyFile?.toLowerCase().includes('priceaction') || selectedStrategyFile?.toLowerCase().includes('price_action'));
 
     // Render 1 input number chuẩn
     const renderNumberField = (field) => {
@@ -227,6 +228,69 @@ const DynamicStrategyForm = ({
         );
     };
 
+    // Render Setup 1 & Setup 2 cho Breakout ST & VWAP Strategy
+    const renderBreakoutSetups = (field) => {
+        return (
+            <div key={field.name} className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                        <Activity size={13} className="text-purple-400" />
+                        Tùy chọn Setup Vào Lệnh (Tick chọn kích hoạt)
+                    </label>
+                    <span className="text-[10px] text-purple-300 font-mono bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-full">
+                        Kích hoạt khi thỏa mãn (OR)
+                    </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${
+                        params.allowBreakoutHigh
+                            ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50'
+                            : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'
+                    }`}>
+                        <input
+                            type="checkbox"
+                            checked={Boolean(params.allowBreakoutHigh)}
+                            onChange={(e) => onParamChange('allowBreakoutHigh', e.target.checked)}
+                            className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
+                        />
+                        <div className="min-w-0 flex-1">
+                            <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
+                                <span>Setup 1: Vượt Đỉnh Hôm Trước</span>
+                                <span className="text-[10px] font-mono text-emerald-400">SL: Đáy hiện tại</span>
+                            </div>
+                            <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
+                                Mua khi vượt đỉnh nến trước (High &gt; Prev High) + ST Up. Stop Loss: Đáy nến vào lệnh.
+                            </p>
+                        </div>
+                    </label>
+
+                    <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${
+                        params.allowSweepLow
+                            ? 'bg-purple-950/30 border-purple-500/60 shadow-sm shadow-purple-950/50'
+                            : 'bg-gray-900/80 border-gray-700/80 hover:border-gray-600 opacity-75'
+                    }`}>
+                        <input
+                            type="checkbox"
+                            checked={Boolean(params.allowSweepLow)}
+                            onChange={(e) => onParamChange('allowSweepLow', e.target.checked)}
+                            className="mt-0.5 w-4 h-4 rounded text-purple-600 bg-gray-800 border-gray-600 focus:ring-purple-500 focus:ring-offset-gray-900 cursor-pointer accent-purple-500"
+                        />
+                        <div className="min-w-0 flex-1">
+                            <div className="text-xs font-bold text-gray-200 flex items-center justify-between">
+                                <span>Setup 2: Phá Đáy Hôm Trước</span>
+                                <span className="text-[10px] font-mono text-amber-400">SL: Khoảng SP 75</span>
+                            </div>
+                            <p className="text-[11px] text-gray-400 leading-tight mt-0.5">
+                                Mua khi phá đáy nến trước (Low &lt; Prev Low) + (ST Up HOẶC Giá &gt; VWAP). Stop Loss: Khoảng SP 75.
+                            </p>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        );
+    };
+
     // Render Tùy chọn Chốt lời Supertrend MA (ST Đảo chiều & Theo R:R)
     const renderTpOptionsSt = (field) => {
         const isOpt = Boolean(optFlags.tpMode);
@@ -287,7 +351,7 @@ const DynamicStrategyForm = ({
         );
     };
 
-    // Render TP dropdown với mốc Spread Percentiles
+    // Render TP dropdown với mốc Spread Percentiles, RR & Close ngày
     const renderSelectSpreadTp = (field) => {
         const isOpt = Boolean(optFlags.tpType);
         return (
@@ -315,15 +379,19 @@ const DynamicStrategyForm = ({
                     </label>
                 </div>
                 <select
-                    value={params.tpType || 'P50'}
+                    value={params.tpType || (isBreakout ? 'P90' : 'P50')}
                     onChange={(e) => onParamChange('tpType', e.target.value)}
                     className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition cursor-pointer font-medium h-[42px]"
                 >
                     <option value="P25">P25 (Spread Hẹp {spreadValues?.p25 ? `• ${formatNumber(spreadValues.p25)}` : ''})</option>
-                    <option value="P50">P50 (Trung vị {spreadValues?.p50 ? `• ${formatNumber(spreadValues.p50)}` : ''}) - Mặc định</option>
+                    <option value="P50">P50 (Trung vị {spreadValues?.p50 ? `• ${formatNumber(spreadValues.p50)}` : ''})</option>
                     <option value="P75">P75 (Spread Rộng {spreadValues?.p75 ? `• ${formatNumber(spreadValues.p75)}` : ''})</option>
-                    <option value="P90">P90 (Spread Đột biến {spreadValues?.p90 ? `• ${formatNumber(spreadValues.p90)}` : ''})</option>
+                    <option value="P90">P90 (Spread Đột biến {spreadValues?.p90 ? `• ${formatNumber(spreadValues.p90)}` : ''}) - Mặc định</option>
                     <option value="P99">P99 (Spread Cực đại {spreadValues?.p99 ? `• ${formatNumber(spreadValues.p99)}` : ''})</option>
+                    <option value="RR1.5">Theo R:R (1 : 1.5)</option>
+                    <option value="RR2.0">Theo R:R (1 : 2.0)</option>
+                    <option value="close_today">🎯 Close ngày hiện tại (Đóng nến hiện tại)</option>
+                    <option value="close_next_day">🎯 Close ngày hôm sau (Đóng nến tiếp theo)</option>
                 </select>
             </div>
         );
@@ -357,15 +425,22 @@ const DynamicStrategyForm = ({
                     </label>
                 </div>
                 <select
-                    value={params.slType || 'P75'}
+                    value={params.slType || (isBreakout ? 'current_bar' : 'P75')}
                     onChange={(e) => onParamChange('slType', e.target.value)}
                     className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 transition cursor-pointer font-medium h-[42px]"
                 >
-                    <option value="P25">P25 (Spread Hẹp {spreadValues?.p25 ? `• ${formatNumber(spreadValues.p25)}` : ''})</option>
-                    <option value="P50">P50 (Trung vị {spreadValues?.p50 ? `• ${formatNumber(spreadValues.p50)}` : ''})</option>
-                    <option value="P75">P75 (Spread Rộng {spreadValues?.p75 ? `• ${formatNumber(spreadValues.p75)}` : ''}) - Mặc định</option>
-                    <option value="P90">P90 (Spread Đột biến {spreadValues?.p90 ? `• ${formatNumber(spreadValues.p90)}` : ''})</option>
-                    <option value="supertrend">Theo dải Supertrend</option>
+                    {isBreakout && (
+                        <>
+                            <option value="current_bar">Đáy/Đỉnh nến hiện tại (Đáy Long / Đỉnh Short)</option>
+                            <option value="prev_bar">Đáy/Đỉnh nến hôm trước (Đáy hôm trước)</option>
+                        </>
+                    )}
+                    <option value="P25">Khoảng Spread P25 (Spread Hẹp {spreadValues?.p25 ? `• ${formatNumber(spreadValues.p25)}` : ''})</option>
+                    <option value="P50">Khoảng Spread P50 (Trung vị {spreadValues?.p50 ? `• ${formatNumber(spreadValues.p50)}` : ''})</option>
+                    <option value="P75">Khoảng Spread P75 (Spread Rộng {spreadValues?.p75 ? `• ${formatNumber(spreadValues.p75)}` : ''}) - Mặc định</option>
+                    <option value="P90">Khoảng Spread P90 (Spread Đột biến {spreadValues?.p90 ? `• ${formatNumber(spreadValues.p90)}` : ''})</option>
+                    <option value="P99">Khoảng Spread P99 (Spread Cực đại {spreadValues?.p99 ? `• ${formatNumber(spreadValues.p99)}` : ''})</option>
+                    {!isBreakout && <option value="supertrend">Theo dải Supertrend</option>}
                 </select>
             </div>
         );
@@ -514,6 +589,8 @@ const DynamicStrategyForm = ({
                 return renderSelectField(field);
             case 'price_action_patterns':
                 return renderPriceActionPatterns(field);
+            case 'breakout_setups':
+                return renderBreakoutSetups(field);
             case 'tp_options_st':
                 return renderTpOptionsSt(field);
             case 'select_spread_tp':
@@ -603,7 +680,16 @@ const DynamicStrategyForm = ({
                     </div>
 
                     {/* Indicator Parameters: Dựa trên fields của Schema */}
-                    {isVWAP ? (
+                    {isBreakout ? (
+                        <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-2.5">
+                                {col1Fields.filter(f => f.type === 'number').map(renderField)}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                {col1Fields.filter(f => f.type === 'select').map(renderField)}
+                            </div>
+                        </div>
+                    ) : isVWAP ? (
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                             {col1Fields.map(renderField)}
                         </div>
@@ -632,7 +718,101 @@ const DynamicStrategyForm = ({
                     </div>
 
                     {/* Cột 2 Layout: Entry condition + Long/Short */}
-                    {isVWAP ? (
+                    {isBreakout ? (
+                        <>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                            <Activity size={13} className="text-indigo-400" />
+                                            Điều kiện Vào lệnh (Entry)
+                                        </label>
+                                        {optFlags.entrySetup !== undefined && (
+                                            <label
+                                                title={optFlags.entrySetup ? "Bỏ chọn để giữ cố định setup khi optimize" : "Chọn để tự động tìm kiếm setup tối ưu"}
+                                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer transition select-none ${
+                                                    optFlags.entrySetup
+                                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                                        : 'bg-gray-800/90 text-gray-400 border border-gray-700 hover:text-gray-300'
+                                                }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(optFlags.entrySetup)}
+                                                    onChange={(e) => onOptFlagChange('entrySetup', e.target.checked)}
+                                                    className="w-3 h-3 rounded text-amber-500 bg-gray-900 border-gray-600 focus:ring-amber-500 cursor-pointer accent-amber-500"
+                                                />
+                                                <span>{optFlags.entrySetup ? 'Opt' : 'Lock'}</span>
+                                            </label>
+                                        )}
+                                    </div>
+                                    <select
+                                        value={params.entrySetup || (params.allowBreakoutHigh && !params.allowSweepLow ? 'setup1' : (!params.allowBreakoutHigh && params.allowSweepLow ? 'setup2' : 'both'))}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            onParamChange('entrySetup', val);
+                                            if (val === 'setup1') {
+                                                onParamChange('allowBreakoutHigh', true);
+                                                onParamChange('allowSweepLow', false);
+                                            } else if (val === 'setup2') {
+                                                onParamChange('allowBreakoutHigh', false);
+                                                onParamChange('allowSweepLow', true);
+                                            } else {
+                                                onParamChange('allowBreakoutHigh', true);
+                                                onParamChange('allowSweepLow', true);
+                                            }
+                                        }}
+                                        className="w-full bg-gray-900 border border-gray-700 hover:border-gray-600 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition cursor-pointer font-medium h-[42px]"
+                                    >
+                                        <option value="setup1">Setup 1 (Vượt đỉnh)</option>
+                                        <option value="setup2">Setup 2 (Phá đáy)</option>
+                                        <option value="both">Cả 2 Setup (Setup 1 &amp; Setup 2)</option>
+                                    </select>
+                                </div>
+
+                                {/* Long & Short Checkboxes */}
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                        <Layers size={13} className="text-purple-400" />
+                                        Loại lệnh giao dịch
+                                    </label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${
+                                            params.allowLong ? 'border-emerald-500/50 bg-emerald-950/20 shadow-sm shadow-emerald-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
+                                        }`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={Boolean(params.allowLong)}
+                                                onChange={(e) => onParamChange('allowLong', e.target.checked)}
+                                                className="w-4 h-4 rounded text-emerald-600 bg-gray-800 border-gray-600 focus:ring-emerald-500 focus:ring-offset-gray-900 cursor-pointer accent-emerald-500"
+                                            />
+                                            <TrendingUp size={14} className={params.allowLong ? 'text-emerald-400 shrink-0' : 'text-gray-400 shrink-0'} />
+                                            <span className={`text-xs font-semibold truncate ${params.allowLong ? 'text-emerald-300' : 'text-gray-400'}`}>Long</span>
+                                        </label>
+
+                                        <label className={`flex items-center justify-center gap-2 bg-gray-900 border rounded-xl px-2 py-2 cursor-pointer transition select-none h-[42px] ${
+                                            params.allowShort ? 'border-rose-500/50 bg-rose-950/20 shadow-sm shadow-rose-950/50' : 'border-gray-700 hover:border-gray-600 opacity-60'
+                                        }`}>
+                                            <input
+                                                type="checkbox"
+                                                checked={Boolean(params.allowShort)}
+                                                onChange={(e) => onParamChange('allowShort', e.target.checked)}
+                                                className="w-4 h-4 rounded text-rose-600 bg-gray-800 border-gray-600 focus:ring-rose-500 focus:ring-offset-gray-900 cursor-pointer accent-rose-500"
+                                            />
+                                            <TrendingDown size={14} className={params.allowShort ? 'text-rose-400 shrink-0' : 'text-gray-400 shrink-0'} />
+                                            <span className={`text-xs font-semibold truncate ${params.allowShort ? 'text-rose-300' : 'text-gray-400'}`}>Short</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                {col2Fields.filter(f => f.type.startsWith('select_spread')).map(renderField)}
+                            </div>
+
+                            {col2Fields.filter(f => f.type === 'insight_spread_row').map(renderField)}
+                        </>
+                    ) : isVWAP ? (
                         <>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                 <div className="space-y-1.5">

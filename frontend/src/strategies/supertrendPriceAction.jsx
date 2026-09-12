@@ -159,6 +159,8 @@ export const supertrendPriceActionStrategy = {
         template: 'Supertrend',
         supertrendPeriod: parseInt(params.stPeriod) || 10,
         supertrendMultiplier: parseFloat(params.stMultiplier) || 3.0,
+        showSupertrend: true,
+        showVWAP: false,
         showMA: false,
         maPeriod: null,
     }),

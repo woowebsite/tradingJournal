@@ -15,21 +15,23 @@ import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
 import TechnicalPanel from '../containers/TechnicalPanel';
 import WatchlistSelector from '../components/WatchlistSelector';
-import TradeStationOrderForm from '../components/TradeStationOrderForm';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
-import { Search, RefreshCw, Plus, History, BookmarkCheck, Bot } from 'lucide-react';
+import { Search, RefreshCw, Plus, History, BookmarkCheck, Bot, List, Trash2 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { upsertSymbolTechnicalAnalysis } from '../services/tcbs';
 import { calculateSMA } from '../indicators/movingAverages';
+import { formatNumber } from '../utils/formatNumber';
+import { buildExecutedTradeSignals } from '../utils/chartSignals';
 import { calculateSupertrend } from '../indicators/supertrend';
 import { calculateVWAP } from '../indicators/vwap';
 import { calculateIchimoku } from '../indicators/ichimoku/ichimoku';
 import { fetchRecentTcbsStrategySignals } from '../services/tcbsStrategy';
 import { getStrategyId } from '../utils/roadmapCalculations';
-import { getStrategyTemplates } from '../services/strategyTemplate';
+import { getStrategyTemplates, deleteStrategyTemplate } from '../services/strategyTemplate';
 import { scanPythonStrategy } from '../services/pythonStrategy';
+import StrategyTemplatesListModal from '../components/python-strategy/StrategyTemplatesListModal';
 
 const TradeStation = () => {
     const dispatch = useDispatch();
@@ -56,6 +58,7 @@ const TradeStation = () => {
     const [stMultiplier, setStMultiplier] = useState(3);
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
+    const [templatesListModalOpen, setTemplatesListModalOpen] = useState(false);
     const [tradeFormSetup, setTradeFormSetup] = useState({ price: '', slPrice: '', tpPrice: '' });
     const [pythonScanResult, setPythonScanResult] = useState(null);
     const [autoTrading, setAutoTrading] = useState(false);
@@ -183,10 +186,32 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
     const stratName = String(tpl?.name || stratFile.replace('.py', '')).toLowerCase();
     const rawTemplate = String(tpl?.template || '').toLowerCase();
 
-    const isPriceAction = stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || stratName.includes('price action') || stratName.includes('+ pa') || stratName.includes(' pa ') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined || cfg.slType !== undefined || cfg.paBd3bu2 !== undefined;
-    const isVWAP = !isPriceAction && (stratFile.includes('vwap') || stratName.includes('vwap') || rawTemplate.includes('vwap') || cfg.vwapMaPeriod !== undefined || cfg.vwapAnchor !== undefined || (!tpl && fallbackCtx.chartTemplate === 'VWAP'));
+    const isBreakout = stratFile.includes('breakout') || stratName.includes('breakout');
+    const isPriceAction = !isBreakout && (stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || stratName.includes('price action') || stratName.includes('+ pa') || stratName.includes(' pa ') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined || cfg.slType !== undefined || cfg.paBd3bu2 !== undefined);
+    const isVWAP = !isBreakout && !isPriceAction && (stratFile.includes('vwap') || stratName.includes('vwap') || rawTemplate.includes('vwap') || cfg.vwapMaPeriod !== undefined || cfg.vwapAnchor !== undefined || (!tpl && fallbackCtx.chartTemplate === 'VWAP'));
 
-    if (isPriceAction) {
+    if (isBreakout) {
+        return {
+            strategyFile: tpl?.strategyFile || 'strategy_breakout_st_vwap.py',
+            ticker: symName,
+            timeframe: targetTf,
+            countback: cfg.countback || 1000,
+            stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
+            stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
+            vwapAnchor: cfg.vwapAnchor || fallbackCtx.vwapAnchor || 'year',
+            indicatorFilter: cfg.indicatorFilter || 'st_or_vwap',
+            allowBreakoutHigh: cfg.allowBreakoutHigh !== undefined ? cfg.allowBreakoutHigh : true,
+            allowSweepLow: cfg.allowSweepLow !== undefined ? cfg.allowSweepLow : true,
+            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false,
+            tpType: cfg.tpType || 'P90',
+            slType: cfg.slType || 'P75',
+            customTpVal: parseFloat(cfg.customTpVal) || 0,
+            customSlVal: parseFloat(cfg.customSlVal) || 0,
+            riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+        };
+    } else if (isPriceAction) {
         return {
             strategyFile: tpl?.strategyFile || 'strategy_supertrend_priceaction.py',
             ticker: symName,
@@ -266,7 +291,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 return;
             }
 
-            const activeTrade = res.summary?.activeTrade;
+            const activeTrade = res.summary?.activeTrade || (res.trades || []).find(t => t.status === 'Open');
 
             let targetSignal = null;
             if (activeTrade && activeTrade.entry_price && activeTrade.stop_loss && activeTrade.status === 'Open') {
@@ -633,6 +658,9 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         const tpl = symbolTemplates.find(t =>
             String(t.documentId || t.id) === String(templateId) ||
             String(t.id) === String(templateId)
+        ) || templates.find(t =>
+            String(t.documentId || t.id) === String(templateId) ||
+            String(t.id) === String(templateId)
         );
         if (!tpl) {
             setChartTemplate('Supertrend');
@@ -650,10 +678,26 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
         const stratFile = (tpl.strategyFile || '').toLowerCase();
         const tplName = (tpl.name || '').toLowerCase();
-        const isVWAP = stratFile.includes('vwap') || tplName.includes('vwap');
+        const isBreakout = stratFile.includes('breakout') || tplName.includes('breakout');
+        const isPriceAction = !isBreakout && (stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa'));
+        const isVWAP = !isBreakout && !isPriceAction && (stratFile.includes('vwap') || tplName.includes('vwap'));
         const isIchimoku = stratFile.includes('ichimoku') || tplName.includes('ichimoku');
 
-        if (isVWAP) {
+        if (isBreakout) {
+            setChartTemplate('Supertrend_VWAP');
+            setMaPeriod(null);
+            if (cfg.stPeriod !== undefined) setStPeriod(parseInt(cfg.stPeriod) || 10);
+            if (cfg.stMultiplier !== undefined) setStMultiplier(parseFloat(cfg.stMultiplier) || 3.0);
+            if (cfg.vwapAnchor) {
+                const anchorMap = { 'day': 'Day', 'week': 'Week', 'month': 'Month', 'year': 'Year', 'quarter': 'Quarter' };
+                setVwapAnchor(anchorMap[cfg.vwapAnchor.toLowerCase()] || cfg.vwapAnchor);
+            }
+        } else if (isPriceAction) {
+            setChartTemplate('Supertrend');
+            setMaPeriod(null);
+            if (cfg.stPeriod !== undefined) setStPeriod(parseInt(cfg.stPeriod) || 10);
+            if (cfg.stMultiplier !== undefined) setStMultiplier(parseFloat(cfg.stMultiplier) || 3.0);
+        } else if (isVWAP) {
             setChartTemplate('VWAP');
             const targetMa = parseInt(cfg.vwapMaPeriod || cfg.maPeriod) || 9;
             setMaPeriod(targetMa);
@@ -666,7 +710,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
             const targetMa = parseInt(cfg.maPeriod) || 78;
             setMaPeriod(targetMa);
         } else {
-            setChartTemplate('Supertrend');
+            setChartTemplate('Supertrend_MA');
             const targetMa = parseInt(cfg.maPeriod) || 288;
             setMaPeriod(targetMa);
             if (cfg.stPeriod !== undefined) setStPeriod(parseInt(cfg.stPeriod) || 10);
@@ -681,7 +725,41 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 resolution: targetTf
             }));
         }
-    }, [dispatch, selectedAccount?.market?.Name, selectedSymbol, selectedSymbolId, symbolTemplates, timeframe]);
+    }, [dispatch, selectedAccount?.market?.Name, selectedSymbol, selectedSymbolId, symbolTemplates, templates, timeframe]);
+
+    const handleApplyTemplateFromModal = useCallback((tpl) => {
+        if (!tpl) return;
+        const tplId = String(tpl.documentId || tpl.id);
+        handleSelectTemplate(tplId);
+
+        // If template belongs to another symbol, switch symbol if present in symbols list
+        const tSym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || '').trim().toUpperCase();
+        if (tSym && Array.isArray(symbols)) {
+            const matchSym = symbols.find(s => String(s.Name || s.name || '').trim().toUpperCase() === tSym);
+            if (matchSym) {
+                const symId = matchSym.documentId || matchSym.id;
+                setSelectedSymbolId(symId);
+                setSearchParams({ symbol: matchSym.Name || matchSym.name }, { replace: true });
+            }
+        }
+    }, [handleSelectTemplate, symbols, setSearchParams]);
+
+    const handleDeleteTemplate = useCallback(async (templateId, e) => {
+        if (e) e.stopPropagation();
+        if (!templateId) return;
+        if (!window.confirm('Bạn có chắc chắn muốn xóa template chiến lược này?')) return;
+
+        try {
+            await deleteStrategyTemplate(templateId);
+            const updated = await getStrategyTemplates();
+            setTemplates(updated || []);
+            if (String(selectedTemplateId) === String(templateId)) {
+                setSelectedTemplateId('');
+            }
+        } catch (err) {
+            console.error('Failed to delete strategy template:', err);
+        }
+    }, [selectedTemplateId]);
 
     useEffect(() => {
         if (!selectedSymbol) {
@@ -1037,9 +1115,11 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
             }
         } else if (activeStrategy?.strategyFile) {
             const stratLower = activeStrategy.strategyFile.toLowerCase();
-            if (stratLower.includes('ichimoku')) setChartTemplate('Ichimoku');
+            if (stratLower.includes('breakout')) setChartTemplate('Supertrend_VWAP');
+            else if (stratLower.includes('ichimoku')) setChartTemplate('Ichimoku');
             else if (stratLower.includes('vwap')) setChartTemplate('VWAP');
-            else if (stratLower.includes('supertrend')) setChartTemplate('Supertrend');
+            else if (stratLower.includes('priceaction') || stratLower.includes('price_action')) setChartTemplate('Supertrend');
+            else if (stratLower.includes('supertrend')) setChartTemplate('Supertrend_MA');
         }
     }, [activeStrategy?.template, activeStrategy?.strategyFile]);
 
@@ -1108,113 +1188,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
     // Convert executed Real Trades & TradeDetails from Strapi DB into Chart Markers / Signals
     const executedTradeSignals = useMemo(() => {
-        if (!symbolTrades || symbolTrades.length === 0) return [];
-        const signalsList = [];
-
-        symbolTrades.forEach(trade => {
-            const tradeType = trade.type || 'Long';
-            const isLong = String(tradeType).toLowerCase() === 'long';
-            const details = trade.trade_details || [];
-
-            if (details.length > 0) {
-                details.forEach(detail => {
-                    const signalKind = String(detail.signal || 'Entry').toLowerCase();
-                    const detailType = String(detail.type || (isLong ? 'Buy' : 'Sell')).toLowerCase();
-                    const isBuy = detailType === 'buy';
-                    const isShortPos = !isLong || !isBuy;
-
-                    let markerType = 'entry';
-                    let shape = isBuy ? 'arrowUp' : 'arrowDown';
-                    let position = isBuy ? 'belowBar' : 'aboveBar';
-                    let color = isBuy ? '#10b981' : '#ef4444';
-                    let signalText = isBuy ? 'Buy' : 'Sell';
-
-                    if (signalKind.includes('take') || signalKind.includes('tp')) {
-                        markerType = 'takeprofit';
-                        color = '#3b82f6';
-                        signalText = 'TP';
-                        shape = isShortPos ? 'arrowUp' : 'arrowDown';
-                        position = isShortPos ? 'belowBar' : 'aboveBar';
-                    } else if (signalKind.includes('stop') || signalKind.includes('sl')) {
-                        markerType = 'stoploss';
-                        color = '#ef4444';
-                        signalText = 'SL';
-                        shape = 'circle';
-                        position = isShortPos ? 'aboveBar' : 'belowBar';
-                    } else if (signalKind.includes('exit') || signalKind.includes('close')) {
-                        markerType = 'exit';
-                        color = '#fb923c';
-                        signalText = 'Exit';
-                        shape = isBuy ? 'arrowUp' : 'arrowDown';
-                        position = isBuy ? 'belowBar' : 'aboveBar';
-                    } else {
-                        markerType = 'entry';
-                        signalText = isLong ? 'Long' : 'Short';
-                        color = isLong ? '#10b981' : '#ef4444';
-                        shape = isLong ? 'arrowUp' : 'arrowDown';
-                        position = isLong ? 'belowBar' : 'aboveBar';
-                    }
-
-                    signalsList.push({
-                        id: `detail-${detail.documentId || detail.id || Math.random()}`,
-                        date: detail.date || trade.date,
-                        time: detail.date || trade.date,
-                        type: markerType,
-                        posType: isLong ? 'Long' : 'Short',
-                        action: detail.signal || (isLong ? 'Long Entry' : 'Short Entry'),
-                        color,
-                        shape,
-                        position,
-                        text: `${signalText} @ ${detail.price || trade.price || ''}`,
-                        price: detail.price,
-                        volume: detail.volume,
-                        note: detail.note || trade.note,
-                        tradeId: trade.documentId || trade.id,
-                        status: trade.trade_status,
-                        rule: {
-                            Name: `${signalText} @ ${detail.price || ''}`,
-                            Type: markerType,
-                            signalText,
-                        },
-                        rules: [{
-                            Name: `${signalText} @ ${detail.price || ''}`,
-                            Type: markerType,
-                            signalText,
-                        }]
-                    });
-                });
-            } else if (trade.date) {
-                const markerType = 'entry';
-                signalsList.push({
-                    id: `trade-${trade.documentId || trade.id}`,
-                    date: trade.date,
-                    time: trade.date,
-                    type: markerType,
-                    posType: isLong ? 'Long' : 'Short',
-                    action: isLong ? 'Long' : 'Short',
-                    color: isLong ? '#10b981' : '#ef4444',
-                    shape: isLong ? 'arrowUp' : 'arrowDown',
-                    position: isLong ? 'belowBar' : 'aboveBar',
-                    text: `${isLong ? 'Long' : 'Short'} @ ${trade.price || ''}`,
-                    price: trade.price,
-                    note: trade.note,
-                    tradeId: trade.documentId || trade.id,
-                    status: trade.trade_status,
-                    rule: {
-                        Name: `${isLong ? 'Long' : 'Short'} (${trade.trade_status || 'Open'})`,
-                        Type: markerType,
-                        signalText: isLong ? 'Long' : 'Short',
-                    },
-                    rules: [{
-                        Name: `${isLong ? 'Long' : 'Short'}`,
-                        Type: markerType,
-                        signalText: isLong ? 'Long' : 'Short',
-                    }]
-                });
-            }
-        });
-
-        return signalsList.sort((a, b) => new Date(b.date) - new Date(a.date));
+        return buildExecutedTradeSignals(symbolTrades);
     }, [symbolTrades]);
 
 
@@ -1311,7 +1285,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                     const res = await scanPythonStrategy(scanParams);
                     if (res && !res.error) {
                         setPythonScanResult(res);
-                        const activeTrade = res.summary?.activeTrade;
+                        const activeTrade = res.summary?.activeTrade || (res.trades || []).find(t => t.status === 'Open');
                         const latestTrade = res.summary?.latestTrade;
 
                         if (activeTrade && activeTrade.entry_price && activeTrade.stop_loss) {
@@ -1540,7 +1514,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                                 </label>
 
                                 {/* Strategy Template Dropdown */}
-                                <label className="inline-flex items-center gap-1.5 text-xs text-cyan-300">
+                                <div className="inline-flex items-center gap-1.5 text-xs text-cyan-300">
                                     <BookmarkCheck size={14} className="text-cyan-400 shrink-0" />
                                     <span>Template</span>
                                     <select
@@ -1552,14 +1526,37 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                                         <option value="">-- Template ({symbolTemplates.length}) --</option>
                                         {symbolTemplates.map(tpl => {
                                             const tplId = String(tpl.documentId || tpl.id);
+                                            const m = tpl.config?.metrics || tpl.config?.backtestSummary;
+                                            const metricsStr = m ? ` | WR: ${m.winRate}% PF: ${m.profitFactor}` : '';
                                             return (
                                                 <option key={tplId} value={tplId}>
-                                                    {tpl.name} ({tpl.timeframe || 'D1'})
+                                                    {tpl.name} ({tpl.timeframe || 'D1'}{metricsStr})
                                                 </option>
                                             );
                                         })}
                                     </select>
-                                </label>
+                                    {selectedSymbol && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setTemplatesListModalOpen(true)}
+                                            title={`Xem danh sách các Strategy Templates của ${selectedSymbol?.Name || selectedSymbol?.name || selectedSymbol}`}
+                                            className="px-2 py-1 bg-cyan-900/40 hover:bg-cyan-800/60 border border-cyan-700/60 text-cyan-300 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                                        >
+                                            <List size={12} />
+                                            <span>Tất cả</span>
+                                        </button>
+                                    )}
+                                    {selectedTemplateId && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleDeleteTemplate(selectedTemplateId, e)}
+                                            title="Xóa template đang chọn"
+                                            className="p-1 bg-red-950/40 hover:bg-red-900/60 border border-red-700/60 text-red-400 rounded-lg text-xs transition cursor-pointer"
+                                        >
+                                            <Trash2 size={13} />
+                                        </button>
+                                    )}
+                                </div>
                                 {chartTemplate === 'VWAP' && (
                                     <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
                                         <span>Anchor</span>
@@ -1686,6 +1683,15 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 onSubmit={handleSaveTrade}
                 onDelete={handleDeleteTrade}
                 initialData={tradeToEdit}
+            />
+            <StrategyTemplatesListModal
+                isOpen={templatesListModalOpen}
+                onClose={() => setTemplatesListModalOpen(false)}
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                selectedSymbol={selectedSymbol?.Name || selectedSymbol?.name || ''}
+                onApplyTemplate={handleApplyTemplateFromModal}
+                onDeleteTemplate={handleDeleteTemplate}
             />
         </div>
     );

@@ -11,6 +11,7 @@ import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, d
 import { getSymbolInsights, getSymbolInsightsBySymbol } from '../services/symbolInsight';
 import DeflatedSharpeRatioCard from '../components/DeflatedSharpeRatioCard';
 import { formatNumber } from '../utils/formatNumber';
+import { buildPythonChartSignals } from '../utils/chartSignals';
 
 // Strategy Registry
 import {
@@ -34,6 +35,7 @@ import TradesHistoryTable from '../components/python-strategy/TradesHistoryTable
 import SaveTemplateModal from '../components/python-strategy/SaveTemplateModal';
 import InsightHistoryModal from '../components/python-strategy/InsightHistoryModal';
 import OptimizationLeaderboardModal from '../components/python-strategy/OptimizationLeaderboardModal';
+import StrategyTemplatesListModal from '../components/python-strategy/StrategyTemplatesListModal';
 
 const PythonStrategy = () => {
     const dispatch = useDispatch();
@@ -91,6 +93,7 @@ const PythonStrategy = () => {
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [saveModalOpen, setSaveModalOpen] = useState(false);
+    const [templatesListModalOpen, setTemplatesListModalOpen] = useState(false);
     const [overwriteTemplateId, setOverwriteTemplateId] = useState('');
     const [templateNameInput, setTemplateNameInput] = useState('');
     const [templateDescInput, setTemplateDescInput] = useState('');
@@ -541,11 +544,16 @@ const PythonStrategy = () => {
     }, [selectedSymbol, selectedStrategyFile, timeframe, handleScan]);
 
     // Template Handlers: Select, Save, Delete
-    const handleSelectTemplate = (templateId) => {
+    const handleSelectTemplate = (templateId, customSymbol = null) => {
         setSelectedTemplateId(templateId);
         if (!templateId) return;
         const tpl = templates.find(t => String(t.id || t.documentId) === String(templateId));
         if (!tpl) return;
+
+        const targetSymbol = customSymbol || String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || selectedSymbol || '').trim().toUpperCase();
+        if (targetSymbol && targetSymbol !== selectedSymbol) {
+            setSelectedSymbol(targetSymbol);
+        }
 
         if (tpl.strategyFile && tpl.strategyFile !== selectedStrategyFile) {
             setSelectedStrategyFile(tpl.strategyFile);
@@ -555,7 +563,10 @@ const PythonStrategy = () => {
             setTimeframe(tpl.timeframe);
         }
 
-        const tplConfig = tpl.config || {};
+        const tplConfig = { ...(tpl.config || {}) };
+        delete tplConfig.metrics;
+        delete tplConfig.backtestSummary;
+
         const mergedParams = {
             ...getDefaultParams(tpl.strategyFile || selectedStrategyFile),
             ...tplConfig,
@@ -567,7 +578,14 @@ const PythonStrategy = () => {
         setBestInfo(null);
         setHasMore(true);
 
-        handleScan(selectedSymbol, reqCount, targetTf, mergedParams);
+        handleScan(targetSymbol || selectedSymbol, reqCount, targetTf, mergedParams);
+    };
+
+    const handleApplyTemplateModal = (tpl) => {
+        if (!tpl) return;
+        const tplId = String(tpl.id || tpl.documentId);
+        const sym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || selectedSymbol || '').trim().toUpperCase();
+        handleSelectTemplate(tplId, sym);
     };
 
     const handleOpenSaveModal = () => {
@@ -630,6 +648,25 @@ const PythonStrategy = () => {
                 ? currentStrategy.generateDescription(params)
                 : '';
 
+            // Extract backtest summary metrics if available
+            const metrics = scanResult?.summary ? {
+                profitFactor: profitFactor !== undefined && profitFactor !== null ? profitFactor : (scanResult.summary.profitFactor ?? 0),
+                winRate: scanResult.summary.winRate ?? 0,
+                totalTrades: scanResult.summary.totalTrades ?? 0,
+                closedTrades: scanResult.summary.closedTrades ?? 0,
+                winTrades: scanResult.summary.winTrades ?? 0,
+                lossTrades: scanResult.summary.lossTrades ?? 0,
+                totalPnlPercent: scanResult.summary.totalPnlPercent ?? 0,
+                avgPnlPercent: scanResult.summary.avgPnlPercent ?? 0,
+                grossProfit: scanResult.summary.grossProfit ?? 0,
+                grossLoss: scanResult.summary.grossLoss ?? 0,
+                calculatedAt: new Date().toISOString(),
+            } : (
+                (overwriteTemplateId && overwriteTemplateId !== '__NEW__')
+                    ? (symbolTemplates.find(t => String(t.documentId || t.id) === String(overwriteTemplateId))?.config?.metrics || null)
+                    : null
+            );
+
             const payload = {
                 name,
                 description: templateDescInput.trim() || defaultDesc,
@@ -638,6 +675,8 @@ const PythonStrategy = () => {
                 config: {
                     ...params,
                     countback,
+                    metrics,
+                    backtestSummary: metrics,
                 },
                 symbol: currentSymObj?.documentId || currentSymObj?.id || null,
                 symbolName: selectedSymbol,
@@ -720,68 +759,9 @@ const PythonStrategy = () => {
         }));
     }, [scanResult]);
 
-    // Chuẩn bị Markers tín hiệu cho TradingViewChart
+    // Chuẩn bị Markers tín hiệu cho TradingViewChart (sử dụng common helper)
     const chartSignals = useMemo(() => {
-        if (!scanResult?.signals) return [];
-        return scanResult.signals.map(sig => {
-            const isEntry = sig.action === 'Entry';
-            const isTP = sig.type === 'takeprofit';
-            const isSL = sig.type === 'stoploss';
-            const isShort = sig.type === 'Short' || sig.pos_type === 'Short';
-
-            let ruleType = 'entry';
-            let color = '#10b981';
-            let shape = 'arrowUp';
-            let position = 'belowBar';
-            let text = '';
-
-            if (isTP) {
-                ruleType = 'takeprofit';
-                color = '#3b82f6';
-                if (isShort) {
-                    position = 'belowBar';
-                    shape = 'arrowUp';
-                } else {
-                    position = 'aboveBar';
-                    shape = 'arrowDown';
-                }
-            } else if (isSL) {
-                ruleType = 'stoploss';
-                color = '#ef4444';
-                shape = 'circle';
-                position = isShort ? 'aboveBar' : 'belowBar';
-            } else if (isShort) {
-                ruleType = 'entry';
-                color = '#ef4444';
-                shape = 'arrowDown';
-                position = 'aboveBar';
-            } else {
-                ruleType = 'entry';
-                color = '#10b981';
-                shape = 'arrowUp';
-                position = 'belowBar';
-            }
-
-            return {
-                date: sig.date,
-                time: sig.time,
-                type: ruleType,
-                posType: sig.pos_type || (isEntry ? sig.type : null),
-                action: sig.action,
-                color,
-                shape,
-                position,
-                text,
-                name: sig.rule?.Name || `${sig.type} @ ${formatNumber(sig.price || sig.entry)}`,
-                rules: [
-                    {
-                        Name: sig.rule?.Name || `${sig.type} @ ${formatNumber(sig.price || sig.entry)}`,
-                        Type: ruleType,
-                        signalText: isTP ? 'TP' : isSL ? 'SL' : `${sig.type}`
-                    }
-                ]
-            };
-        });
+        return buildPythonChartSignals(scanResult?.signals);
     }, [scanResult]);
 
     const summary = scanResult?.summary;
@@ -819,7 +799,7 @@ const PythonStrategy = () => {
     }, []);
 
     return (
-        <div className="flex-1 flex flex-col p-4 md:p-6 bg-gray-900 text-gray-100 min-h-screen space-y-6">
+        <div className="flex-1 flex flex-col bg-gray-900 text-gray-100 min-h-screen space-y-6">
             {/* 1. Header Area */}
             <StrategyHeader
                 selectedAccount={selectedAccount}
@@ -852,6 +832,7 @@ const PythonStrategy = () => {
                 selectedTemplateId={selectedTemplateId}
                 onTemplateSelect={handleSelectTemplate}
                 onTemplateDelete={handleDeleteTemplate}
+                onOpenTemplatesList={() => setTemplatesListModalOpen(true)}
                 symbolTemplates={symbolTemplates}
                 timeframe={timeframe}
                 onTimeframeChange={(newTf) => {
@@ -975,6 +956,8 @@ const PythonStrategy = () => {
                 timeframe={timeframe}
                 currentStrategy={currentStrategy}
                 params={params}
+                scanResult={scanResult}
+                profitFactor={profitFactor}
             />
 
             {/* 12. Modal Lịch sử Insight đã lưu (SymbolInsight) */}
@@ -999,6 +982,17 @@ const PythonStrategy = () => {
                 selectedStrategyFile={selectedStrategyFile}
                 timeframe={timeframe}
                 currentStrategy={currentStrategy}
+            />
+
+            {/* 14. Modal Danh sách tất cả Strategy Templates */}
+            <StrategyTemplatesListModal
+                isOpen={templatesListModalOpen}
+                onClose={() => setTemplatesListModalOpen(false)}
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                selectedSymbol={selectedSymbol}
+                onApplyTemplate={handleApplyTemplateModal}
+                onDeleteTemplate={handleDeleteTemplate}
             />
         </div>
     );

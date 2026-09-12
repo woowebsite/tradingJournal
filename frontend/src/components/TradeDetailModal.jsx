@@ -94,25 +94,9 @@ const TradeDetailModal = ({ isOpen, onClose, trade, onEdit }) => {
     const chartData = chartState.symbolId === activeSymbolId ? chartState.data : [];
     const chartError = chartState.symbolId === activeSymbolId ? chartState.error : '';
 
-    const chartSignals = useMemo(() => (trade?.trade_details || [])
-        .filter(detail => detail.date && detail.signal)
-        .map(detail => {
-            const normalizedSignal = String(detail.signal).toLowerCase().replace(/[\s_-]/g, '');
-            let type = 'unknown';
-            if (normalizedSignal.includes('entry') || normalizedSignal.includes('buy')) type = 'entry';
-            else if (normalizedSignal.includes('takeprofit') || normalizedSignal === 'tp') type = 'takeprofit';
-            else if (normalizedSignal.includes('stoploss') || normalizedSignal === 'sl') type = 'stoploss';
-            else if (normalizedSignal.includes('exit') || normalizedSignal.includes('sell')) type = 'exit';
-
-            return {
-                date: detail.date,
-                rules: [{
-                    documentId: `trade-detail-${detail.documentId || detail.id || detail.date}`,
-                    Name: detail.signal,
-                    Type: type
-                }]
-            };
-        }), [trade?.trade_details]);
+    const chartSignals = useMemo(() => {
+        return buildTradeDetailChartSignals(trade, selectedAccount);
+    }, [trade, selectedAccount]);
 
     useEscapeKey(onClose, isOpen);
 

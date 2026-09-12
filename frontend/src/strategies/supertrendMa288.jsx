@@ -158,9 +158,12 @@ export const supertrendMa288Strategy = {
 
     // Cấu hình truyền vào TradingViewChart
     getChartProps: (params) => ({
-        template: 'Supertrend',
+        template: 'Supertrend_MA',
         supertrendPeriod: parseInt(params.stPeriod) || 10,
         supertrendMultiplier: parseFloat(params.stMultiplier) || 3.0,
+        showSupertrend: true,
+        showVWAP: false,
+        showMA: true,
         maPeriod: parseInt(params.maPeriod) || 288,
     }),
 

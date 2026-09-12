@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, ListFilter, Bookmark, Trash2, Clock } from 'lucide-react';
+import { Layers, ListFilter, Bookmark, Trash2, Clock, List } from 'lucide-react';
 
 const WatchlistSymbolBar = ({
     selectedWatchlistId,
@@ -11,6 +11,7 @@ const WatchlistSymbolBar = ({
     selectedTemplateId,
     onTemplateSelect,
     onTemplateDelete,
+    onOpenTemplatesList,
     symbolTemplates,
     timeframe,
     onTimeframeChange
@@ -72,17 +73,30 @@ const WatchlistSymbolBar = ({
                             <Bookmark size={14} className="text-cyan-400" />
                             Strategy Template {selectedSymbol ? `(${selectedSymbol})` : ''}
                         </label>
-                        {selectedTemplateId && (
-                            <button
-                                type="button"
-                                onClick={(e) => onTemplateDelete(selectedTemplateId, e)}
-                                title="Xóa template đã chọn"
-                                className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition cursor-pointer"
-                            >
-                                <Trash2 size={12} />
-                                <span>Xóa</span>
-                            </button>
-                        )}
+                        <div className="flex items-center gap-2">
+                            {selectedSymbol && (
+                                <button
+                                    type="button"
+                                    onClick={onOpenTemplatesList}
+                                    title={`Xem danh sách các Strategy Templates của ${selectedSymbol}`}
+                                    className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition cursor-pointer font-medium hover:underline"
+                                >
+                                    <List size={12} />
+                                    <span>Tất cả</span>
+                                </button>
+                            )}
+                            {selectedTemplateId && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => onTemplateDelete(selectedTemplateId, e)}
+                                    title="Xóa template đã chọn"
+                                    className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition cursor-pointer"
+                                >
+                                    <Trash2 size={12} />
+                                    <span>Xóa</span>
+                                </button>
+                            )}
+                        </div>
                     </div>
                     <select
                         value={selectedTemplateId}
@@ -97,9 +111,13 @@ const WatchlistSymbolBar = ({
                         {symbolTemplates.map(tpl => {
                             const tplId = String(tpl.id || tpl.documentId);
                             const stratShortName = String(tpl.strategyFile || '').replace('strategy_', '').replace('.py', '');
+                            const m = tpl.config?.metrics || tpl.config?.backtestSummary;
+                            const metricsStr = m
+                                ? ` | WR: ${m.winRate}% • PF: ${m.profitFactor} • PnL: ${Number(m.totalPnlPercent) > 0 ? '+' : ''}${m.totalPnlPercent}%`
+                                : '';
                             return (
                                 <option key={tplId} value={tplId}>
-                                    {tpl.name} ({stratShortName} - {tpl.timeframe || 'D1'})
+                                    {tpl.name} ({stratShortName} - {tpl.timeframe || 'D1'}{metricsStr})
                                 </option>
                             );
                         })}
