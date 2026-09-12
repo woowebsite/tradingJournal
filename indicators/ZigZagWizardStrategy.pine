@@ -1,0 +1,695 @@
+//@version=6
+strategy(
+    title                   = "ZigZag Wizard Strategy",
+    shorttitle              = "ZZ Wizard",
+    overlay                 = true,
+    initial_capital         = 10000,
+    default_qty_type        = strategy.percent_of_equity,
+    default_qty_value       = 95,
+    margin_long             = 0,
+    margin_short            = 0,
+    commission_type         = strategy.commission.percent,
+    commission_value        = 0.05,
+    process_orders_on_close = true,
+    max_lines_count         = 500,
+    max_labels_count        = 500,
+    max_boxes_count         = 500
+)
+
+// ==============================================================================
+// 1. INPUTS & PARAMETERS
+// ==============================================================================
+
+// --- Group 1: ZigZag Settings ---
+grp_zz          = "1. Cấu hình ZigZag (ZigZag Settings)"
+selectedInd     = input.string("Donchian", "Indicator filter", 
+                     options = ["Supertrend", "Donchian"], 
+                     group = grp_zz, 
+                     tooltip = "Lựa chọn chỉ báo kết hợp cùng ZigZag:\n- Supertrend: Sử dụng dải Supertrend tính từ Đỉnh/Đáy ZigZag (Mục 2A)\n- Donchian: Sử dụng dải Donchian Channel tính từ Đỉnh/Đáy ZigZag (Mục 2B)")
+zzDepth         = input.int(5, "Pivot Depth (Số nến biên độ)", minval = 2, maxval = 50, group = grp_zz, tooltip = "Số lượng nến tối thiểu hai bên để xác nhận một điểm xoay Đỉnh/Đáy (Left/Right bars).")
+useAtrDev       = input.bool(true, "Dùng ATR cho Deviation", group = grp_zz, tooltip = "Sử dụng độ biến động ATR để lọc nhiễu các sóng ZigZag nhỏ.")
+zzAtrLength     = input.int(14, "Chu kỳ ATR Deviation", minval = 1, group = grp_zz)
+zzAtrMult       = input.float(1.5, "Hệ số nhân ATR Deviation", minval = 0.1, step = 0.1, group = grp_zz)
+zzFixedDevPct   = input.float(3.0, "Độ lệch cố định (% Fixed Deviation)", minval = 0.1, step = 0.5, group = grp_zz, tooltip = "Độ lệch tối thiểu (%) giữa đỉnh và đáy nếu không dùng ATR.")
+showZzLines     = input.bool(true, "Hiển thị đường vẽ ZigZag", group = grp_zz)
+colZzUp         = input.color(color.new(#00E5FF, 0), "Màu sóng Tăng (Up Wave)", group = grp_zz)
+colZzDown       = input.color(color.new(#FF5252, 0), "Màu sóng Giảm (Down Wave)", group = grp_zz)
+
+// --- Group 2A: Supertrend on ZigZag Settings ---
+grp_st          = "2A. Cấu hình Supertrend trên ZigZag (ST 10, 3)"
+stPeriod        = input.int(10, "Chu kỳ Supertrend ATR (Period)", minval = 1, group = grp_st, tooltip = "Mặc định 10 - Chu kỳ tính ATR của Supertrend.")
+stFactor        = input.float(3.0, "Hệ số nhân Supertrend (Factor/Multiplier)", minval = 0.1, step = 0.1, group = grp_st, tooltip = "Mặc định 3.0 - Hệ số mở rộng dải Supertrend.")
+stSourceType    = input.string("ZigZag HL2 (Đỉnh + Đáy / 2)", "Nguồn giá tham chiếu Supertrend", 
+                     options = ["ZigZag HL2 (Đỉnh + Đáy / 2)", "Giá Đỉnh/Đáy theo hướng sóng", "Giá Đóng Cửa (Close)"], 
+                     group = grp_st, 
+                     tooltip = "Lựa chọn nguồn giá đưa vào tính dải Supertrend:\n- ZigZag HL2: Trung điểm (Đỉnh Zigzag + Đáy Zigzag)/2\n- Giá Đỉnh/Đáy: Lấy Đỉnh khi sóng tăng, Đáy khi sóng giảm\n- Giá Đóng Cửa: Dùng giá nến để so sánh với dải tính từ đỉnh đáy")
+stAtrMode       = input.string("ATR Sóng ZigZag (True Range ZigZag)", "Cách tính biến động ATR", 
+                     options = ["ATR Sóng ZigZag (True Range ZigZag)", "ATR Nến thông thường (Standard Candle ATR)"], 
+                     group = grp_st, 
+                     tooltip = "Cách đo lường độ rộng dao động để tạo dải Supertrend.")
+showStLines     = input.bool(true, "Hiển thị đường Supertrend ZigZag", group = grp_st)
+colStUp         = input.color(color.new(#00E676, 0), "Màu Supertrend UP", group = grp_st)
+colStDown       = input.color(color.new(#FF1744, 0), "Màu Supertrend DOWN", group = grp_st)
+
+// --- Group 2B: Donchian Channel on ZigZag Settings ---
+grp_dc          = "2B. Cấu hình Donchian Channel trên ZigZag (DC 20)"
+dcLength        = input.int(20, "Donchian Length (Chu kỳ)", minval = 1, group = grp_dc, tooltip = "Mặc định 20 - Số nến dùng để xác định dải Đỉnh cao nhất (Upper) và Đáy thấp nhất (Lower) của ZigZag.")
+dcTriggerType   = input.string("Vượt Trung Tuyến (Basis)", "Tiêu chuẩn Xác định Trend Donchian", 
+                     options = ["Vượt Trung Tuyến (Basis)", "Chạm / Phá Dải Biên (Upper/Lower)"], 
+                     group = grp_dc, 
+                     tooltip = "Quy định điều kiện Donchian đảo chiều UP/DOWN:\n- Vượt Trung Tuyến: UP khi giá/sóng Zigzag nằm trên Basis, DOWN khi nằm dưới Basis\n- Chạm/Phá Dải Biên: UP khi chạm Upper Band, DOWN khi chạm Lower Band")
+showDcLines     = input.bool(true, "Hiển thị Donchian Channel ZigZag", group = grp_dc)
+colDcUpper      = input.color(color.new(#29B6F6, 0), "Màu Dải Trên (Upper Band)", group = grp_dc)
+colDcBasis      = input.color(color.new(#FFA726, 0), "Màu Trung Tuyến (Basis)", group = grp_dc)
+colDcLower      = input.color(color.new(#AB47BC, 0), "Màu Dải Dưới (Lower Band)", group = grp_dc)
+
+// --- Group 3: Strategy Entry Logic ---
+grp_entry       = "3. Cấu hình Vào lệnh (Entry Logic)"
+allowLong       = input.bool(true, "Kích hoạt lệnh LONG", group = grp_entry)
+allowShort      = input.bool(true, "Kích hoạt lệnh SHORT", group = grp_entry)
+entryMode       = input.string("Cùng chiều", "Entry Mode", 
+                     options = [
+                         "Cùng chiều", 
+                         "Ngược chiều"
+                     ], 
+                     group = grp_entry, 
+                     tooltip = "Quy định điều kiện vào lệnh:\n- Cùng chiều: LONG khi Break Đỉnh ZigZag cũ + Indicator TĂNG; SHORT khi Break Đáy ZigZag cũ + Indicator GIẢM\n- Ngược chiều: LONG khi Break Đáy ZigZag cũ + Indicator TĂNG; SHORT khi Break Đỉnh ZigZag cũ + Indicator GIẢM")
+breakoutSrcType = input.string("Giá Đóng Cửa (Close)", "Tiêu chuẩn Break đỉnh/đáy", 
+                     options = ["Giá Đóng Cửa (Close)", "Râu nến (High/Low)"], 
+                     group = grp_entry, 
+                     tooltip = "Lựa chọn tiêu chuẩn tính Breakout:\n- Giá Đóng Cửa: Nến đóng cửa vượt qua đỉnh/đáy cũ\n- Râu nến: High vượt đỉnh cũ hoặc Low phá đáy cũ")
+filterSmaTrend  = input.bool(false, "Lọc thêm xu hướng dài hạn (SMA Trend)", group = grp_entry)
+smaTrendLen     = input.int(200, "Chu kỳ SMA Trend Filter", minval = 1, group = grp_entry)
+
+// --- Group 4: Risk Management & Exit ---
+grp_risk        = "4. Quản trị Rủi ro & Thoát lệnh (Risk & Exits)"
+slType          = input.string("Đáy/Đỉnh ZigZag gần nhất", "Phương thức Stop Loss (SL)", 
+                     options = ["Đáy/Đỉnh ZigZag gần nhất", "Theo dải Indicator (ST / DC Basis)", "Theo ATR Nến (Multiplier)"], 
+                     group = grp_risk)
+slAtrMult       = input.float(1.5, "Hệ số nhân ATR Stop Loss", minval = 0.5, step = 0.1, group = grp_risk)
+slBufferTicks   = input.int(2, "Số tick đệm an toàn dưới/trên SL", minval = 0, group = grp_risk)
+exitOnZigzag    = input.bool(true, "Thoát lệnh theo ZigZag đảo chiều", group = grp_risk, tooltip = "Đóng vị thế LONG khi giá Close < đáy ZigZag giảm trước đó; Đóng vị thế SHORT khi giá Close > đỉnh ZigZag tăng trước đó.")
+exitOnIndicator = input.bool(false, "Thoát lệnh theo Indicator đảo chiều", group = grp_risk, tooltip = "Đóng vị thế khi có 1 sóng ZigZag giảm hoàn thành dưới Supertrend/DC Basis (đối với Long), hoặc 1 sóng ZigZag tăng hoàn thành trên Supertrend/DC Basis (đối với Short).")
+useTakeProfit   = input.bool(false, "Sử dụng Take Profit (TP)", group = grp_risk)
+tpRrr           = input.float(2.0, "Tỷ lệ Risk : Reward (RRR)", minval = 0.5, step = 0.1, group = grp_risk, tooltip = "Chốt lời theo tỷ lệ bội số khoảng cách cắt lỗ ban đầu.")
+usePartialTp    = input.bool(false, "Chốt lời 50% tại Đỉnh/Đáy cũ của ZigZag", group = grp_risk, tooltip = "Chốt 50% vị thế khi giá chạm lại đỉnh cũ (với Long) hoặc đáy cũ (với Short), 50% còn lại gồng theo RRR.")
+useBreakEven    = input.bool(false, "Dời Stop Loss về Hòa vốn (Break-Even)", group = grp_risk, tooltip = "Tự động dời SL về giá vào lệnh khi đạt 1.0R hoặc sau khi chốt lời 1 phần.")
+beTriggerRrr    = input.float(1.0, "Ngưỡng RRR kích hoạt Break-Even", minval = 0.5, step = 0.1, group = grp_risk)
+showTpSlVisual  = input.bool(true, "Hiển thị đường vẽ Entry / SL / TP", group = grp_risk)
+
+// --- Group 5: Dashboard ---
+grp_dash        = "5. Bảng Thống kê & Dashboard"
+showDashboard   = input.bool(true, "Hiển thị Bảng Dashboard", group = grp_dash)
+dashPosition    = input.string("Top Right", "Vị trí Dashboard", 
+                     options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right"], 
+                     group = grp_dash)
+
+// ==============================================================================
+// 2. CORE ENGINE: TÍNH TOÁN ZIGZAG TỪ ĐỈNH ĐÁY CỦA NẾN
+// ==============================================================================
+
+// Tính toán độ lệch tối thiểu (Deviation Threshold)
+float dynamicDev = (useAtrDev ? (ta.atr(zzAtrLength) * zzAtrMult) : (close * zzFixedDevPct / 100.0))
+
+// Phát hiện Pivot High và Pivot Low theo Depth
+float rawPivotHigh = ta.pivothigh(high, zzDepth, zzDepth)
+float rawPivotLow  = ta.pivotlow(low, zzDepth, zzDepth)
+
+// Lưu trữ cấu trúc điểm xoay ZigZag
+var array<float> pivotPrices = array.new_float()
+var array<int>   pivotBars   = array.new_int()
+var array<bool>  pivotIsHigh = array.new_bool()
+
+// Trạng thái sóng hiện tại
+// zzDir: 1 = Sóng Tăng (đáy trước đó, đang hướng lên đỉnh mới), -1 = Sóng Giảm (đỉnh trước đó, đang hướng xuống đáy mới)
+var int   zzDir          = 0
+var float lastConfirmedHigh = high
+var float lastConfirmedLow  = low
+var int   lastHighBar       = bar_index
+var int   lastLowBar        = bar_index
+var float currentZzPrice    = close
+
+bool isNewHighConfirmed = false
+bool isNewLowConfirmed  = false
+
+// Xử lý khi xuất hiện Pivot High mới
+if not na(rawPivotHigh)
+    int pBar = bar_index - zzDepth
+    float pPrice = rawPivotHigh
+    
+    if zzDir == 1 or zzDir == 0
+        // Đang trong sóng tăng hoặc mới bắt đầu: Đã tìm thấy Đỉnh mới
+        if pPrice >= (lastConfirmedLow + dynamicDev) or array.size(pivotPrices) == 0
+            array.push(pivotPrices, pPrice)
+            array.push(pivotBars, pBar)
+            array.push(pivotIsHigh, true)
+            lastConfirmedHigh  := pPrice
+            lastHighBar        := pBar
+            zzDir              := -1 // Đã tạo đỉnh, bắt đầu chuyển sang tìm đáy (sóng giảm)
+            isNewHighConfirmed := true
+    else if zzDir == -1
+        // Nếu đang trong sóng giảm mà tạo Đỉnh cao hơn đỉnh vừa rồi -> Cập nhật lại đỉnh cao nhất
+        if pPrice > lastConfirmedHigh
+            if array.size(pivotPrices) > 0
+                array.set(pivotPrices, array.size(pivotPrices) - 1, pPrice)
+                array.set(pivotBars, array.size(pivotBars) - 1, pBar)
+            lastConfirmedHigh  := pPrice
+            lastHighBar        := pBar
+            isNewHighConfirmed := true
+
+// Xử lý khi xuất hiện Pivot Low mới
+if not na(rawPivotLow)
+    int pBar = bar_index - zzDepth
+    float pPrice = rawPivotLow
+    
+    if zzDir == -1 or zzDir == 0
+        // Đang trong sóng giảm hoặc mới bắt đầu: Đã tìm thấy Đáy mới
+        if pPrice <= (lastConfirmedHigh - dynamicDev) or array.size(pivotPrices) == 0
+            array.push(pivotPrices, pPrice)
+            array.push(pivotBars, pBar)
+            array.push(pivotIsHigh, false)
+            lastConfirmedLow  := pPrice
+            lastLowBar        := pBar
+            zzDir             := 1 // Đã tạo đáy, bắt đầu chuyển sang tìm đỉnh (sóng tăng)
+            isNewLowConfirmed := true
+    else if zzDir == 1
+        // Nếu đang trong sóng tăng mà tạo Đáy thấp hơn đáy vừa rồi -> Cập nhật lại đáy thấp nhất
+        if pPrice < lastConfirmedLow
+            if array.size(pivotPrices) > 0
+                array.set(pivotPrices, array.size(pivotPrices) - 1, pPrice)
+                array.set(pivotBars, array.size(pivotBars) - 1, pBar)
+            lastConfirmedLow  := pPrice
+            lastLowBar        := pBar
+            isNewLowConfirmed := true
+
+// Cập nhật giá trị điểm xoay gần nhất
+currentZzPrice := (zzDir == 1) ? lastConfirmedLow : lastConfirmedHigh
+
+// ==============================================================================
+// 3. VẼ ĐƯỜNG ZIGZAG TRỰC QUAN
+// ==============================================================================
+
+var array<line> zzLines = array.new_line()
+
+if showZzLines and (isNewHighConfirmed or isNewLowConfirmed) and array.size(pivotPrices) >= 2
+    int pSize = array.size(pivotPrices)
+    int x1 = array.get(pivotBars, pSize - 2)
+    float y1 = array.get(pivotPrices, pSize - 2)
+    int x2 = array.get(pivotBars, pSize - 1)
+    float y2 = array.get(pivotPrices, pSize - 1)
+    bool isUpWave = y2 > y1
+    
+    line l = line.new(
+        x1          = x1, 
+        y1          = y1, 
+        x2          = x2, 
+        y2          = y2, 
+        xloc        = xloc.bar_index, 
+        color       = isUpWave ? colZzUp : colZzDown, 
+        width       = 2, 
+        style       = line.style_solid
+    )
+    array.push(zzLines, l)
+    
+    if array.size(zzLines) > 200
+        line.delete(array.shift(zzLines))
+
+// ==============================================================================
+// 4A. BỘ TÍNH TOÁN SUPERTREND TỪ ĐỈNH / ĐÁY ZIGZAG (SUPERTREND 10, 3)
+// ==============================================================================
+
+// 1. Tọa độ Đỉnh và Đáy ZigZag đưa vào Supertrend
+float zzHigh = lastConfirmedHigh
+float zzLow  = lastConfirmedLow
+float zzHL2  = (zzHigh + zzLow) / 2.0
+
+// 2. Nguồn giá được sử dụng cho Supertrend
+float zzSource = switch stSourceType
+    "ZigZag HL2 (Đỉnh + Đáy / 2)"     => zzHL2
+    "Giá Đỉnh/Đáy theo hướng sóng"     => (zzDir == 1 ? zzHigh : zzLow)
+    "Giá Đóng Cửa (Close)"           => close
+    => zzHL2
+
+// 3. Tính độ biến động (ATR) cho Supertrend
+float zzTR = math.max(
+    zzHigh - zzLow, 
+    math.max(
+        math.abs(zzHigh - nz(currentZzPrice[1], zzHigh)), 
+        math.abs(zzLow - nz(currentZzPrice[1], zzLow))
+    )
+)
+
+float stAtrValue = switch stAtrMode
+    "ATR Sóng ZigZag (True Range ZigZag)" => ta.rma(zzTR, stPeriod)
+    "ATR Nến thông thường (Standard Candle ATR)" => ta.atr(stPeriod)
+    => ta.rma(zzTR, stPeriod)
+
+if na(stAtrValue) or stAtrValue <= 0
+    stAtrValue := ta.atr(stPeriod)
+if na(stAtrValue) or stAtrValue <= 0
+    stAtrValue := math.max(high - low, syminfo.mintick)
+
+// 4. Tính toán Dải Supertrend (Bands)
+float basicUpper = zzSource + (stFactor * stAtrValue)
+float basicLower = zzSource - (stFactor * stAtrValue)
+
+var float finalUpper = na
+var float finalLower = na
+var int   stTrend    = 1 // 1: Bullish (UP), -1: Bearish (DOWN)
+
+float prevFinalUpper = nz(finalUpper[1], basicUpper)
+float prevFinalLower = nz(finalLower[1], basicLower)
+float prevSource     = nz(zzSource[1], zzSource)
+
+if (basicLower > prevFinalLower) or (prevSource < prevFinalLower)
+    finalLower := basicLower
+else
+    finalLower := prevFinalLower
+
+if (basicUpper < prevFinalUpper) or (prevSource > prevFinalUpper)
+    finalUpper := basicUpper
+else
+    finalUpper := prevFinalUpper
+
+int prevStTrend = nz(stTrend[1], 1)
+if prevStTrend == 1
+    if zzSource < finalLower
+        stTrend := -1
+        finalUpper := basicUpper
+else
+    if zzSource > finalUpper
+        stTrend := 1
+        finalLower := basicLower
+
+float stValue = (stTrend == 1) ? finalLower : finalUpper
+bool  isStFlippedUp   = (stTrend == 1 and stTrend[1] == -1)
+bool  isStFlippedDown = (stTrend == -1 and stTrend[1] == 1)
+
+// ==============================================================================
+// 4B. BỘ TÍNH TOÁN DONCHIAN CHANNEL TỪ ĐỈNH / ĐÁY ZIGZAG (DC 20)
+// ==============================================================================
+
+// Dải Donchian Channel tính từ chuỗi Đỉnh/Đáy ZigZag trong N nến (dcLength)
+float dcUpper = ta.highest(zzHigh, dcLength)
+float dcLower = ta.lowest(zzLow, dcLength)
+float dcBasis = (dcUpper + dcLower) / 2.0
+
+// Xác định xu hướng Donchian Zigzag
+var int dcTrend = 1 // 1: Bullish (UP), -1: Bearish (DOWN)
+
+if dcTriggerType == "Vượt Trung Tuyến (Basis)"
+    if zzSource >= dcBasis
+        dcTrend := 1
+    else
+        dcTrend := -1
+else // "Chạm / Phá Dải Biên (Upper/Lower)"
+    if zzSource >= dcUpper
+        dcTrend := 1
+    else if zzSource <= dcLower
+        dcTrend := -1
+
+bool isDcFlippedUp   = (dcTrend == 1 and nz(dcTrend[1], 1) == -1)
+bool isDcFlippedDown = (dcTrend == -1 and nz(dcTrend[1], 1) == 1)
+
+// ==============================================================================
+// 4C. HỢP NHẤT CHỈ BÁO KẾT HỢP (UNIFIED INDICATOR ABSTRACTION)
+// ==============================================================================
+
+bool isUseSupertrend = (selectedInd == "Supertrend")
+bool isUseDonchian   = (selectedInd == "Donchian")
+
+int   indTrend       = isUseSupertrend ? stTrend : dcTrend
+float indValue       = isUseSupertrend ? stValue : dcBasis
+bool  isIndFlippedUp   = isUseSupertrend ? isStFlippedUp : isDcFlippedUp
+bool  isIndFlippedDown = isUseSupertrend ? isStFlippedDown : isDcFlippedDown
+
+// ==============================================================================
+// 5. HIỂN THỊ ĐƯỜNG CHỈ BÁO TRÊN BIỂU ĐỒ (VISUALS)
+// ==============================================================================
+
+// 1. Vẽ Supertrend khi chọn chế độ Supertrend
+plotStLine = plot(
+    (isUseSupertrend and showStLines) ? stValue : na, 
+    title       = "ZigZag Supertrend Line", 
+    color       = stTrend == 1 ? colStUp : colStDown, 
+    linewidth   = 2, 
+    style       = plot.style_linebr
+)
+
+plotStMid = plot(
+    (isUseSupertrend and showStLines) ? zzSource : na, 
+    title       = "ZigZag Source Reference", 
+    color       = color.new(color.gray, 80), 
+    display     = display.none
+)
+
+fill(
+    plotStLine, 
+    plotStMid, 
+    color = (isUseSupertrend and showStLines) ? (stTrend == 1 ? color.new(#00E676, 85) : color.new(#FF1744, 85)) : na, 
+    title = "Supertrend Background Fill"
+)
+
+// 2. Vẽ Donchian Channel khi chọn chế độ Donchian
+plotDcUpper = plot(
+    (isUseDonchian and showDcLines) ? dcUpper : na, 
+    title       = "ZigZag Donchian Upper", 
+    color       = colDcUpper, 
+    linewidth   = 1, 
+    style       = plot.style_line
+)
+
+plotDcBasis = plot(
+    (isUseDonchian and showDcLines) ? dcBasis : na, 
+    title       = "ZigZag Donchian Basis", 
+    color       = colDcBasis, 
+    linewidth   = 2, 
+    style       = plot.style_line
+)
+
+plotDcLower = plot(
+    (isUseDonchian and showDcLines) ? dcLower : na, 
+    title       = "ZigZag Donchian Lower", 
+    color       = colDcLower, 
+    linewidth   = 1, 
+    style       = plot.style_line
+)
+
+fill(
+    plotDcUpper, 
+    plotDcLower, 
+    color = (isUseDonchian and showDcLines) ? color.new(#29B6F6, 92) : na, 
+    title = "Donchian Background Fill"
+)
+
+// ==============================================================================
+// 6. LOGIC TÍN HIỆU VÀ VÀO / THOÁT LỆNH (STRATEGY LOGIC)
+// ==============================================================================
+
+// Bộ lọc xu hướng dài hạn nếu được bật
+float smaTrendVal = ta.sma(close, smaTrendLen)
+bool  trendLongOk  = not filterSmaTrend or (close > smaTrendVal)
+bool  trendShortOk = not filterSmaTrend or (close < smaTrendVal)
+
+// Điều kiện cơ bản:
+// - Long: Zigzag đang tăng (zzDir == 1) VÀ Indicator Zigzag đang UP (indTrend == 1)
+// - Short: Zigzag đang giảm (zzDir == -1) VÀ Indicator Zigzag đang DOWN (indTrend == -1)
+bool zzIsRising  = (zzDir == 1)
+bool zzIsFalling = (zzDir == -1)
+bool indIsUp     = (indTrend == 1)
+bool indIsDown   = (indTrend == -1)
+
+bool baseLongCond  = zzIsRising and indIsUp and trendLongOk
+bool baseShortCond = zzIsFalling and indIsDown and trendShortOk
+
+// Điều kiện lọc bắt buộc: Entry Long luôn > DC Basis hoặc Supertrend; Entry Short luôn < DC Basis hoặc Supertrend
+bool priceAboveInd = (close > indValue)
+bool priceBelowInd = (close < indValue)
+
+// Nhận diện Break đỉnh / đáy cũ của ZigZag
+bool isBreakHigh = (breakoutSrcType == "Giá Đóng Cửa (Close)") ? ta.crossover(close, lastConfirmedHigh) : ta.crossover(high, lastConfirmedHigh)
+bool isBreakLow  = (breakoutSrcType == "Giá Đóng Cửa (Close)") ? ta.crossunder(close, lastConfirmedLow) : ta.crossunder(low, lastConfirmedLow)
+
+// Xác định thời điểm kích hoạt theo Chế độ Vào lệnh
+bool longTrigger  = false
+bool shortTrigger = false
+
+switch entryMode
+    "Cùng chiều" =>
+        // Long: Break Đỉnh cũ + Indicator TĂNG + Giá > Indicator (ST/DC Basis)
+        longTrigger  := isBreakHigh and indIsUp and priceAboveInd and trendLongOk
+        // Short: Break Đáy cũ + Indicator GIẢM + Giá < Indicator (ST/DC Basis)
+        shortTrigger := isBreakLow and indIsDown and priceBelowInd and trendShortOk
+    "Ngược chiều" =>
+        // Long: Break Đáy cũ + Indicator TĂNG + Giá > Indicator (ST/DC Basis)
+        longTrigger  := isBreakLow and indIsUp and priceAboveInd and trendLongOk
+        // Short: Break Đỉnh cũ + Indicator GIẢM + Giá < Indicator (ST/DC Basis)
+        shortTrigger := isBreakHigh and indIsDown and priceBelowInd and trendShortOk
+
+// Ngăn vào lệnh trùng lặp khi đang giữ đúng chiều vị thế và đảm bảo giá luôn thỏa mãn điều kiện so với Indicator
+bool validLongSignal  = allowLong and longTrigger and priceAboveInd and strategy.position_size <= 0
+bool validShortSignal = allowShort and shortTrigger and priceBelowInd and strategy.position_size >= 0
+
+// ==============================================================================
+// 7. TÍNH TOÁN STOP LOSS & TAKE PROFIT & QUẢN LÝ VỊ THẾ
+// ==============================================================================
+
+var float activeLongEntryPrice  = na
+var float activeLongSlPrice     = na
+var float activeLongTp1Price    = na
+var float activeLongTp2Price    = na
+var bool  isLongTp1Hit          = false
+var bool  isLongBeApplied       = false
+
+var float activeShortEntryPrice = na
+var float activeShortSlPrice    = na
+var float activeShortTp1Price   = na
+var float activeShortTp2Price   = na
+var bool  isShortTp1Hit         = false
+var bool  isShortBeApplied      = false
+
+// Tính mức SL cho Long
+float baseLongSl = (entryMode == "Ngược chiều") ? math.min(lastConfirmedLow, low) : lastConfirmedLow
+float calcLongSl = switch slType
+    "Đáy/Đỉnh ZigZag gần nhất"             => baseLongSl - (slBufferTicks * syminfo.mintick)
+    "Theo dải Indicator (ST / DC Basis)" => indValue - (slBufferTicks * syminfo.mintick)
+    "Theo ATR Nến (Multiplier)"           => close - (ta.atr(14) * slAtrMult)
+    => baseLongSl
+
+float minSlDistLong = ta.atr(14) * 0.5
+if (close - calcLongSl) < minSlDistLong
+    calcLongSl := close - (ta.atr(14) * slAtrMult)
+
+// Tính mức SL cho Short
+float baseShortSl = (entryMode == "Ngược chiều") ? math.max(lastConfirmedHigh, high) : lastConfirmedHigh
+float calcShortSl = switch slType
+    "Đáy/Đỉnh ZigZag gần nhất"             => baseShortSl + (slBufferTicks * syminfo.mintick)
+    "Theo dải Indicator (ST / DC Basis)" => indValue + (slBufferTicks * syminfo.mintick)
+    "Theo ATR Nến (Multiplier)"           => close + (ta.atr(14) * slAtrMult)
+    => baseShortSl
+
+float minSlDistShort = ta.atr(14) * 0.5
+if (calcShortSl - close) < minSlDistShort
+    calcShortSl := close + (ta.atr(14) * slAtrMult)
+
+// --- THỰC THI VÀO LỆNH LONG ---
+if validLongSignal
+    float longRiskDist = math.max(close - calcLongSl, syminfo.mintick)
+    float longTp2 = useTakeProfit ? (close + longRiskDist * tpRrr) : na
+    float longTp1 = (usePartialTp and lastConfirmedHigh > close) ? lastConfirmedHigh : na
+    
+    activeLongEntryPrice := close
+    activeLongSlPrice    := calcLongSl
+    activeLongTp1Price   := longTp1
+    activeLongTp2Price   := longTp2
+    isLongTp1Hit         := false
+    isLongBeApplied      := false
+    
+    strategy.entry("Long", strategy.long, comment = "Entry Long")
+    
+    if not na(longTp1)
+        strategy.exit("TP1 Long", from_entry = "Long", qty_percent = 50, limit = longTp1, stop = activeLongSlPrice, comment_profit = "TP1 Long", comment_loss = "SL Long")
+        strategy.exit("TP2 Long", from_entry = "Long", limit = longTp2, stop = activeLongSlPrice, comment_profit = "TP2 Long", comment_loss = "SL Long")
+    else
+        strategy.exit("Exit Long", from_entry = "Long", limit = longTp2, stop = activeLongSlPrice, comment_profit = "TP Long", comment_loss = "SL Long")
+
+// --- THỰC THI VÀO LỆNH SHORT ---
+if validShortSignal
+    float shortRiskDist = math.max(calcShortSl - close, syminfo.mintick)
+    float shortTp2 = useTakeProfit ? (close - shortRiskDist * tpRrr) : na
+    float shortTp1 = (usePartialTp and lastConfirmedLow < close) ? lastConfirmedLow : na
+    
+    activeShortEntryPrice := close
+    activeShortSlPrice    := calcShortSl
+    activeShortTp1Price   := shortTp1
+    activeShortTp2Price   := shortTp2
+    isShortTp1Hit         := false
+    isShortBeApplied      := false
+    
+    strategy.entry("Short", strategy.short, comment = "Entry Short")
+    
+    if not na(shortTp1)
+        strategy.exit("TP1 Short", from_entry = "Short", qty_percent = 50, limit = shortTp1, stop = activeShortSlPrice, comment_profit = "TP1 Short", comment_loss = "SL Short")
+        strategy.exit("TP2 Short", from_entry = "Short", limit = shortTp2, stop = activeShortSlPrice, comment_profit = "TP2 Short", comment_loss = "SL Short")
+    else
+        strategy.exit("Exit Short", from_entry = "Short", limit = shortTp2, stop = activeShortSlPrice, comment_profit = "TP Short", comment_loss = "SL Short")
+
+// ==============================================================================
+// 8. QUẢN LÝ VỊ THẾ ĐANG MỞ (BREAK-EVEN & REVERSAL EXITS)
+// ==============================================================================
+
+if strategy.position_size > 0
+    if not na(activeLongTp1Price) and high >= activeLongTp1Price
+        isLongTp1Hit := true
+    
+    if useBreakEven and not isLongBeApplied and not na(activeLongEntryPrice) and not na(activeLongSlPrice)
+        float initialRisk = activeLongEntryPrice - activeLongSlPrice
+        if high >= (activeLongEntryPrice + initialRisk * beTriggerRrr) or isLongTp1Hit
+            activeLongSlPrice := activeLongEntryPrice
+            isLongBeApplied   := true
+            strategy.exit("Exit Long BE", from_entry = "Long", limit = activeLongTp2Price, stop = activeLongSlPrice, comment_profit = "TP Long", comment_loss = "SL BE Long")
+    
+    // Thoát lệnh theo cấu hình độc lập: Zigzag đảo chiều & Indicator đảo chiều
+    int entryBar = strategy.opentrades > 0 ? strategy.opentrades.entry_bar_index(strategy.opentrades - 1) : -1
+    if bar_index > entryBar
+        // 1. Thoát lệnh khi ZigZag đảo chiều: Close < Đáy ZigZag giảm trước đó (Long)
+        if exitOnZigzag and not na(lastConfirmedLow) and close < lastConfirmedLow
+            strategy.close("Long", comment = "Close Long (Close < Prev ZZ Low)")
+        
+        // 2. Thoát lệnh khi Indicator đảo chiều: Có 1 Sóng ZigZag GIẢM hoàn thành/đóng cửa dưới Supertrend hoặc DC Basis
+        if exitOnIndicator
+            if isNewLowConfirmed and (lastConfirmedLow < indValue or indTrend == -1)
+                strategy.close("Long", comment = "Close Long (ZZ Wave below Indicator)")
+
+else if strategy.position_size < 0
+    if not na(activeShortTp1Price) and low <= activeShortTp1Price
+        isShortTp1Hit := true
+    
+    if useBreakEven and not isShortBeApplied and not na(activeShortEntryPrice) and not na(activeShortSlPrice)
+        float initialRisk = activeShortSlPrice - activeShortEntryPrice
+        if low <= (activeShortEntryPrice - initialRisk * beTriggerRrr) or isShortTp1Hit
+            activeShortSlPrice := activeShortEntryPrice
+            isShortBeApplied   := true
+            strategy.exit("Exit Short BE", from_entry = "Short", limit = activeShortTp2Price, stop = activeShortSlPrice, comment_profit = "TP Short", comment_loss = "SL BE Short")
+    
+    // Thoát lệnh theo cấu hình độc lập: Zigzag đảo chiều & Indicator đảo chiều
+    int entryBar = strategy.opentrades > 0 ? strategy.opentrades.entry_bar_index(strategy.opentrades - 1) : -1
+    if bar_index > entryBar
+        // 1. Thoát lệnh khi ZigZag đảo chiều: Close > Đỉnh ZigZag tăng trước đó (Short)
+        if exitOnZigzag and not na(lastConfirmedHigh) and close > lastConfirmedHigh
+            strategy.close("Short", comment = "Close Short (Close > Prev ZZ High)")
+        
+        // 2. Thoát lệnh khi Indicator đảo chiều: Có 1 Sóng ZigZag TĂNG hoàn thành/đóng cửa trên Supertrend hoặc DC Basis
+        if exitOnIndicator
+            if isNewHighConfirmed and (lastConfirmedHigh > indValue or indTrend == 1)
+                strategy.close("Short", comment = "Close Short (ZZ Wave above Indicator)")
+
+else
+    activeLongEntryPrice  := na
+    activeLongSlPrice     := na
+    activeLongTp1Price    := na
+    activeLongTp2Price    := na
+    isLongTp1Hit          := false
+    isLongBeApplied       := false
+    
+    activeShortEntryPrice := na
+    activeShortSlPrice    := na
+    activeShortTp1Price   := na
+    activeShortTp2Price   := na
+    isShortTp1Hit         := false
+    isShortBeApplied      := false
+
+// ==============================================================================
+// 9. VẼ ĐƯỜNG MỤC TIÊU & NHÃN TÍN HIỆU (VISUALS)
+// ==============================================================================
+
+var line entryLineVisual = na
+var line slLineVisual    = na
+var line tpLineVisual    = na
+
+if showTpSlVisual
+    line.delete(entryLineVisual)
+    line.delete(slLineVisual)
+    line.delete(tpLineVisual)
+    
+    if strategy.position_size > 0 and not na(activeLongEntryPrice)
+        entryLineVisual := line.new(bar_index - 5, activeLongEntryPrice, bar_index + 10, activeLongEntryPrice, color = color.blue, width = 1, style = line.style_dashed)
+        slLineVisual    := line.new(bar_index - 5, activeLongSlPrice, bar_index + 10, activeLongSlPrice, color = color.red, width = 2, style = line.style_solid)
+        if not na(activeLongTp2Price)
+            tpLineVisual := line.new(bar_index - 5, activeLongTp2Price, bar_index + 10, activeLongTp2Price, color = color.green, width = 2, style = line.style_solid)
+            
+    else if strategy.position_size < 0 and not na(activeShortEntryPrice)
+        entryLineVisual := line.new(bar_index - 5, activeShortEntryPrice, bar_index + 10, activeShortEntryPrice, color = color.blue, width = 1, style = line.style_dashed)
+        slLineVisual    := line.new(bar_index - 5, activeShortSlPrice, bar_index + 10, activeShortSlPrice, color = color.red, width = 2, style = line.style_solid)
+        if not na(activeShortTp2Price)
+            tpLineVisual := line.new(bar_index - 5, activeShortTp2Price, bar_index + 10, activeShortTp2Price, color = color.green, width = 2, style = line.style_solid)
+
+// ==============================================================================
+// 10. DASHBOARD HIỂN THỊ THỜI GIAN THỰC
+// ==============================================================================
+
+var table dashTable = na
+
+table_position = switch dashPosition
+    "Top Right"     => position.top_right
+    "Bottom Right"  => position.bottom_right
+    "Top Left"      => position.top_left
+    "Bottom Left"   => position.bottom_left
+    "Middle Right"  => position.middle_right
+    => position.top_right
+
+if showDashboard and barstate.islast
+    if na(dashTable)
+        dashTable := table.new(
+            table_position, 
+            columns          = 2, 
+            rows             = 9, 
+            bgcolor          = color.new(#1E222D, 10), 
+            border_width     = 1, 
+            border_color     = color.new(color.gray, 60), 
+            frame_color      = color.new(color.gray, 40), 
+            frame_width      = 1
+        )
+    
+    // Header
+    table.cell(dashTable, 0, 0, "ZZ Wizard Strategy", bgcolor = color.new(#2962FF, 0), text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 0, "Mode: " + selectedInd, bgcolor = color.new(#2962FF, 0), text_color = color.white, text_size = size.small)
+    
+    // 1. Trạng thái ZigZag
+    string zzStatusStr = (zzDir == 1) ? "TĂNG (Up Leg) ↗" : (zzDir == -1 ? "GIẢM (Down Leg) ↘" : "Đang tạo sóng...")
+    color  zzStatusCol = (zzDir == 1) ? color.teal : (zzDir == -1 ? color.maroon : color.gray)
+    table.cell(dashTable, 0, 1, "Sóng ZigZag", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 1, zzStatusStr, bgcolor = zzStatusCol, text_color = color.white, text_size = size.small)
+    
+    // 2. Trạng thái Indicator (Supertrend hoặc Donchian)
+    string indTitle = isUseSupertrend ? "Supertrend (10,3)" : "Donchian (" + str.tostring(dcLength) + ")"
+    string indStatusStr = (indTrend == 1) ? "UP (Bullish) ▲" : "DOWN (Bearish) ▼"
+    color  indStatusCol = (indTrend == 1) ? color.green : color.red
+    table.cell(dashTable, 0, 2, indTitle, text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 2, indStatusStr, bgcolor = indStatusCol, text_color = color.white, text_size = size.small)
+    
+    // 3. Đỉnh / Đáy gần nhất
+    table.cell(dashTable, 0, 3, "Đỉnh / Đáy ZigZag", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 3, "H: " + str.tostring(lastConfirmedHigh, format.mintick) + " | L: " + str.tostring(lastConfirmedLow, format.mintick), text_color = color.yellow, text_size = size.small)
+    
+    // 4. Mức Dải Indicator
+    string indLevelTitle = isUseSupertrend ? "Dải Supertrend" : "DC Basis (Mid)"
+    table.cell(dashTable, 0, 4, indLevelTitle, text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 4, str.tostring(indValue, format.mintick), text_color = (indTrend == 1 ? color.green : color.red), text_size = size.small)
+    
+    // 5. Vị thế Hiện tại
+    string posStr = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size) + ")" : strategy.position_size < 0 ? "SHORT (" + str.tostring(strategy.position_size) + ")" : "FLAT (Chờ tín hiệu)"
+    color  posCol = strategy.position_size > 0 ? color.teal : strategy.position_size < 0 ? color.maroon : color.gray
+    table.cell(dashTable, 0, 5, "Vị thế hiện tại", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 5, posStr, bgcolor = posCol, text_color = color.white, text_size = size.small)
+    
+    // 6. Lợi nhuận (Net Profit)
+    float netPnl = strategy.netprofit
+    color pnlCol = netPnl >= 0 ? color.green : color.red
+    table.cell(dashTable, 0, 6, "Tổng Lợi Nhuận", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 6, str.tostring(netPnl, "#,###.##") + " USD", text_color = pnlCol, text_size = size.small)
+    
+    // 7. Tỷ lệ Thắng (Win Rate)
+    int totalTrades = strategy.closedtrades
+    int winTrades   = strategy.wintrades
+    float winRate   = totalTrades > 0 ? (winTrades / float(totalTrades) * 100) : 0.0
+    table.cell(dashTable, 0, 7, "Tỷ lệ Thắng (Winrate)", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 7, str.tostring(winRate, "#.##") + "% (" + str.tostring(winTrades) + "/" + str.tostring(totalTrades) + ")", text_color = color.white, text_size = size.small)
+    
+    // 8. Profit Factor
+    float grossProfit = strategy.grossprofit
+    float grossLoss   = strategy.grossloss
+    float pf = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? 99.9 : 0.0)
+    table.cell(dashTable, 0, 8, "Profit Factor", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 8, str.tostring(pf, "#.##"), text_color = pf >= 1.5 ? color.green : (pf >= 1.0 ? color.yellow : color.red), text_size = size.small)
+
+// ==============================================================================
+// 11. CẢNH BÁO (ALERTS)
+// ==============================================================================
+
+alertcondition(validLongSignal, title = "Tín hiệu MUA (Long)", message = "ZZ Wizard: Tín hiệu LONG tại giá {{close}} - ZigZag Tăng & Indicator UP")
+alertcondition(validShortSignal, title = "Tín hiệu BÁN (Short)", message = "ZZ Wizard: Tín hiệu SHORT tại giá {{close}} - ZigZag Giảm & Indicator DOWN")
+alertcondition(isIndFlippedUp, title = "Indicator Đảo chiều TĂNG", message = "ZZ Wizard: Indicator chuyển sang UP tại giá {{close}}")
+alertcondition(isIndFlippedDown, title = "Indicator Đảo chiều GIẢM", message = "ZZ Wizard: Indicator chuyển sang DOWN tại giá {{close}}")
+alertcondition(isNewLowConfirmed, title = "ZigZag Tạo Đáy Mới", message = "ZZ Wizard: Zigzag xác nhận ĐÁY mới tại {{low}}")
+alertcondition(isNewHighConfirmed, title = "ZigZag Tạo Đỉnh Mới", message = "ZZ Wizard: Zigzag xác nhận ĐỈNH mới tại {{high}}")
