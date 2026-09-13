@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle, getSymbolHistoriesCache, loadCachedSymbolHistories } from '../features/marketSlice';
 import { subscribeBinanceKlineWS } from '../services/binance';
 import { executeBinanceOrder } from '../services/binanceExecution';
 import api from '../services/api';
@@ -500,7 +500,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
     useEffect(() => {
         if (selectedSymbolId) {
             const curTf = String(timeframe || 'D1').toUpperCase();
-            // Check if the history for this symbol is already loaded in Redux or localStorage for current timeframe
+            // Check if the history for this symbol is already loaded in Redux for current timeframe
             const isLoaded = histories && histories.some(h => {
                 const symDocId = h.symbol?.documentId;
                 const symNumId = h.symbol?.id;
@@ -516,29 +516,28 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 return matchesSym && hTf === curTf;
             });
 
-            const hasInLocal = (() => {
-                if (curTf !== 'D1') return false; // Intraday histories are not in localStorage
-                try {
-                    const cachedStr = localStorage.getItem('watchlist_histories');
-                    if (!cachedStr) return false;
-                    const cached = JSON.parse(cachedStr);
-                    return cached.some(h => {
-                        const symId = h.symbol?.documentId || h.symbol?.id;
-                        return symId && symId.toString() === selectedSymbolId.toString();
-                    });
-                } catch { return false; }
-            })();
-
-            if (!isLoaded && !hasInLocal) {
-                if (selectedSymbol && selectedSymbol.Name) {
-                    dispatch(loadExternalHistory({
-                        symbol: selectedSymbol.Name,
+            if (!isLoaded) {
+                // Check localStorage cache first for 0ms load
+                const cached = getSymbolHistoriesCache(selectedSymbolId, selectedSymbol?.Name, curTf);
+                if (cached && cached.length > 0) {
+                    dispatch(loadCachedSymbolHistories({
+                        candles: cached,
+                        timeframe: curTf,
                         symbolId: selectedSymbolId,
-                        marketType: selectedAccount?.market?.Name,
-                        resolution: curTf
+                        symbolName: selectedSymbol?.Name
                     }));
                 } else {
-                    dispatch(fetchHistories({ symbolId: selectedSymbolId, timeframe: curTf, forceRefresh: true }));
+                    // Not cached: fetch from backend/external
+                    if (selectedSymbol && selectedSymbol.Name) {
+                        dispatch(loadExternalHistory({
+                            symbol: selectedSymbol.Name,
+                            symbolId: selectedSymbolId,
+                            marketType: selectedAccount?.market?.Name,
+                            resolution: curTf
+                        }));
+                    } else {
+                        dispatch(fetchHistories({ symbolId: selectedSymbolId, timeframe: curTf, forceRefresh: true }));
+                    }
                 }
             }
 
@@ -719,14 +718,42 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         }
 
         if (selectedSymbol && selectedSymbolId) {
-            dispatch(loadExternalHistory({
-                symbol: selectedSymbol.Name,
-                symbolId: selectedSymbolId,
-                marketType: selectedAccount?.market?.Name,
-                resolution: targetTf
-            }));
+            const curTf = String(targetTf || 'D1').toUpperCase();
+            const isLoaded = histories && histories.some(h => {
+                const symDocId = h.symbol?.documentId;
+                const symNumId = h.symbol?.id;
+                const target = String(selectedSymbolId);
+                const matchesSym = (symDocId && String(symDocId) === target) ||
+                    (symNumId && String(symNumId) === target) ||
+                    (selectedSymbol && (
+                        (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
+                        (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
+                        (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
+                    ));
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                return matchesSym && hTf === curTf;
+            });
+
+            if (!isLoaded) {
+                const cached = getSymbolHistoriesCache(selectedSymbolId, selectedSymbol.Name, curTf);
+                if (cached && cached.length > 0) {
+                    dispatch(loadCachedSymbolHistories({
+                        candles: cached,
+                        timeframe: curTf,
+                        symbolId: selectedSymbolId,
+                        symbolName: selectedSymbol.Name
+                    }));
+                } else {
+                    dispatch(loadExternalHistory({
+                        symbol: selectedSymbol.Name,
+                        symbolId: selectedSymbolId,
+                        marketType: selectedAccount?.market?.Name,
+                        resolution: targetTf
+                    }));
+                }
+            }
         }
-    }, [dispatch, selectedAccount?.market?.Name, selectedSymbol, selectedSymbolId, symbolTemplates, templates, timeframe]);
+    }, [dispatch, selectedAccount?.market?.Name, selectedSymbol, selectedSymbolId, symbolTemplates, templates, timeframe, histories]);
 
     const handleApplyTemplateFromModal = useCallback(async (tpl) => {
         if (!tpl) return;
@@ -838,11 +865,27 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         const symName = selectedSymbol.Name.trim().toUpperCase();
         const targetTf = selectedTemplate.timeframe || timeframe || 'D1';
         const scanParams = buildPythonScanParams(selectedTemplate, symName, targetTf, { chartTemplate, timeframe, vwapAnchor, maPeriod, stPeriod, stMultiplier });
+        const cacheKey = `python_scan_${symName}_${selectedTemplate.documentId || selectedTemplate.id}_${targetTf}`;
 
+        // 1. Instantly load cached scan result if available
+        try {
+            const cachedScan = localStorage.getItem(cacheKey);
+            if (cachedScan) {
+                const parsed = JSON.parse(cachedScan);
+                if (parsed && !parsed.error) {
+                    setPythonScanResult(parsed);
+                }
+            }
+        } catch (e) {}
+
+        // 2. Fetch fresh scan in background
         scanPythonStrategy(scanParams)
             .then(res => {
                 if (res && !res.error) {
                     setPythonScanResult(res);
+                    try {
+                        localStorage.setItem(cacheKey, JSON.stringify(res));
+                    } catch (e) {}
                 }
             })
             .catch(err => console.warn('Could not sync python strategy signals for template:', err));
@@ -851,18 +894,47 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
     const handleTimeframeChange = (newTf) => {
         setTimeframe(newTf);
         if (selectedSymbol && selectedSymbolId) {
-            dispatch(loadExternalHistory({
-                symbol: selectedSymbol.Name,
-                symbolId: selectedSymbolId,
-                marketType: selectedAccount?.market?.Name,
-                resolution: newTf
-            }));
+            const curTf = String(newTf || 'D1').toUpperCase();
+            const isLoaded = histories && histories.some(h => {
+                const symDocId = h.symbol?.documentId;
+                const symNumId = h.symbol?.id;
+                const target = String(selectedSymbolId);
+                const matchesSym = (symDocId && String(symDocId) === target) ||
+                    (symNumId && String(symNumId) === target) ||
+                    (selectedSymbol && (
+                        (symDocId && selectedSymbol.documentId && String(symDocId) === String(selectedSymbol.documentId)) ||
+                        (symNumId && selectedSymbol.id && String(symNumId) === String(selectedSymbol.id)) ||
+                        (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
+                    ));
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                return matchesSym && hTf === curTf;
+            });
+
+            if (!isLoaded) {
+                const cached = getSymbolHistoriesCache(selectedSymbolId, selectedSymbol.Name, curTf);
+                if (cached && cached.length > 0) {
+                    dispatch(loadCachedSymbolHistories({
+                        candles: cached,
+                        timeframe: curTf,
+                        symbolId: selectedSymbolId,
+                        symbolName: selectedSymbol.Name
+                    }));
+                } else {
+                    dispatch(loadExternalHistory({
+                        symbol: selectedSymbol.Name,
+                        symbolId: selectedSymbolId,
+                        marketType: selectedAccount?.market?.Name,
+                        resolution: newTf
+                    }));
+                }
+            }
         }
     };
 
     const activeSymbolHistories = useMemo(() => {
-        if (!selectedSymbolId || !histories) return [];
-        return histories.filter(h => {
+        if (!selectedSymbolId) return [];
+        const curTf = String(timeframe || 'D1').toUpperCase();
+        let matched = histories ? histories.filter(h => {
             const symDocId = h.symbol?.documentId;
             const symNumId = h.symbol?.id;
             const target = String(selectedSymbolId);
@@ -874,13 +946,18 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                     (h.symbol?.Name && selectedSymbol.Name && String(h.symbol.Name).trim().toUpperCase() === String(selectedSymbol.Name).trim().toUpperCase())
                 ));
             if (!matchesSym) return false;
-            if (timeframe) {
-                const hTf = String(h.timeframe || 'D1').toUpperCase();
-                const currentTf = String(timeframe || 'D1').toUpperCase();
-                return hTf === currentTf;
+            const hTf = String(h.timeframe || 'D1').toUpperCase();
+            return hTf === curTf;
+        }) : [];
+
+        if (matched.length === 0) {
+            const cached = getSymbolHistoriesCache(selectedSymbolId, selectedSymbol?.Name, curTf);
+            if (cached && cached.length > 0) {
+                matched = cached;
             }
-            return true;
-        });
+        }
+
+        return matched;
     }, [histories, selectedSymbolId, selectedSymbol, timeframe]);
 
     useEffect(() => {

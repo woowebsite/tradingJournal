@@ -118,7 +118,86 @@ const checkSymbolsHaveTodayCandle = (symbolIds, historiesList) => {
     });
 };
 
-const sanitizeHistoriesForStorage = (items) => {
+export const getSymbolCacheKey = (symbolId, symbolName, timeframe = 'D1') => {
+    const tf = String(timeframe || 'D1').trim().toUpperCase();
+    const idStr = symbolId ? String(symbolId).trim().toUpperCase() : '';
+    const nameStr = symbolName ? String(symbolName).split(':')[0].trim().toUpperCase() : '';
+    return {
+        idKey: idStr ? `candledata_id_${idStr}_${tf}` : null,
+        nameKey: nameStr ? `candledata_sym_${nameStr}_${tf}` : null,
+    };
+};
+
+export const saveSymbolHistoriesCache = (symbolId, symbolName, timeframe = 'D1', candles = []) => {
+    if (!Array.isArray(candles) || candles.length === 0) return;
+    try {
+        const sanitized = sanitizeHistoriesForStorage(candles);
+        const tf = String(timeframe || 'D1').trim().toUpperCase();
+        const { idKey, nameKey } = getSymbolCacheKey(symbolId, symbolName, tf);
+        const dataStr = JSON.stringify(sanitized);
+        if (idKey) localStorage.setItem(idKey, dataStr);
+        if (nameKey) localStorage.setItem(nameKey, dataStr);
+
+        // Also merge into watchlist_histories if D1 for backwards compatibility
+        if (tf === 'D1') {
+            const cachedStr = localStorage.getItem('watchlist_histories');
+            const cached = cachedStr ? JSON.parse(cachedStr) : [];
+            const targetId = symbolId ? String(symbolId).toUpperCase() : null;
+            const targetName = symbolName ? String(symbolName).split(':')[0].toUpperCase() : null;
+            const filtered = cached.filter(h => {
+                const sId = String(h.symbol?.documentId || h.symbol?.id || '').toUpperCase();
+                const sName = String(h.symbol?.Name || h.symbol?.name || '').split(':')[0].toUpperCase();
+                const match = (targetId && sId === targetId) || (targetName && sName === targetName);
+                return !match;
+            });
+            const merged = [...filtered, ...sanitized];
+            localStorage.setItem('watchlist_histories', JSON.stringify(merged));
+        }
+    } catch (e) {
+        console.warn('Failed saving symbol histories to localStorage cache:', e);
+    }
+};
+
+export const getSymbolHistoriesCache = (symbolId, symbolName, timeframe = 'D1') => {
+    const tf = String(timeframe || 'D1').trim().toUpperCase();
+    const { idKey, nameKey } = getSymbolCacheKey(symbolId, symbolName, tf);
+    try {
+        if (idKey) {
+            const cached = localStorage.getItem(idKey);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            }
+        }
+        if (nameKey) {
+            const cached = localStorage.getItem(nameKey);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            }
+        }
+        // Fallback: check watchlist_histories
+        const wStr = localStorage.getItem('watchlist_histories');
+        if (wStr) {
+            const cached = JSON.parse(wStr);
+            const targetId = symbolId ? String(symbolId).toUpperCase() : null;
+            const targetName = symbolName ? String(symbolName).split(':')[0].toUpperCase() : null;
+            const matches = cached.filter(h => {
+                const sId = String(h.symbol?.documentId || h.symbol?.id || '').toUpperCase();
+                const sName = String(h.symbol?.Name || h.symbol?.name || '').split(':')[0].toUpperCase();
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                const match = (targetId && sId === targetId) || (targetName && sName === targetName);
+                return match && hTf === tf;
+            });
+            if (matches.length > 0) return matches;
+        }
+    } catch (e) {
+        console.warn('Failed loading symbol histories from localStorage cache:', e);
+    }
+    return null;
+};
+
+export const sanitizeHistoriesForStorage = (items) => {
     if (!Array.isArray(items)) return [];
     return items.map(h => ({
         id: h.id || h.documentId,
@@ -143,11 +222,13 @@ export const fetchHistories = createAsyncThunk(
     async (arg, { rejectWithValue }) => {
         try {
             let filterSymbolId = arg;
+            let filterSymbolName = null;
             let forceRefresh = false;
             let timeframe = 'D1';
 
             if (arg && typeof arg === 'object' && !Array.isArray(arg)) {
                 filterSymbolId = arg.symbolIds || arg.symbolId;
+                filterSymbolName = arg.symbolName || arg.symbol || null;
                 forceRefresh = arg.forceRefresh;
                 if (arg.timeframe) timeframe = arg.timeframe;
             }
@@ -165,11 +246,25 @@ export const fetchHistories = createAsyncThunk(
                 // Otherwise, fetch from database
                 const histories = await fetchSymbolHistoriesInWatchlist(filterSymbolId);
 
-                // Save to localStorage and set watchlist_updated_latest = 'true'
+                // Save to localStorage
                 try {
                     const sanitized = sanitizeHistoriesForStorage(histories);
                     localStorage.setItem('watchlist_histories', JSON.stringify(sanitized));
                     localStorage.setItem('watchlist_updated_latest', 'true');
+
+                    // Also index individually
+                    sanitized.forEach(item => {
+                        const sId = item.symbol?.documentId || item.symbol?.id;
+                        const sName = item.symbol?.Name;
+                        if (sId || sName) {
+                            const symCandles = sanitized.filter(c => {
+                                const cId = c.symbol?.documentId || c.symbol?.id;
+                                const cName = c.symbol?.Name;
+                                return (sId && cId === sId) || (sName && cName === sName);
+                            });
+                            saveSymbolHistoriesCache(sId, sName, 'D1', symCandles);
+                        }
+                    });
                 } catch (e) {
                     console.error('Failed to save to localStorage:', e);
                 }
@@ -179,42 +274,23 @@ export const fetchHistories = createAsyncThunk(
 
             // If it's a single symbol fetch
             const currentTf = String(timeframe || 'D1').toUpperCase();
-            const cachedHistoriesStr = localStorage.getItem('watchlist_histories');
 
-            if (!forceRefresh && cachedHistoriesStr && currentTf === 'D1') {
-                try {
-                    const cached = JSON.parse(cachedHistoriesStr);
-                    const symbolHistory = cached.filter(h => {
-                        const symId = h.symbol?.documentId || h.symbol?.id;
-                        const hTf = (h.timeframe || 'D1').toUpperCase();
-                        return symId && filterSymbolId && symId.toString() === filterSymbolId.toString() && hTf === 'D1';
-                    });
-
-                    if (symbolHistory.length > 0) {
-                        console.log(`Loading history for symbol ${filterSymbolId} from localStorage cache...`);
-                        return symbolHistory;
-                    }
-                } catch (e) {
-                    console.error('Failed reading from localStorage:', e);
+            // 1. Check individual localStorage cache if not forced
+            if (!forceRefresh) {
+                const cachedHistory = getSymbolHistoriesCache(filterSymbolId, filterSymbolName, currentTf);
+                if (cachedHistory && cachedHistory.length > 0) {
+                    console.log(`Loading history for symbol ${filterSymbolId || filterSymbolName} (${currentTf}) from localStorage cache...`);
+                    return cachedHistory;
                 }
             }
 
-            // Fallback to fetch from database with exact timeframe
+            // 2. Fetch from database with exact timeframe
             const singleHistory = await fetchPagedSymbolHistories(filterSymbolId, undefined, undefined, currentTf);
 
-            // Merge into localStorage if D1
-            if (cachedHistoriesStr && currentTf === 'D1') {
-                try {
-                    const cached = JSON.parse(cachedHistoriesStr);
-                    const filtered = cached.filter(h => {
-                        const symId = h.symbol?.documentId || h.symbol?.id;
-                        return !symId || symId.toString() !== filterSymbolId.toString();
-                    });
-                    const merged = [...filtered, ...sanitizeHistoriesForStorage(singleHistory)];
-                    localStorage.setItem('watchlist_histories', JSON.stringify(merged));
-                } catch (e) {
-                    console.error('Failed to update localStorage:', e);
-                }
+            // 3. Save to localStorage cache
+            if (singleHistory && singleHistory.length > 0) {
+                const symName = filterSymbolName || singleHistory[0]?.symbol?.Name || singleHistory[0]?.symbol?.name;
+                saveSymbolHistoriesCache(filterSymbolId, symName, currentTf, singleHistory);
             }
 
             return singleHistory;
@@ -536,7 +612,27 @@ export const fetchExternalIndicators = createAsyncThunk(
             if (!ticker || /USDT|\.P|BINANCE:/i.test(ticker) || !/^[A-Z0-9]{1,10}$/.test(ticker)) {
                 return null;
             }
+            // Check localStorage cache first (valid for 30 mins)
+            try {
+                const cacheKey = `ext_indicators_${ticker}`;
+                const cachedStr = localStorage.getItem(cacheKey);
+                if (cachedStr) {
+                    const parsed = JSON.parse(cachedStr);
+                    if (parsed && parsed.data && (Date.now() - (parsed.timestamp || 0) < 30 * 60 * 1000)) {
+                        return parsed.data;
+                    }
+                }
+            } catch (e) {}
+
             const data = await getTechnicalIndicators(ticker);
+            try {
+                if (data) {
+                    localStorage.setItem(`ext_indicators_${ticker}`, JSON.stringify({
+                        timestamp: Date.now(),
+                        data
+                    }));
+                }
+            } catch (e) {}
             return data;
         } catch (error) {
             return rejectWithValue(error.message);
@@ -582,6 +678,40 @@ const marketSlice = createSlice({
         externalIndicators: [],
     },
     reducers: {
+        loadCachedSymbolHistories: (state, action) => {
+            const { candles, timeframe, symbolId, symbolName } = action.payload || {};
+            if (!Array.isArray(candles) || candles.length === 0) return;
+            const targetTf = String(timeframe || candles[0]?.timeframe || 'D1').toUpperCase();
+            const targetSymId = symbolId ? String(symbolId).trim().toUpperCase() : null;
+            const targetSymName = symbolName ? String(symbolName).split(':')[0].trim().toUpperCase() : null;
+
+            const sanitized = candles.map(item => ({
+                id: item.id || item.documentId,
+                ...item,
+                timeframe: item.timeframe || targetTf
+            }));
+
+            const filteredHistories = state.histories.filter(h => {
+                const symDocId = h.symbol?.documentId ? String(h.symbol.documentId).toUpperCase() : '';
+                const symNumId = h.symbol?.id ? String(h.symbol.id).toUpperCase() : '';
+                const symName = (h.symbol?.Name || h.symbol?.name) ? String(h.symbol.Name || h.symbol.name).split(':')[0].toUpperCase() : '';
+                const isSameSymbol = (targetSymId && (symDocId === targetSymId || symNumId === targetSymId)) ||
+                                     (targetSymName && symName === targetSymName);
+                const hTf = String(h.timeframe || 'D1').toUpperCase();
+                return !(isSameSymbol && hTf === targetTf);
+            });
+
+            state.histories = [...filteredHistories, ...sanitized];
+            state.loading = false;
+            state.historyLoading = false;
+
+            if (targetSymId && sanitized.length > 0) {
+                const sorted = [...sanitized].sort((a, b) => new Date(b.date) - new Date(a.date));
+                if (sorted[0]?.close !== undefined) {
+                    state.latestPricesMap[targetSymId] = sorted[0].close;
+                }
+            }
+        },
         setSymbolFilter: (state, action) => {
             state.selectedSymbolFilter = action.payload;
         },
@@ -778,5 +908,7 @@ const marketSlice = createSlice({
     }
 });
 
-export const { setSymbolFilter, clearError, updateRealtimeCandle } = marketSlice.actions;
+export const { setSymbolFilter, clearError, updateRealtimeCandle, loadCachedSymbolHistories } = marketSlice.actions;
 export default marketSlice.reducer;
+
+
