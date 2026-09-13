@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols } from '../features/symbolSlice';
+import { fetchSymbols, updateSymbol } from '../features/symbolSlice';
 import { useAccount } from '../context/AccountContext';
 import { getStrategyTemplates, deleteStrategyTemplate } from '../services/strategyTemplate';
 import { scanPythonStrategy, buildPythonScanParams } from '../services/pythonStrategy';
@@ -55,10 +55,41 @@ const PythonSignals = () => {
         setIsTemplatesModalOpen(true);
     };
 
-    const handleApplyTemplateFromModal = (template) => {
+    const handleApplyTemplateFromModal = async (template) => {
+        if (!template) return;
         const sym = template?.symbolName || template?.symbol?.Name || template?.symbol?.name || selectedTemplateModalSymbol;
+        const tplId = template.documentId || template.id;
+        await handleSetDefaultTemplate(template);
         setIsTemplatesModalOpen(false);
-        navigate(`/python-strategy?symbol=${sym}&templateId=${template.documentId || template.id}`);
+        navigate(`/python-strategy?symbol=${sym}&templateId=${tplId}`);
+    };
+
+    const handleSetDefaultTemplate = async (template) => {
+        try {
+            const tplId = template.documentId || template.id;
+            const symObj = accountSymbols.find(s => {
+                const sName = String(s.Name || s.name || '').trim().toUpperCase();
+                return sName === selectedTemplateModalSymbol;
+            });
+            if (!symObj) return;
+
+            const symId = symObj.documentId || symObj.id;
+            await dispatch(updateSymbol({ id: symId, data: { strategy_template: tplId } })).unwrap();
+
+            setSelectedTemplateIdForModal(tplId);
+            const updatedTpls = await getStrategyTemplates();
+            setTemplates(updatedTpls || []);
+
+            if (selectedAccount?.market) {
+                const marketId = selectedAccount.market.documentId || selectedAccount.market.id;
+                dispatch(fetchSymbols(marketId));
+            } else {
+                dispatch(fetchSymbols());
+            }
+        } catch (err) {
+            console.error('Failed to set default template:', err);
+            alert(`Không thể đặt template làm mặc định: ${err.message || err}`);
+        }
     };
 
     const handleDeleteTemplate = async (templateId) => {
@@ -99,16 +130,18 @@ const PythonSignals = () => {
         prevAccountIdRef.current = currentAccountId;
     }, [currentAccountId]);
 
-    // 4. Map only symbols belonging to current selected account that have assigned Strategy Template
+    // 4. Map ONLY symbols belonging to current selected account that have a DEFAULT Strategy Template
     const configuredSymbols = useMemo(() => {
         if (!selectedAccount || !accountSymbols || accountSymbols.length === 0) return [];
 
         return accountSymbols.map(sym => {
             const symName = String(sym.Name || sym.name || '').trim().toUpperCase();
+            const symDocId = String(sym.documentId || sym.id || '');
             const assigned = sym.strategy_template;
             const assignedId = assigned?.documentId || assigned?.id || (typeof assigned === 'string' || typeof assigned === 'number' ? String(assigned) : null);
 
             let template = null;
+            // 1. Check template assigned directly to symbol (symbol.strategy_template)
             if (assignedId && templates.length > 0) {
                 template = templates.find(t =>
                     String(t.documentId || t.id) === String(assignedId) ||
@@ -116,11 +149,13 @@ const PythonSignals = () => {
                 ) || (typeof assigned === 'object' && assigned.name ? assigned : null);
             }
 
-            // Fallback: match template by symbol name
+            // 2. Fallback ONLY to a template explicitly designated as default (isDefault === true) for this symbol
             if (!template && templates.length > 0) {
                 template = templates.find(t => {
                     const tSym = String(t.symbolName || t.symbol?.Name || t.symbol?.name || '').trim().toUpperCase();
-                    return tSym === symName;
+                    const tSymDocId = String(t.symbol?.documentId || t.symbol?.id || '');
+                    const isMatchingSymbol = tSym === symName || (symDocId && tSymDocId && tSymDocId === symDocId);
+                    return isMatchingSymbol && Boolean(t.isDefault);
                 }) || null;
             }
 
@@ -550,9 +585,12 @@ const PythonSignals = () => {
                     <div className="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto border border-purple-500/20">
                         <BrainCircuit size={32} />
                     </div>
-                    <h3 className="text-xl font-bold text-white">Chưa có Symbol nào trong tài khoản được gán Strategy Template</h3>
+                    <h3 className="text-xl font-bold text-white">Chưa có Symbol nào có Strategy Template mặc định</h3>
                     <p className="text-gray-400 max-w-md mx-auto text-sm">
-                        Tài khoản <strong>{selectedAccount?.name || 'hiện tại'}</strong> {selectedAccount?.market?.Name ? `(Thị trường ${selectedAccount.market.Name})` : ''} chưa có mã symbol nào được cấu hình Strategy Template.
+                        Tài khoản <strong>{selectedAccount?.name || 'hiện tại'}</strong> {selectedAccount?.market?.Name ? `(Thị trường ${selectedAccount.market.Name})` : ''} chưa có mã symbol nào được cấu hình Strategy Template mặc định.
+                    </p>
+                    <p className="text-gray-500 max-w-md mx-auto text-xs">
+                        Hệ thống chỉ quét tín hiệu cho các mã có template mặc định để đảm bảo độ chuẩn xác.
                     </p>
                     <Link
                         to="/manage-symbols"
@@ -776,7 +814,7 @@ const PythonSignals = () => {
                                             title="Chi tiết chiến lược Python"
                                         >
                                             <BrainCircuit size={12} className="text-purple-400" />
-                                            Chi Tiết
+                                            Strategy
                                         </Link>
 
                                         <Link
@@ -946,8 +984,10 @@ const PythonSignals = () => {
                 onClose={() => setIsTemplatesModalOpen(false)}
                 templates={templates}
                 selectedTemplateId={selectedTemplateIdForModal}
+                defaultTemplateId={selectedTemplateIdForModal}
                 selectedSymbol={selectedTemplateModalSymbol}
                 onApplyTemplate={handleApplyTemplateFromModal}
+                onSetDefaultTemplate={handleSetDefaultTemplate}
                 onDeleteTemplate={handleDeleteTemplate}
             />
         </div>

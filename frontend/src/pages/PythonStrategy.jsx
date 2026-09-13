@@ -7,7 +7,7 @@ import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
 import { useAccount } from '../context/AccountContext';
 import { getPythonStrategies, scanPythonStrategy, optimizePythonStrategy } from '../services/pythonStrategy';
-import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, deleteStrategyTemplate } from '../services/strategyTemplate';
+import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, deleteStrategyTemplate, assignDefaultStrategyTemplate } from '../services/strategyTemplate';
 import { getSymbolInsights, getSymbolInsightsBySymbol } from '../services/symbolInsight';
 import DeflatedSharpeRatioCard from '../components/DeflatedSharpeRatioCard';
 import { formatNumber } from '../utils/formatNumber';
@@ -581,11 +581,27 @@ const PythonStrategy = () => {
         handleScan(targetSymbol || selectedSymbol, reqCount, targetTf, mergedParams);
     };
 
-    const handleApplyTemplateModal = (tpl) => {
+    const handleApplyTemplateModal = async (tpl) => {
         if (!tpl) return;
         const tplId = String(tpl.id || tpl.documentId);
         const sym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || selectedSymbol || '').trim().toUpperCase();
         handleSelectTemplate(tplId, sym);
+
+        // Tự động gán template này làm default template cho symbol
+        const targetSymObj = (Array.isArray(symbols) ? symbols : []).find(s =>
+            String(s.Name || s.name || '').trim().toUpperCase() === sym
+        );
+        const targetSymId = targetSymObj?.documentId || targetSymObj?.id || tpl.symbol?.documentId || tpl.symbol?.id;
+        if (targetSymId && tplId) {
+            try {
+                await assignDefaultStrategyTemplate(targetSymId, tplId);
+                const updatedTemplates = await getStrategyTemplates();
+                setTemplates(updatedTemplates || []);
+                dispatch(fetchSymbols());
+            } catch (err) {
+                console.error('Failed to assign default template to symbol in PythonStrategy:', err);
+            }
+        }
     };
 
     const handleOpenSaveModal = () => {
@@ -990,8 +1006,17 @@ const PythonStrategy = () => {
                 onClose={() => setTemplatesListModalOpen(false)}
                 templates={templates}
                 selectedTemplateId={selectedTemplateId}
+                defaultTemplateId={
+                    (() => {
+                        const targetSymObj = (Array.isArray(symbols) ? symbols : []).find(s =>
+                            String(s.Name || s.name || '').trim().toUpperCase() === String(selectedSymbol).trim().toUpperCase()
+                        );
+                        return targetSymObj?.strategy_template?.documentId || targetSymObj?.strategy_template?.id || (typeof targetSymObj?.strategy_template === 'string' || typeof targetSymObj?.strategy_template === 'number' ? targetSymObj.strategy_template : null);
+                    })()
+                }
                 selectedSymbol={selectedSymbol}
                 onApplyTemplate={handleApplyTemplateModal}
+                onSetDefaultTemplate={handleApplyTemplateModal}
                 onDeleteTemplate={handleDeleteTemplate}
             />
         </div>

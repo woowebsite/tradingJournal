@@ -45,3 +45,14 @@ export const updateStrategyTemplate = async (templateId, templateData) => {
 export const deleteStrategyTemplate = async (templateId) => {
     await api.delete(`/strategy-templates/${templateId}`);
 };
+
+export const assignDefaultStrategyTemplate = async (symbolId, templateId) => {
+    if (!symbolId) return null;
+    const response = await api.put(`/symbols/${symbolId}`, {
+        data: {
+            strategy_template: templateId || null
+        }
+    });
+    return response.data?.data;
+};
+

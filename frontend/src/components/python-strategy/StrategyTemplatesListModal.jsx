@@ -16,7 +16,8 @@ import {
     Filter,
     ArrowUpDown,
     ExternalLink,
-    Tag
+    Tag,
+    Star
 } from 'lucide-react';
 
 const getStrategyDisplayName = (stratFile = '') => {
@@ -86,8 +87,10 @@ const StrategyTemplatesListModal = ({
     onClose,
     templates = [],
     selectedTemplateId,
+    defaultTemplateId,
     selectedSymbol = '',
     onApplyTemplate,
+    onSetDefaultTemplate,
     onDeleteTemplate
 }) => {
     const [search, setSearch] = useState('');
@@ -162,6 +165,12 @@ const StrategyTemplatesListModal = ({
     useEscapeKey(onClose, isOpen);
 
     if (!isOpen) return null;
+
+    const isDefaultTemplate = (tpl) => {
+        const tplDocId = String(tpl.documentId || tpl.id || '');
+        if (defaultTemplateId && String(defaultTemplateId) === tplDocId) return true;
+        return Boolean(tpl.isDefault);
+    };
 
     return (
         <div
@@ -264,6 +273,7 @@ const StrategyTemplatesListModal = ({
                         filteredTemplates.map(tpl => {
                             const tplId = String(tpl.id || tpl.documentId);
                             const isSelected = String(selectedTemplateId) === tplId;
+                            const isDefault = isDefaultTemplate(tpl);
                             const symName = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || '').trim().toUpperCase();
                             const stratName = getStrategyDisplayName(tpl.strategyFile);
                             const m = tpl.config?.metrics || tpl.config?.backtestSummary;
@@ -275,7 +285,9 @@ const StrategyTemplatesListModal = ({
                                     className={`rounded-2xl border transition-all p-4 space-y-3 shadow-md ${
                                         isSelected
                                             ? 'bg-cyan-950/30 border-cyan-500/60 ring-1 ring-cyan-500/40'
-                                            : 'bg-gray-900/70 border-gray-700/60 hover:border-gray-600 hover:bg-gray-900/90'
+                                            : isDefault
+                                                ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-500/60'
+                                                : 'bg-gray-900/70 border-gray-700/60 hover:border-gray-600 hover:bg-gray-900/90'
                                     }`}
                                 >
                                     {/* Top Line: Template Name, Badges & Actions */}
@@ -285,6 +297,11 @@ const StrategyTemplatesListModal = ({
                                                 <h4 className="text-sm sm:text-base font-bold text-gray-100">
                                                     {tpl.name}
                                                 </h4>
+                                                {isDefault && (
+                                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1">
+                                                        <Star size={10} className="fill-amber-400 text-amber-400" /> Mặc định
+                                                    </span>
+                                                )}
                                                 {isSelected && (
                                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold flex items-center gap-1">
                                                         <Check size={10} /> Đang chọn
@@ -312,6 +329,17 @@ const StrategyTemplatesListModal = ({
 
                                         {/* Action buttons */}
                                         <div className="flex items-center gap-2 shrink-0">
+                                            {onSetDefaultTemplate && !isDefault && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onSetDefaultTemplate(tpl)}
+                                                    className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-gray-800 hover:bg-amber-600/20 text-gray-300 hover:text-amber-300 border border-gray-700 hover:border-amber-500/40 transition flex items-center gap-1 cursor-pointer"
+                                                    title="Đặt làm template mặc định cho symbol này"
+                                                >
+                                                    <Star size={12} className="text-amber-400" />
+                                                    <span>Đặt mặc định</span>
+                                                </button>
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => {
