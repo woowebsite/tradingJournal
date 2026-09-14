@@ -31,7 +31,8 @@ import {
     Bookmark,
     Trash2,
     History,
-    X
+    X,
+    CandlestickChart
 } from 'lucide-react';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
@@ -39,6 +40,7 @@ import { useAccount } from '../context/AccountContext';
 import { scanPythonStrategy } from '../services/pythonStrategy';
 import { createSymbolInsight, getSymbolInsightsBySymbol, deleteSymbolInsight } from '../services/symbolInsight';
 import TradingViewChart from '../components/TradingViewChart';
+import PatternOccurrencesChart from '../components/PatternOccurrencesChart';
 import { formatNumber } from '../utils/formatNumber';
 import dayjs from 'dayjs';
 
@@ -94,6 +96,69 @@ const MONTH_NAMES = [
     'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
 ];
 
+const PATTERN_CONFIGS = {
+    '3_bull': {
+        id: '3_bull',
+        label: '3 Nến Tăng Liên Tiếp',
+        subLabel: 'Three White Soldiers',
+        tag: '3 Nến Tăng',
+        type: 'bull',
+        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        chartSignal: { type: 'entry', name: '3 Nến Tăng', text: '3-Bull', color: '#10b981' },
+        desc: 'Thống kê hành vi và xác suất nến tiếp theo sau chuỗi 3 nến tăng liên tiếp.'
+    },
+    '3_bear': {
+        id: '3_bear',
+        label: '3 Nến Giảm Liên Tiếp',
+        subLabel: 'Three Black Crows',
+        tag: '3 Nến Giảm',
+        type: 'bear',
+        badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+        chartSignal: { type: 'stoploss', name: '3 Nến Giảm', text: '3-Bear', color: '#f43f5e' },
+        desc: 'Thống kê hành vi và xác suất nến tiếp theo sau chuỗi 3 nến giảm liên tiếp.'
+    },
+    'bullish_engulfing': {
+        id: 'bullish_engulfing',
+        label: 'Bullish Engulfing',
+        subLabel: 'Nhấn Chìm Tăng',
+        tag: 'Bull Engulfing',
+        type: 'bull',
+        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        chartSignal: { type: 'entry', name: 'Bullish Engulfing', text: 'Bull-Engulf', color: '#10b981' },
+        desc: 'Thống kê hành vi và xác suất nến tiếp theo sau mô hình Nhấn Chìm Tăng (Bullish Engulfing).'
+    },
+    'bearish_engulfing': {
+        id: 'bearish_engulfing',
+        label: 'Bearish Engulfing',
+        subLabel: 'Nhấn Chìm Giảm',
+        tag: 'Bear Engulfing',
+        type: 'bear',
+        badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+        chartSignal: { type: 'stoploss', name: 'Bearish Engulfing', text: 'Bear-Engulf', color: '#f43f5e' },
+        desc: 'Thống kê hành vi và xác suất nến tiếp theo sau mô hình Nhấn Chìm Giảm (Bearish Engulfing).'
+    },
+    'bullish_pinbar': {
+        id: 'bullish_pinbar',
+        label: 'Bullish Pinbar',
+        subLabel: 'Pinbar Tăng / Rút Chân (Hammer)',
+        tag: 'Bull Pinbar',
+        type: 'bull',
+        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        chartSignal: { type: 'entry', name: 'Bullish Pinbar', text: 'Bull-Pinbar', color: '#10b981' },
+        desc: 'Thống kê hành vi và xác suất nến tiếp theo sau mô hình Bullish Pinbar (Râu dưới dài, từ chối giá thấp).'
+    },
+    'bearish_pinbar': {
+        id: 'bearish_pinbar',
+        label: 'Bearish Pinbar',
+        subLabel: 'Pinbar Giảm / Bắn Râu (Shooting Star)',
+        tag: 'Bear Pinbar',
+        type: 'bear',
+        badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+        chartSignal: { type: 'stoploss', name: 'Bearish Pinbar', text: 'Bear-Pinbar', color: '#f43f5e' },
+        desc: 'Thống kê hành vi và xác suất nến tiếp theo sau mô hình Bearish Pinbar (Râu trên dài, từ chối giá cao).'
+    }
+};
+
 const StrategyInsight = () => {
     const dispatch = useDispatch();
     const [searchParams] = useSearchParams();
@@ -113,6 +178,7 @@ const StrategyInsight = () => {
     const [timeframe, setTimeframe] = useState('D1');
     const [insightMode, setInsightMode] = useState('spread'); // 'spread' | 'intraday' | 'week' | 'year'
     const [spreadViewUnit, setSpreadViewUnit] = useState('price'); // 'price' | 'percent'
+    const [candlePattern, setCandlePattern] = useState(''); // '' | '3_bull' | '3_bear'
 
     // Data States
     const [countback, setCountback] = useState(1000);
@@ -330,12 +396,370 @@ const StrategyInsight = () => {
         : 0;
 
     // ==========================================
+    // 0. PATTERN ANALYSIS: Candle Patterns
+    // ==========================================
+    const patternAnalysis = useMemo(() => {
+        if (!chartCandles || chartCandles.length < 2) return null;
+
+        const totalWindows = chartCandles.length;
+        const patternKeys = ['3_bull', '3_bear', 'bullish_engulfing', 'bearish_engulfing', 'bullish_pinbar', 'bearish_pinbar'];
+        const patternOccurrences = {};
+        const patternNextCandles = {};
+
+        patternKeys.forEach(k => {
+            patternOccurrences[k] = [];
+            patternNextCandles[k] = [];
+        });
+
+        for (let i = 0; i < chartCandles.length; i++) {
+            const c2 = chartCandles[i];
+            const c1 = i >= 1 ? chartCandles[i - 1] : null;
+            const c0 = i >= 2 ? chartCandles[i - 2] : null;
+            const nextCandle = chartCandles[i + 1] || null;
+
+            const nextReturn = nextCandle && nextCandle.open > 0
+                ? ((nextCandle.close - nextCandle.open) / nextCandle.open) * 100
+                : null;
+            const nextDirection = nextCandle
+                ? (nextCandle.close > nextCandle.open ? 'up' : (nextCandle.close < nextCandle.open ? 'down' : 'doji'))
+                : null;
+            const nextSpread = nextCandle ? Math.max(0, nextCandle.high - nextCandle.low) : 0;
+            const nextSpreadPercent = nextCandle && nextCandle.low > 0
+                ? (nextSpread / nextCandle.low) * 100
+                : 0;
+
+            const createOcc = (candles) => ({
+                index: i,
+                patternEndDate: c2.date,
+                patternEndTime: c2.time,
+                candles,
+                nextCandle,
+                nextReturn,
+                nextDirection,
+                nextSpread,
+                nextSpreadPercent
+            });
+
+            // 1. 3 Bull / 3 Bear (requires 3 candles: c0, c1, c2)
+            if (c0 && c1) {
+                const is3Bull = c0.close > c0.open && c1.close > c1.open && c2.close > c2.open;
+                const is3Bear = c0.close < c0.open && c1.close < c1.open && c2.close < c2.open;
+
+                if (is3Bull) {
+                    patternOccurrences['3_bull'].push(createOcc([c0, c1, c2]));
+                    if (nextCandle) patternNextCandles['3_bull'].push(nextCandle);
+                }
+                if (is3Bear) {
+                    patternOccurrences['3_bear'].push(createOcc([c0, c1, c2]));
+                    if (nextCandle) patternNextCandles['3_bear'].push(nextCandle);
+                }
+            }
+
+            // 2. Engulfing (requires 2 candles: c1, c2)
+            if (c1) {
+                const isC1Bear = c1.close < c1.open;
+                const isC1Bull = c1.close > c1.open;
+                const isC2Bull = c2.close > c2.open;
+                const isC2Bear = c2.close < c2.open;
+
+                // Bullish Engulfing: c1 is bear, c2 is bull, and c2 body engulfs c1 body
+                const isBullishEngulfing = isC1Bear && isC2Bull && (c2.close >= c1.open - 1e-6) && (c2.open <= c1.close + 1e-6);
+                // Bearish Engulfing: c1 is bull, c2 is bear, and c2 body engulfs c1 body
+                const isBearishEngulfing = isC1Bull && isC2Bear && (c2.open >= c1.close - 1e-6) && (c2.close <= c1.open + 1e-6);
+
+                if (isBullishEngulfing) {
+                    patternOccurrences['bullish_engulfing'].push(createOcc([c1, c2]));
+                    if (nextCandle) patternNextCandles['bullish_engulfing'].push(nextCandle);
+                }
+                if (isBearishEngulfing) {
+                    patternOccurrences['bearish_engulfing'].push(createOcc([c1, c2]));
+                    if (nextCandle) patternNextCandles['bearish_engulfing'].push(nextCandle);
+                }
+            }
+
+            // 3. Pinbar (requires 1 candle: c2)
+            const range = c2.high - c2.low;
+            if (range > 0) {
+                const body = Math.abs(c2.close - c2.open);
+                const upperWick = c2.high - Math.max(c2.open, c2.close);
+                const lowerWick = Math.min(c2.open, c2.close) - c2.low;
+
+                // Bullish Pinbar (Hammer / Rút chân dưới): Lower shadow >= 55%, upper shadow <= 25%, body <= 35%
+                const isBullishPinbar = lowerWick >= (range * 0.55) && upperWick <= (range * 0.25) && body <= (range * 0.35);
+                // Bearish Pinbar (Shooting Star / Bắn râu trên): Upper shadow >= 55%, lower shadow <= 25%, body <= 35%
+                const isBearishPinbar = upperWick >= (range * 0.55) && lowerWick <= (range * 0.25) && body <= (range * 0.35);
+
+                if (isBullishPinbar) {
+                    patternOccurrences['bullish_pinbar'].push(createOcc([c2]));
+                    if (nextCandle) patternNextCandles['bullish_pinbar'].push(nextCandle);
+                }
+                if (isBearishPinbar) {
+                    patternOccurrences['bearish_pinbar'].push(createOcc([c2]));
+                    if (nextCandle) patternNextCandles['bearish_pinbar'].push(nextCandle);
+                }
+            }
+        }
+
+        const isDailyOrHigher = timeframe === 'D1' || timeframe === 'W1';
+
+        const parseOccDate = (occ) => {
+            if (occ.patternEndDate) return dayjs(occ.patternEndDate);
+            if (occ.patternEndTime) {
+                const t = occ.patternEndTime;
+                return dayjs(typeof t === 'number' && t < 10000000000 ? t * 1000 : t);
+            }
+            return dayjs();
+        };
+
+        const computeTimeDistribution = (occurrences) => {
+            if (!occurrences || occurrences.length === 0) return null;
+
+            if (isDailyOrHigher) {
+                // Group by Day of Week (0: CN, 1: T2, 2: T3, 3: T4, 4: T5, 5: T6, 6: T7)
+                const dayMap = new Map();
+                for (let d = 0; d < 7; d++) {
+                    dayMap.set(d, {
+                        key: d,
+                        label: WEEKDAY_NAMES[d],
+                        count: 0,
+                        bullCount: 0,
+                        bearCount: 0,
+                        dojiCount: 0,
+                        returns: [],
+                        spreads: []
+                    });
+                }
+
+                occurrences.forEach(occ => {
+                    const dt = parseOccDate(occ);
+                    const dayIdx = dt.day();
+                    const slot = dayMap.get(dayIdx);
+                    if (slot) {
+                        slot.count += 1;
+                        if (occ.nextDirection === 'up') slot.bullCount += 1;
+                        else if (occ.nextDirection === 'down') slot.bearCount += 1;
+                        else if (occ.nextDirection === 'doji') slot.dojiCount += 1;
+
+                        if (occ.nextReturn !== null) slot.returns.push(occ.nextReturn);
+                        if (occ.nextSpreadPercent !== null) slot.spreads.push(occ.nextSpreadPercent);
+                    }
+                });
+
+                const orderedDays = [1, 2, 3, 4, 5, 6, 0].map(d => {
+                    const slot = dayMap.get(d);
+                    const sample = slot.bullCount + slot.bearCount + slot.dojiCount;
+                    const bullRate = sample > 0 ? (slot.bullCount / sample) * 100 : 0;
+                    const bearRate = sample > 0 ? (slot.bearCount / sample) * 100 : 0;
+                    const avgReturn = slot.returns.length > 0 ? slot.returns.reduce((a, b) => a + b, 0) / slot.returns.length : 0;
+                    const avgSpread = slot.spreads.length > 0 ? slot.spreads.reduce((a, b) => a + b, 0) / slot.spreads.length : 0;
+                    const percentage = occurrences.length > 0 ? (slot.count / occurrences.length) * 100 : 0;
+                    return {
+                        ...slot,
+                        sample,
+                        bullRate,
+                        bearRate,
+                        avgReturn,
+                        avgSpread,
+                        percentage
+                    };
+                });
+
+                const activeDays = orderedDays.filter(d => d.count > 0);
+                const peakItem = [...orderedDays].sort((a, b) => b.count - a.count)[0];
+                const bestBullItem = [...activeDays].sort((a, b) => b.bullRate - a.bullRate)[0];
+                const bestBearItem = [...activeDays].sort((a, b) => b.bearRate - a.bearRate)[0];
+                const bestReturnItem = [...activeDays].sort((a, b) => b.avgReturn - a.avgReturn)[0];
+
+                return {
+                    mode: 'day',
+                    isDailyOrHigher: true,
+                    items: orderedDays,
+                    activeItems: activeDays,
+                    peakItem,
+                    bestBullItem,
+                    bestBearItem,
+                    bestReturnItem
+                };
+            } else {
+                // Group by Hour (0 to 23)
+                const hourMap = new Map();
+                for (let h = 0; h < 24; h++) {
+                    hourMap.set(h, {
+                        key: h,
+                        label: `${String(h).padStart(2, '0')}:00`,
+                        count: 0,
+                        bullCount: 0,
+                        bearCount: 0,
+                        dojiCount: 0,
+                        returns: [],
+                        spreads: []
+                    });
+                }
+
+                occurrences.forEach(occ => {
+                    const dt = parseOccDate(occ);
+                    const h = dt.hour();
+                    const slot = hourMap.get(h);
+                    if (slot) {
+                        slot.count += 1;
+                        if (occ.nextDirection === 'up') slot.bullCount += 1;
+                        else if (occ.nextDirection === 'down') slot.bearCount += 1;
+                        else if (occ.nextDirection === 'doji') slot.dojiCount += 1;
+
+                        if (occ.nextReturn !== null) slot.returns.push(occ.nextReturn);
+                        if (occ.nextSpreadPercent !== null) slot.spreads.push(occ.nextSpreadPercent);
+                    }
+                });
+
+                const hours = Array.from(hourMap.values()).map(slot => {
+                    const sample = slot.bullCount + slot.bearCount + slot.dojiCount;
+                    const bullRate = sample > 0 ? (slot.bullCount / sample) * 100 : 0;
+                    const bearRate = sample > 0 ? (slot.bearCount / sample) * 100 : 0;
+                    const avgReturn = slot.returns.length > 0 ? slot.returns.reduce((a, b) => a + b, 0) / slot.returns.length : 0;
+                    const avgSpread = slot.spreads.length > 0 ? slot.spreads.reduce((a, b) => a + b, 0) / slot.spreads.length : 0;
+                    const percentage = occurrences.length > 0 ? (slot.count / occurrences.length) * 100 : 0;
+                    return {
+                        ...slot,
+                        sample,
+                        bullRate,
+                        bearRate,
+                        avgReturn,
+                        avgSpread,
+                        percentage
+                    };
+                });
+
+                const activeHours = hours.filter(h => h.count > 0);
+                const peakItem = [...hours].sort((a, b) => b.count - a.count)[0];
+                const bestBullItem = [...activeHours].sort((a, b) => b.bullRate - a.bullRate)[0];
+                const bestBearItem = [...activeHours].sort((a, b) => b.bearRate - a.bearRate)[0];
+                const bestReturnItem = [...activeHours].sort((a, b) => b.avgReturn - a.avgReturn)[0];
+
+                return {
+                    mode: 'hour',
+                    isDailyOrHigher: false,
+                    items: hours,
+                    activeItems: activeHours,
+                    peakItem,
+                    bestBullItem,
+                    bestBearItem,
+                    bestReturnItem
+                };
+            }
+        };
+
+        const buildStatsForOccurrences = (occurrences, type) => {
+            const timeDist = computeTimeDistribution(occurrences);
+            const withNext = occurrences.filter(o => o.nextCandle && o.nextReturn !== null);
+            const sampleSize = withNext.length;
+            if (sampleSize === 0) {
+                return {
+                    type,
+                    totalOccurrences: occurrences.length,
+                    frequency: totalWindows > 0 ? (occurrences.length / totalWindows) * 100 : 0,
+                    sampleSize: 0,
+                    bullProb: 0,
+                    bearProb: 0,
+                    dojiProb: 0,
+                    bullCount: 0,
+                    bearCount: 0,
+                    dojiCount: 0,
+                    avgReturn: 0,
+                    maxReturn: 0,
+                    minReturn: 0,
+                    avgSpreadPrice: 0,
+                    avgSpreadPercent: 0,
+                    timeDist,
+                    allOccurrences: occurrences,
+                    occurrences: occurrences.slice(-20).reverse()
+                };
+            }
+
+            const bullCount = withNext.filter(o => o.nextDirection === 'up').length;
+            const bearCount = withNext.filter(o => o.nextDirection === 'down').length;
+            const dojiCount = withNext.filter(o => o.nextDirection === 'doji').length;
+
+            const returns = withNext.map(o => o.nextReturn);
+            const avgReturn = returns.reduce((a, b) => a + b, 0) / sampleSize;
+            const maxReturn = Math.max(...returns);
+            const minReturn = Math.min(...returns);
+
+            const avgSpreadPrice = withNext.reduce((a, o) => a + o.nextSpread, 0) / sampleSize;
+            const avgSpreadPercent = withNext.reduce((a, o) => a + o.nextSpreadPercent, 0) / sampleSize;
+
+            return {
+                type,
+                totalOccurrences: occurrences.length,
+                frequency: totalWindows > 0 ? (occurrences.length / totalWindows) * 100 : 0,
+                sampleSize,
+                bullCount,
+                bearCount,
+                dojiCount,
+                bullProb: (bullCount / sampleSize) * 100,
+                bearProb: (bearCount / sampleSize) * 100,
+                dojiProb: (dojiCount / sampleSize) * 100,
+                avgReturn,
+                maxReturn,
+                minReturn,
+                avgSpreadPrice,
+                avgSpreadPercent,
+                timeDist,
+                allOccurrences: occurrences,
+                occurrences: occurrences.slice(-20).reverse()
+            };
+        };
+
+        const statsByPattern = {};
+        patternKeys.forEach(k => {
+            statsByPattern[k] = buildStatsForOccurrences(patternOccurrences[k], k);
+        });
+
+        return {
+            totalWindows,
+            statsByPattern,
+            patternOccurrences,
+            nextCandlesByPattern: patternNextCandles,
+            bullStats: statsByPattern['3_bull'],
+            bearStats: statsByPattern['3_bear'],
+            bullNextCandles: patternNextCandles['3_bull'],
+            bearNextCandles: patternNextCandles['3_bear'],
+            bullOccurrences: patternOccurrences['3_bull'],
+            bearOccurrences: patternOccurrences['3_bear']
+        };
+    }, [chartCandles, timeframe]);
+
+    const analyzedCandles = useMemo(() => {
+        if (!candlePattern) return chartCandles;
+        const nextCandles = patternAnalysis?.nextCandlesByPattern?.[candlePattern];
+        return nextCandles?.length > 0 ? nextCandles : chartCandles;
+    }, [chartCandles, candlePattern, patternAnalysis]);
+
+    const patternChartSignals = useMemo(() => {
+        if (!candlePattern || !patternAnalysis) return [];
+        const occs = patternAnalysis.patternOccurrences?.[candlePattern] || [];
+        const cfg = PATTERN_CONFIGS[candlePattern];
+        if (!cfg) return [];
+
+        return occs.map(o => {
+            const lastCandleInPattern = o.candles[o.candles.length - 1];
+            return {
+                date: o.patternEndTime || o.patternEndDate,
+                type: cfg.chartSignal.type,
+                name: cfg.label,
+                text: cfg.chartSignal.text,
+                price: lastCandleInPattern?.close,
+                color: cfg.chartSignal.color
+            };
+        });
+    }, [candlePattern, patternAnalysis]);
+
+    // ==========================================
     // 1. STATS: SPREAD (Price & Percent)
     // ==========================================
     const spreadStats = useMemo(() => {
-        if (!chartCandles || chartCandles.length === 0) return null;
+        if (!analyzedCandles || analyzedCandles.length === 0) return null;
 
-        const spreads = chartCandles.map(c => {
+        const spreads = analyzedCandles.map(c => {
             const priceSpread = Math.max(0, c.high - c.low);
             const basePrice = c.low > 0 ? c.low : (c.open > 0 ? c.open : 1);
             const percentSpread = (priceSpread / basePrice) * 100;
@@ -471,13 +895,13 @@ const StrategyInsight = () => {
             lowVolRatio: ((lowVolCount / len) * 100).toFixed(1),
             spreadsTimeline: spreads.slice(-100) // last 100 candles for timeline
         };
-    }, [chartCandles]);
+    }, [analyzedCandles]);
 
     // ==========================================
     // 2. STATS: INTRADAY (Hourly Distribution)
     // ==========================================
     const intradayStats = useMemo(() => {
-        if (!chartCandles || chartCandles.length === 0) return null;
+        if (!analyzedCandles || analyzedCandles.length === 0) return null;
 
         // Group by hour (0 to 23)
         const hourlyMap = new Map();
@@ -493,7 +917,7 @@ const StrategyInsight = () => {
             });
         }
 
-        chartCandles.forEach(c => {
+        analyzedCandles.forEach(c => {
             const d = dayjs(c.date || (typeof c.time === 'number' ? c.time * 1000 : c.time));
             const h = d.hour();
             const slot = hourlyMap.get(h);
@@ -538,15 +962,15 @@ const StrategyInsight = () => {
             bestBearHour,
             highestVolHour,
             highestReturnHour,
-            totalCandles: chartCandles.length
+            totalCandles: analyzedCandles.length
         };
-    }, [chartCandles]);
+    }, [analyzedCandles]);
 
     // ==========================================
     // 3. STATS: WEEK (Day of Week Distribution)
     // ==========================================
     const weekStats = useMemo(() => {
-        if (!chartCandles || chartCandles.length === 0) return null;
+        if (!analyzedCandles || analyzedCandles.length === 0) return null;
 
         // Group by day of week (0: CN, 1: T2, 2: T3, 3: T4, 4: T5, 5: T6, 6: T7)
         const weekMap = new Map();
@@ -563,7 +987,7 @@ const StrategyInsight = () => {
             });
         }
 
-        chartCandles.forEach(c => {
+        analyzedCandles.forEach(c => {
             const dt = dayjs(c.date || (typeof c.time === 'number' ? c.time * 1000 : c.time));
             const dayIdx = dt.day();
             const slot = weekMap.get(dayIdx);
@@ -610,15 +1034,15 @@ const StrategyInsight = () => {
             bestBearDay,
             highestReturnDay,
             highestVolDay,
-            totalDays: chartCandles.length
+            totalDays: analyzedCandles.length
         };
-    }, [chartCandles]);
+    }, [analyzedCandles]);
 
     // ==========================================
     // 4. STATS: YEAR (Month of Year Seasonality)
     // ==========================================
     const yearStats = useMemo(() => {
-        if (!chartCandles || chartCandles.length === 0) return null;
+        if (!analyzedCandles || analyzedCandles.length === 0) return null;
 
         // Group by month (0 to 11)
         const monthMap = new Map();
@@ -634,7 +1058,7 @@ const StrategyInsight = () => {
             });
         }
 
-        chartCandles.forEach(c => {
+        analyzedCandles.forEach(c => {
             const dt = dayjs(c.date || (typeof c.time === 'number' ? c.time * 1000 : c.time));
             const m = dt.month();
             const slot = monthMap.get(m);
@@ -678,9 +1102,9 @@ const StrategyInsight = () => {
             bestMonth,
             worstMonth,
             highestWinMonth,
-            totalPeriods: chartCandles.length
+            totalPeriods: analyzedCandles.length
         };
-    }, [chartCandles]);
+    }, [analyzedCandles]);
 
     // ==========================================
     // Saved Insights Management (SymbolInsight)
@@ -1521,10 +1945,19 @@ const StrategyInsight = () => {
                     </div>
 
                     <div className="bg-gray-800/80 border border-gray-700/60 rounded-xl p-3 shadow-sm">
-                        <span className="text-xs text-gray-400 block mb-1">Phân tích Insight</span>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-md border inline-block ${activeInsightObj.badgeBg}`}>
-                            {activeInsightObj.label} Mode
-                        </span>
+                        <span className="text-xs text-gray-400 block mb-1">Pattern & Insight</span>
+                        <div className="flex items-center gap-1.5">
+                            {candlePattern ? (
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-md border ${candlePattern === '3_bull' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                                    }`}>
+                                    {candlePattern === '3_bull' ? '3 Nến Tăng' : '3 Nến Giảm'}
+                                </span>
+                            ) : (
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-md border inline-block ${activeInsightObj.badgeBg}`}>
+                                    {activeInsightObj.label} Mode
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
@@ -1555,6 +1988,12 @@ const StrategyInsight = () => {
                         <span className="inline-flex items-center gap-1">
                             <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block"></span> Khối lượng (Volume)
                         </span>
+                        {candlePattern && (
+                            <span className="inline-flex items-center gap-1 font-semibold text-purple-300">
+                                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block animate-pulse"></span>
+                                Pattern: {candlePattern === '3_bull' ? '3 Nến Tăng' : '3 Nến Giảm'}
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -1569,7 +2008,7 @@ const StrategyInsight = () => {
                         <TradingViewChart
                             data={chartCandles}
                             symbol={selectedSymbol}
-                            signals={[]}
+                            signals={patternChartSignals}
                             template={null}
                             timeframe={timeframe}
                             onLoadMore={handleLoadMore}
@@ -1605,13 +2044,47 @@ const StrategyInsight = () => {
                                 <h2 className="text-base font-bold text-gray-100 flex items-center gap-2">
                                     <span>Thống kê Insight: {activeInsightObj.label}</span>
                                     <span className="text-xs font-semibold text-gray-400">({selectedSymbol} • {timeframe})</span>
+                                    {candlePattern && PATTERN_CONFIGS[candlePattern] && (
+                                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${PATTERN_CONFIGS[candlePattern].badgeBg}`}>
+                                            {PATTERN_CONFIGS[candlePattern].tag}
+                                        </span>
+                                    )}
                                 </h2>
                                 <p className="text-xs text-gray-400">{activeInsightObj.desc}</p>
                             </div>
                         </div>
 
-                        {/* Quick switch tabs + Save Button */}
+                        {/* Controls: Candle Pattern Dropdown + Quick switch tabs + Save Button */}
                         <div className="flex flex-wrap items-center gap-2">
+                            {/* Candle Pattern Dropdown */}
+                            <div className="flex items-center bg-gray-900 px-2.5 py-1.5 rounded-xl border border-gray-700 gap-2">
+                                <CandlestickChart size={14} className={
+                                    candlePattern && PATTERN_CONFIGS[candlePattern]?.type === 'bull'
+                                        ? 'text-emerald-400'
+                                        : (candlePattern && PATTERN_CONFIGS[candlePattern]?.type === 'bear' ? 'text-rose-400' : 'text-purple-400')
+                                } />
+                                <span className="text-xs font-semibold text-gray-400 hidden md:inline">Candle Pattern:</span>
+                                <select
+                                    value={candlePattern}
+                                    onChange={(e) => setCandlePattern(e.target.value)}
+                                    className="bg-transparent text-xs font-bold text-gray-200 focus:outline-none cursor-pointer"
+                                >
+                                    <option value="" className="bg-gray-900 text-gray-300">-- Tất cả nến --</option>
+                                    <optgroup label="Chuỗi Nến (Consecutive)" className="bg-gray-900 text-gray-400 font-bold">
+                                        <option value="3_bull" className="bg-gray-900 text-emerald-400 font-semibold">3 nến tăng liên tiếp (Three White Soldiers)</option>
+                                        <option value="3_bear" className="bg-gray-900 text-rose-400 font-semibold">3 nến giảm liên tiếp (Three Black Crows)</option>
+                                    </optgroup>
+                                    <optgroup label="Mô Hình Engulfing (Nhấn Chìm)" className="bg-gray-900 text-gray-400 font-bold">
+                                        <option value="bullish_engulfing" className="bg-gray-900 text-emerald-400 font-semibold">Bullish Engulfing (Nhấn chìm tăng)</option>
+                                        <option value="bearish_engulfing" className="bg-gray-900 text-rose-400 font-semibold">Bearish Engulfing (Nhấn chìm giảm)</option>
+                                    </optgroup>
+                                    <optgroup label="Mô Hình Pinbar (Rút Chân / Bắn Râu)" className="bg-gray-900 text-gray-400 font-bold">
+                                        <option value="bullish_pinbar" className="bg-gray-900 text-emerald-400 font-semibold">Bullish Pinbar (Pinbar tăng / Hammer)</option>
+                                        <option value="bearish_pinbar" className="bg-gray-900 text-rose-400 font-semibold">Bearish Pinbar (Pinbar giảm / Shooting Star)</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+
                             {/* Quick switch tabs */}
                             <div className="flex items-center bg-gray-900 p-1 rounded-xl border border-gray-700 gap-1">
                                 {INSIGHT_MODES.map(mode => {
@@ -1656,6 +2129,283 @@ const StrategyInsight = () => {
                             </button>
                         </div>
                     </div>
+
+                    {/* Candle Pattern Insight Alert & Analytics Card */}
+                    {candlePattern && patternAnalysis && PATTERN_CONFIGS[candlePattern] && (() => {
+                        const config = PATTERN_CONFIGS[candlePattern];
+                        const isBull = config.type === 'bull';
+                        const stats = patternAnalysis.statsByPattern?.[candlePattern];
+
+                        return (
+                            <div className={`p-4 rounded-2xl border transition-all ${isBull
+                                ? 'bg-gradient-to-r from-emerald-950/40 via-gray-900 to-gray-900 border-emerald-500/40 shadow-lg shadow-emerald-950/30'
+                                : 'bg-gradient-to-r from-rose-950/40 via-gray-900 to-gray-900 border-rose-500/40 shadow-lg shadow-rose-950/30'
+                                }`}>
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-700/60 pb-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2.5 rounded-xl border ${isBull
+                                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                                            : 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                                            }`}>
+                                            <CandlestickChart size={22} />
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="text-sm font-bold text-gray-100">
+                                                    Mô hình: {config.label} ({config.subLabel})
+                                                </h3>
+                                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${config.badgeBg}`}>
+                                                    {config.tag}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-gray-400 mt-0.5">
+                                                {config.desc}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setCandlePattern('')}
+                                        className="text-xs text-gray-400 hover:text-gray-200 bg-gray-800 hover:bg-gray-700 border border-gray-700 px-2.5 py-1 rounded-lg transition self-start sm:self-auto cursor-pointer"
+                                    >
+                                        ✕ Xóa bộ lọc Pattern
+                                    </button>
+                                </div>
+
+                                {/* Pattern KPI Grid */}
+                                {!stats || stats.totalOccurrences === 0 ? (
+                                    <div className="py-6 text-center text-xs text-gray-500">
+                                        Chưa tìm thấy chu kỳ nào xuất hiện mô hình <b>{config.label}</b> trong {chartCandles.length} nến đã nạp.
+                                    </div>
+                                ) : (
+                                    <div className="mt-3.5 space-y-3.5">
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                                            <div className="bg-gray-900/80 border border-gray-700/60 rounded-xl p-3">
+                                                <span className="text-[11px] text-gray-400 block mb-1">Số lần xuất hiện</span>
+                                                <span className="text-base font-bold text-gray-100 font-mono block">
+                                                    {stats.totalOccurrences} lần
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 block mt-0.5 font-mono">
+                                                    Tần suất: {stats.frequency.toFixed(1)}% ({patternAnalysis.totalWindows} cửa sổ)
+                                                </span>
+                                            </div>
+
+                                            <div className="bg-gray-900/80 border border-gray-700/60 rounded-xl p-3">
+                                                <span className="text-[11px] text-gray-400 block mb-1">Xác suất Nến sau Tăng</span>
+                                                <span className="text-base font-bold text-emerald-400 font-mono block">
+                                                    {stats.bullProb.toFixed(1)}%
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 block mt-0.5 font-mono">
+                                                    {stats.bullCount}/{stats.sampleSize} lần nến xanh
+                                                </span>
+                                            </div>
+
+                                            <div className="bg-gray-900/80 border border-gray-700/60 rounded-xl p-3">
+                                                <span className="text-[11px] text-gray-400 block mb-1">Xác suất Nến sau Giảm</span>
+                                                <span className="text-base font-bold text-rose-400 font-mono block">
+                                                    {stats.bearProb.toFixed(1)}%
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 block mt-0.5 font-mono">
+                                                    {stats.bearCount}/{stats.sampleSize} lần nến đỏ
+                                                </span>
+                                            </div>
+
+                                            <div className="bg-gray-900/80 border border-gray-700/60 rounded-xl p-3">
+                                                <span className="text-[11px] text-gray-400 block mb-1">Kỳ vọng Lợi nhuận E[R]</span>
+                                                <span className={`text-base font-bold font-mono block ${stats.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {stats.avgReturn >= 0 ? '+' : ''}{stats.avgReturn.toFixed(2)}%
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 block mt-0.5 font-mono">
+                                                    Trung bình nến kế tiếp
+                                                </span>
+                                            </div>
+
+                                            <div className="bg-gray-900/80 border border-gray-700/60 rounded-xl p-3">
+                                                <span className="text-[11px] text-gray-400 block mb-1">Biên độ Max / Min</span>
+                                                <span className="text-base font-bold text-sky-400 font-mono block">
+                                                    +{stats.maxReturn.toFixed(2)}%
+                                                </span>
+                                                <span className="text-[10px] text-rose-400 block mt-0.5 font-mono">
+                                                    Min: {stats.minReturn.toFixed(2)}%
+                                                </span>
+                                            </div>
+
+                                            <div className="bg-gray-900/80 border border-gray-700/60 rounded-xl p-3">
+                                                <span className="text-[11px] text-gray-400 block mb-1">Spread TB Nến sau</span>
+                                                <span className="text-base font-bold text-amber-400 font-mono block">
+                                                    {stats.avgSpreadPercent.toFixed(2)}%
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 block mt-0.5 font-mono">
+                                                    ~{formatNumber(stats.avgSpreadPrice)} điểm
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Box: Biểu đồ Các lần xuất hiện gần nhất */}
+                                        {stats.occurrences?.length > 0 && (
+                                            <PatternOccurrencesChart
+                                                occurrences={stats.occurrences}
+                                                timeframe={timeframe}
+                                                candlePattern={candlePattern}
+                                            />
+                                        )}
+
+                                        {/* Box: Thống kê Thời điểm (Ngày / Giờ) xuất hiện mô hình */}
+                                        {stats.timeDist && stats.timeDist.items?.length > 0 && (
+                                            <div className="bg-gray-900/70 border border-gray-700/60 rounded-xl p-3.5 space-y-3">
+                                                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 border-b border-gray-800 pb-3">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className={`p-2 rounded-xl border ${stats.timeDist.isDailyOrHigher
+                                                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                                                            : 'bg-orange-500/15 border-orange-500/30 text-orange-400'
+                                                            }`}>
+                                                            {stats.timeDist.isDailyOrHigher ? (
+                                                                <CalendarDays size={18} />
+                                                            ) : (
+                                                                <Clock size={18} />
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <h4 className="text-xs font-bold text-gray-100">
+                                                                    {stats.timeDist.isDailyOrHigher
+                                                                        ? 'Thống kê Ngày trong tuần xuất hiện mô hình'
+                                                                        : 'Thống kê Khung giờ xuất hiện mô hình'}
+                                                                </h4>
+                                                                <span className="text-[10px] font-bold bg-gray-800 text-amber-300 px-2 py-0.5 rounded border border-gray-700 font-mono">
+                                                                    TF: {timeframe}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[11px] text-gray-400 mt-0.5">
+                                                                {stats.timeDist.isDailyOrHigher
+                                                                    ? 'Phân bố tần suất & xác suất nến kế tiếp theo từng Thứ (Thứ 2 - Chủ Nhật)'
+                                                                    : 'Phân bố tần suất & xác suất nến kế tiếp theo từng Khung giờ giao dịch (00:00 - 23:00)'}
+                                                            </p>
+                                                            <p className="text-[11px] text-gray-400 mt-0.5">
+                                                                <span>Thanh bar bên trong là tỷ lệ nến kế tiếp <b className="text-emerald-400">Tăng (Xanh)</b> vs <b className="text-rose-400">Giảm (Đỏ)</b>.</span> <br />
+                                                                <span><b className="text-emerald-400">▲ Bull cao nhất</b> / <b className="text-rose-400">▼ Bear cao nhất</b> là {stats.timeDist.isDailyOrHigher ? 'ngày' : 'giờ'} có xác suất nến sau Tăng/Giảm mạnh nhất.</span>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Quick Highlight Badges */}
+                                                    {stats.timeDist.peakItem && stats.timeDist.peakItem.count > 0 && (
+                                                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                                            <div className="bg-gray-950/80 border border-amber-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-mono">
+                                                                <span className="text-gray-400">Xuất hiện nhiều nhất:</span>
+                                                                <span className="text-amber-300 font-bold">
+                                                                    {stats.timeDist.peakItem.label} ({stats.timeDist.peakItem.count} lần • {stats.timeDist.peakItem.percentage.toFixed(1)}%)
+                                                                </span>
+                                                            </div>
+                                                            {stats.timeDist.bestBullItem && stats.timeDist.bestBullItem.bullRate > 0 && (
+                                                                <div className="bg-gray-950/80 border border-emerald-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-mono">
+                                                                    <span className="text-emerald-400 font-bold">▲ Bull cao nhất:</span>
+                                                                    <span className="text-emerald-300 font-bold">
+                                                                        {stats.timeDist.bestBullItem.label} ({stats.timeDist.bestBullItem.bullRate.toFixed(1)}%)
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                            {stats.timeDist.bestBearItem && stats.timeDist.bestBearItem.bearRate > 0 && (
+                                                                <div className="bg-gray-950/80 border border-rose-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-mono">
+                                                                    <span className="text-rose-400 font-bold">▼ Bear cao nhất:</span>
+                                                                    <span className="text-rose-300 font-bold">
+                                                                        {stats.timeDist.bestBearItem.label} ({stats.timeDist.bestBearItem.bearRate.toFixed(1)}%)
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Distribution Grid Cards */}
+                                                <div className={`grid gap-2.5 ${stats.timeDist.isDailyOrHigher
+                                                    ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-7'
+                                                    : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
+                                                    }`}>
+                                                    {stats.timeDist.items
+                                                        .filter(item => stats.timeDist.isDailyOrHigher || item.count > 0)
+                                                        .map((item) => {
+                                                            const isPeak = stats.timeDist.peakItem?.key === item.key && item.count > 0;
+                                                            return (
+                                                                <div
+                                                                    key={item.key}
+                                                                    className={`p-2.5 rounded-xl border transition flex flex-col justify-between ${item.count === 0
+                                                                        ? 'bg-gray-950/30 border-gray-800/60 opacity-40'
+                                                                        : isPeak
+                                                                            ? 'bg-gray-950 border-amber-500/50 shadow-md shadow-amber-950/20 ring-1 ring-amber-500/30'
+                                                                            : 'bg-gray-950/70 border-gray-800 hover:border-gray-700'
+                                                                        }`}
+                                                                >
+                                                                    {/* Header: Label & Count */}
+                                                                    <div className="flex items-center justify-between mb-2">
+                                                                        <span className={`text-xs font-bold ${isPeak ? 'text-amber-300' : 'text-gray-200'}`}>
+                                                                            {item.label}
+                                                                        </span>
+                                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${item.count > 0
+                                                                            ? isPeak ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-gray-800 text-gray-300'
+                                                                            : 'bg-gray-900 text-gray-600'
+                                                                            }`}>
+                                                                            {item.count} lần ({item.percentage.toFixed(0)}%)
+                                                                        </span>
+                                                                    </div>
+
+                                                                    {item.count > 0 ? (
+                                                                        <div className="space-y-1.5 font-mono text-[10px]">
+                                                                            {/* Probability Visual Bar */}
+                                                                            <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden flex">
+                                                                                <div
+                                                                                    className="bg-emerald-500 h-full transition-all"
+                                                                                    style={{ width: `${item.bullRate}%` }}
+                                                                                    title={`Tăng: ${item.bullRate.toFixed(1)}%`}
+                                                                                />
+                                                                                <div
+                                                                                    className="bg-rose-500 h-full transition-all"
+                                                                                    style={{ width: `${item.bearRate}%` }}
+                                                                                    title={`Giảm: ${item.bearRate.toFixed(1)}%`}
+                                                                                />
+                                                                            </div>
+
+                                                                            {/* Probabilities */}
+                                                                            <div className="flex items-center justify-between text-[10px]">
+                                                                                <span className="text-emerald-400 font-bold">
+                                                                                    ▲ {item.bullRate.toFixed(0)}%
+                                                                                </span>
+                                                                                <span className="text-rose-400 font-bold">
+                                                                                    ▼ {item.bearRate.toFixed(0)}%
+                                                                                </span>
+                                                                            </div>
+
+                                                                            {/* E[R] & Spread */}
+                                                                            <div className="pt-1.5 border-t border-gray-800/80 flex items-center justify-between text-[10px] text-gray-400">
+                                                                                <span className="text-gray-500">E[R]:</span>
+                                                                                <span className={`font-bold ${item.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                                    {item.avgReturn >= 0 ? '+' : ''}{item.avgReturn.toFixed(2)}%
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="flex items-center justify-between text-[10px] text-gray-400">
+                                                                                <span className="text-gray-500">Spread:</span>
+                                                                                <span className="text-amber-300 font-semibold">
+                                                                                    {item.avgSpread.toFixed(2)}%
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="py-2 text-center text-[10px] text-gray-600 font-mono">
+                                                                            0 lần
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
 
                     {/* Save Success Alert Banner */}
                     {saveSuccessMsg && (
