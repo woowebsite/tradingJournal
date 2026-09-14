@@ -1,0 +1,910 @@
+//@version=6
+strategy(
+     title                   = "Adaptive Supertrend Sideway Strategy",
+     shorttitle              = "Adaptive ST Sideway",
+     overlay                 = true,
+     initial_capital         = 10000,
+     currency                = currency.USD,
+     default_qty_type        = strategy.percent_of_equity,
+     default_qty_value       = 100,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.05,
+     process_orders_on_close = true,
+     max_lines_count         = 500,
+     max_labels_count        = 500,
+     max_boxes_count         = 500
+)
+
+// ==============================================================================
+// 1. CẤU HÌNH & THAM SỐ ĐẦU VÀO (INPUTS)
+// ==============================================================================
+
+// --- Group 1: Cấu hình Supertrend & Adaptive Mode ---
+grp_st          = "1. Cấu hình Supertrend & Chế độ Adaptive"
+isAdaptive      = input.bool(true, "Bật Supertrend Thích ứng (isAdaptive)", group = grp_st, tooltip = "Khi BẬT: ATR Period và Factor sẽ tự động co giãn theo độ biến động và độ nhiễu thị trường (Period: 5-20, Factor: 2.0-5.0).\nKhi TẮT: Sử dụng thông số cố định bên dưới (Mặc định 10, 3.0).")
+fixedPeriod     = input.int(10, "ATR Period (Cố định khi tắt Adaptive)", minval = 1, group = grp_st, tooltip = "Chu kỳ ATR cố định khi không sử dụng chế độ Adaptive (Mặc định: 10)")
+fixedFactor     = input.float(3.0, "Multiplier Factor (Cố định khi tắt Adaptive)", minval = 0.1, step = 0.1, group = grp_st, tooltip = "Hệ số nhân cố định khi không sử dụng chế độ Adaptive (Mặc định: 3.0)")
+
+// Giới hạn Adaptive
+grp_adapt_lim   = "1.1. Giới hạn dải Adaptive"
+minPeriod       = input.int(5, "Adaptive Min Period", minval = 1, maxval = 50, group = grp_adapt_lim, tooltip = "Chu kỳ ATR tối thiểu khi thị trường có xu hướng mạnh (Mặc định: 5)")
+maxPeriod       = input.int(20, "Adaptive Max Period", minval = 1, maxval = 100, group = grp_adapt_lim, tooltip = "Chu kỳ ATR tối đa khi thị trường đi ngang / nhiều nhiễu (Mặc định: 20)")
+minFactor       = input.float(2.0, "Adaptive Min Factor", minval = 0.5, maxval = 10.0, step = 0.1, group = grp_adapt_lim, tooltip = "Hệ số nhân tối thiểu khi thị trường êm ả / trend mượt (Mặc định: 2.0)")
+maxFactor       = input.float(5.0, "Adaptive Max Factor", minval = 1.0, maxval = 15.0, step = 0.1, group = grp_adapt_lim, tooltip = "Hệ số nhân tối đa khi thị trường biến động giật / nhiễu (Mặc định: 5.0)")
+
+// --- Group 2: Nhận diện Sideway (Sideway Up & Sideway Down) ---
+grp_side        = "2. Nhận diện Trạng thái Sideway"
+detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
+sidewayMethod   = input.string("Narrow Sideway", "Phương pháp nhận diện Sideway", options = ["Narrow Sideway", "Kết hợp (ADX + Kaufman ER + CHOP)", "ADX Thấp", "Choppiness Index Cao", "Kaufman ER Thấp", "Biên độ nén BB Width"], group = grp_side)
+adxThresh       = input.float(20.0, "Ngưỡng ADX (Dưới ngưỡng là Sideway)", minval = 5.0, maxval = 50.0, step = 1.0, group = grp_side, tooltip = "Chỉ số ADX dưới mức này báo hiệu lực xu hướng yếu / tích lũy (Mặc định: 20)")
+chopThresh      = input.float(60.0, "Ngưỡng Choppiness Index (Trên ngưỡng là Sideway)", minval = 30.0, maxval = 90.0, step = 1.0, group = grp_side, tooltip = "Chỉ số CHOP trên mức này báo hiệu thị trường giật cục / không có xu hướng (Mặc định: 60)")
+erThresh        = input.float(0.30, "Ngưỡng Kaufman ER (Dưới ngưỡng là Sideway)", minval = 0.05, maxval = 0.9, step = 0.05, group = grp_side, tooltip = "Hiệu suất di chuyển giá Kaufman ER dưới mức này thể hiện nhiều nến chồng chéo / nhiễu (Mặc định: 0.30)")
+
+// --- Group 3: Quản lý Vào lệnh & Tỷ lệ RRR (Entry / SL / TP1 / TP2) ---
+grp_trade       = "3. Quản lý Vào lệnh & Thoát lệnh RRR"
+entryType       = input.string("Supertrend Flip", "Kiểu vào lệnh (Entry Type)", options = ["Supertrend Flip", "Break Sideway", "First Pullback"], group = grp_trade, tooltip = "Supertrend Flip: Vào lệnh ngay khi Supertrend đảo chiều xu hướng.\nBreak Sideway: Vào lệnh khi giá phá vỡ đỉnh (Long) hoặc đáy (Short) của bất kỳ vùng Sideway nào khi chưa có lệnh.\nFirst Pullback: Vào lệnh sau khi kết thúc vùng First Pullback đầu tiên của sóng Supertrend mà giá vẫn duy trì xu hướng.")
+slType          = input.string("Supertrend", "Kiểu Stop Loss (Stoploss Type)", options = ["Supertrend", "Sideway Zone"], group = grp_trade, tooltip = "Supertrend: Đặt SL theo đường Supertrend tại thời điểm vào lệnh.\nSideway Zone: Đặt SL dưới đáy vùng Sideway (Long) hoặc trên đỉnh vùng Sideway (Short).")
+allowLong       = input.bool(true, "Cho phép lệnh Long (Mua)", group = grp_trade)
+allowShort      = input.bool(true, "Cho phép lệnh Short (Bán)", group = grp_trade)
+filterSideway   = input.bool(false, "Không mở vị thế mới nếu đang Sideway", group = grp_trade, tooltip = "Nếu bật, khi có tín hiệu vào lệnh nhưng thị trường đang nằm trong vùng Sideway sẽ bỏ qua.")
+rrrTp1          = input.float(2.0, "Tỷ lệ RRR cho Take Profit 1 (TP1)", minval = 0.5, step = 0.5, group = grp_trade, tooltip = "Khoảng cách TP1 = Entry + RRR_TP1 * Risk (Mặc định: 2:1)")
+rrrTp2          = input.float(4.0, "Tỷ lệ RRR cho Take Profit 2 (TP2)", minval = 1.0, step = 0.5, group = grp_trade, tooltip = "Khoảng cách TP2 = Entry + RRR_TP2 * Risk (Mặc định: 4:1)")
+tp1QtyPct       = input.float(50.0, "% Khối lượng chốt lời tại TP1", minval = 1.0, maxval = 100.0, step = 5.0, group = grp_trade, tooltip = "Tỷ lệ phần trăm vị thế sẽ chốt lời khi chạm TP1 (Mặc định: 50%)")
+moveSlToBe      = input.bool(true, "Dời SL về Hòa vốn (Break-Even) sau khi đạt TP1", group = grp_trade, tooltip = "Tự động nâng/hạ Stoploss về giá Entry khi giá đã cắn TP1 để bảo toàn vốn.")
+closeOnFlip     = input.bool(true, "Đóng vị thế còn lại khi Supertrend đảo chiều ngược", group = grp_trade, tooltip = "Tự động đóng toàn bộ khối lượng còn lại nếu Supertrend đổi màu ngược hướng.")
+
+// --- Group 4: Hiển thị & Đồ họa ---
+grp_vis         = "4. Hiển thị & Đồ họa Biểu đồ"
+showSidewayBox  = input.bool(true, "Vẽ hình chữ nhật (Box) bao quanh nến Sideway", group = grp_vis, tooltip = "Vẽ khung chữ nhật động bao bọc toàn bộ cụm nến (đỉnh cao nhất - đáy thấp nhất) trong suốt giai đoạn Sideway Up/Down.")
+showTradeLevels = input.bool(true, "Vẽ các đường Entry, SL, TP1, TP2 trên biểu đồ", group = grp_vis)
+
+// --- Group 5: Bảng Thống kê Dashboard ---
+grp_tbl         = "5. Bảng Thống kê Dashboard"
+showTable       = input.bool(true, "Hiển thị Bảng Dashboard Thống kê", group = grp_tbl)
+tablePos        = input.string("Top Right", "Vị trí Bảng", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = grp_tbl)
+tableSize       = input.string("Small", "Cỡ chữ Dashboard", options = ["Tiny", "Small", "Normal", "Large"], group = grp_tbl)
+
+
+// ==============================================================================
+// 2. TÍNH TOÁN CƠ CHẾ THÍCH ỨNG (ADAPTIVE ENGINE)
+// ==============================================================================
+
+// 2.1. Kaufman Efficiency Ratio (KER): Đo lường độ mượt / hiệu quả xu hướng
+calcKER(int len) =>
+    float change     = math.abs(close - close[len])
+    float volatility = math.sum(math.abs(close - close[1]), len)
+    volatility != 0.0 ? change / volatility : 0.0
+
+float ker = calcKER(14) // 1.0 = xu hướng rất mượt, 0.0 = sideway hỗn loạn hoàn toàn
+
+// 2.2. Normalized Volatility Rank: Đo lường mức biến động tương đối
+float baseAtr = ta.atr(14)
+float volRank = ta.percentrank(baseAtr, 50) / 100.0 // [0.0, 1.0]
+
+// 2.3. Tính toán Period & Factor thích ứng
+// - Khi KER cao (Trend mượt): Period -> minPeriod (5), Factor -> minFactor (2.0) để phản ứng nhanh và bám sát giá.
+// - Khi KER thấp (Chop/Sideway): Period -> maxPeriod (20), Factor -> maxFactor (5.0) để tránh bị bẫy nhiễu (whipsaw).
+float calcAdaptPeriod = minPeriod + (1.0 - ker) * (maxPeriod - minPeriod)
+int   adaptivePeriod   = int(math.round(math.max(minPeriod, math.min(maxPeriod, calcAdaptPeriod))))
+
+float calcAdaptFactor = minFactor + (0.5 * (1.0 - ker) + 0.5 * volRank) * (maxFactor - minFactor)
+float adaptiveFactor   = math.max(minFactor, math.min(maxFactor, calcAdaptFactor))
+
+// 2.4. Lựa chọn thông số hiệu dụng
+float effectivePeriod = isAdaptive ? float(adaptivePeriod) : float(fixedPeriod)
+float effectiveFactor = isAdaptive ? float(adaptiveFactor) : float(fixedFactor)
+
+
+// ==============================================================================
+// 3. TÍNH TOÁN SUPERTREND (HỖ TRỢ THAM SỐ ĐỘNG SERIES INT / FLOAT)
+// ==============================================================================
+
+// Hàm tính ATR động với chu kỳ biến thiên (Series Period) theo chuẩn Wilder's RMA
+calcDynamicAtr(series float period) =>
+    float trVal = math.max(high - low, math.max(math.abs(high - nz(close[1], high)), math.abs(low - nz(close[1], low))))
+    float alpha = 1.0 / math.max(1.0, period)
+    var float dAtr = na
+    dAtr := na(dAtr[1]) ? trVal : (alpha * trVal + (1.0 - alpha) * nz(dAtr[1], trVal))
+    dAtr
+
+calcSupertrend(series float factor, series float period) =>
+    float atrVal    = calcDynamicAtr(period)
+    float src       = hl2
+    float upperBand = src + factor * atrVal
+    float lowerBand = src - factor * atrVal
+    
+    var float prevLowerBand = 0.0
+    var float prevUpperBand = 0.0
+    var int   direction     = 1
+    
+    prevLowerBand := nz(lowerBand[1])
+    prevUpperBand := nz(upperBand[1])
+    
+    lowerBand := (lowerBand > prevLowerBand or close[1] < prevLowerBand) ? lowerBand : prevLowerBand
+    upperBand := (upperBand < prevUpperBand or close[1] > prevUpperBand) ? upperBand : prevUpperBand
+    
+    if na(close[1])
+        direction := 1
+    else if direction[1] == 1
+        direction := close < prevLowerBand ? -1 : 1
+    else
+        direction := close > prevUpperBand ? 1 : -1
+        
+    float stValue = direction == 1 ? lowerBand : upperBand
+    [stValue, direction]
+
+[supertrendVal, supertrendDir] = calcSupertrend(effectiveFactor, effectivePeriod)
+
+// Nhận diện Đảo chiều Supertrend (Change Direction)
+bool isSupertrendBuy  = (supertrendDir == 1) and (supertrendDir[1] == -1 or na(supertrendDir[1]))
+bool isSupertrendSell = (supertrendDir == -1) and (supertrendDir[1] == 1 or na(supertrendDir[1]))
+
+// --- Supertrend Cloud / Body Fill ---
+bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle", display = display.none)
+upTrend    = plot(supertrendDir == 1 ? supertrendVal : na, "Supertrend Uptrend", color = color.new(#00e676, 0), linewidth = 2, style = plot.style_linebr)
+downTrend  = plot(supertrendDir == -1 ? supertrendVal : na, "Supertrend Downtrend", color = color.new(#ff1744, 0), linewidth = 2, style = plot.style_linebr)
+
+fill(bodyMiddle, upTrend,   title = "Uptrend Background Cloud",   color = color.new(#00e676, 90), fillgaps = false)
+fill(bodyMiddle, downTrend, title = "Downtrend Background Cloud", color = color.new(#ff1744, 90), fillgaps = false)
+
+// ==============================================================================
+// 4. NHẬN DIỆN TRẠNG THÁI SIDEWAY (SIDEWAY UP & SIDEWAY DOWN)
+// ==============================================================================
+
+// 4.1. Chỉ báo ADX
+[diPlus, diMinus, adxValue] = ta.dmi(14, 14)
+
+// 4.2. Chỉ báo Choppiness Index (CHOP)
+calcCHOP(int len) =>
+    float sumAtr    = math.sum(ta.tr, len)
+    float maxHigh   = ta.highest(high, len)
+    float minLow    = ta.lowest(low, len)
+    float rangeDiff = maxHigh - minLow
+    rangeDiff > 0.0 and sumAtr > 0.0 ? 100.0 * math.log10(sumAtr / rangeDiff) / math.log10(len) : 50.0
+
+float chopValue = calcCHOP(14)
+
+// 4.3. Bollinger Bands Squeeze
+float bbBasis = ta.sma(close, 20)
+float bbDev   = 2.0 * ta.stdev(close, 20)
+float bbWidth = bbBasis != 0 ? ((bbBasis + bbDev) - (bbBasis - bbDev)) / bbBasis * 100.0 : 0.0
+bool  bbSqueeze = bbWidth < ta.sma(bbWidth, 50)
+
+// 4.4. Cơ chế Nhận diện Sideway theo cấu trúc NARROW SIDEWAY (Price Action & FVG)
+
+// --- A. Dữ liệu Đỉnh/Đáy và FVG trong sóng Tăng (Supertrend Up) ---
+var float peakHighInUp = na
+var float peakLowInUp  = na
+
+if isSupertrendBuy
+    peakHighInUp := high
+    peakLowInUp  := low
+else if supertrendDir == 1
+    if na(peakHighInUp) or high > peakHighInUp
+        peakHighInUp := high
+        peakLowInUp  := low
+
+// FVG Giảm (Bearish FVG) trong sóng Tăng: Nến [1] đỏ, có khoảng cách giữa Low[2] và High[0]
+bool isBearishFvg = (close[1] < open[1]) and (low[2] > high)
+var float lastBearFvgBottom = na
+
+// --- B. Dữ liệu Đỉnh/Đáy và FVG trong sóng Giảm (Supertrend Down) ---
+var float valleyLowInDown  = na
+var float valleyHighInDown = na
+
+if isSupertrendSell
+    valleyLowInDown  := low
+    valleyHighInDown := high
+else if supertrendDir == -1
+    if na(valleyLowInDown) or low < valleyLowInDown
+        valleyLowInDown  := low
+        valleyHighInDown := high
+
+// FVG Tăng (Bullish FVG) trong sóng Giảm: Nến [1] xanh, có khoảng cách giữa High[2] và Low[0]
+bool isBullishFvg = (close[1] > open[1]) and (high[2] < low)
+var float lastBullFvgTop = na
+
+// --- C. Theo dõi trạng thái NARROW SIDEWAY UP ---
+var bool  inNarrowUp        = false
+var int   narrowStartBarUp  = na
+var int   narrowUpBullCt    = 0
+var int   narrowUpBearCt    = 0
+var float narrowHighUp      = na
+var float narrowLowUp       = na
+var bool  hasFvgInNarrowUp  = false
+
+// Bắt đầu Sideway Up dạng 1 (dưới đáy nến cao nhất trước đó - không có FVG)
+bool condPeakBelow = (supertrendDir == 1) and not na(peakLowInUp) and (high < peakLowInUp)
+
+// Điều kiện kết thúc Sideway Up
+bool condNarrowUpEnd = (close > math.max(high[1], high[2])) or (hasFvgInNarrowUp and not na(lastBearFvgBottom) and close >= lastBearFvgBottom)
+
+if isSupertrendBuy or supertrendDir != 1
+    inNarrowUp        := false
+    narrowStartBarUp  := na
+    narrowUpBullCt    := 0
+    narrowUpBearCt    := 0
+    narrowHighUp      := na
+    narrowLowUp       := na
+    lastBearFvgBottom := na
+    hasFvgInNarrowUp  := false
+else if supertrendDir == 1
+    // Nếu xuất hiện FVG giảm mới trong sóng tăng -> Bắt đầu tính lại vùng Sideway theo FVG đó
+    if isBearishFvg
+        lastBearFvgBottom := high
+        inNarrowUp        := true
+        hasFvgInNarrowUp  := true
+        narrowStartBarUp  := bar_index - 1
+        narrowUpBullCt    := (close[1] > open[1] ? 1 : 0) + (close > open ? 1 : 0)
+        narrowUpBearCt    := (close[1] < open[1] ? 1 : 0) + (close < open ? 1 : 0)
+        narrowHighUp      := math.max(high[1], high)
+        narrowLowUp       := math.min(low[1], low)
+    else if not inNarrowUp
+        if condPeakBelow
+            inNarrowUp        := true
+            hasFvgInNarrowUp  := false
+            narrowStartBarUp  := bar_index
+            narrowUpBullCt    := close > open ? 1 : 0
+            narrowUpBearCt    := close < open ? 1 : 0
+            narrowHighUp      := high
+            narrowLowUp       := low
+    else
+        // Đang trong sideway up
+        narrowUpBullCt += (close > open ? 1 : 0)
+        narrowUpBearCt += (close < open ? 1 : 0)
+        narrowHighUp   := math.max(nz(narrowHighUp, high), high)
+        narrowLowUp    := math.min(nz(narrowLowUp, low), low)
+        
+        if condNarrowUpEnd
+            inNarrowUp := false
+            if hasFvgInNarrowUp
+                lastBearFvgBottom := na
+                hasFvgInNarrowUp  := false
+
+bool isNarrowUpActive = inNarrowUp and (narrowUpBullCt + narrowUpBearCt >= 3) and (narrowUpBullCt >= 1 and narrowUpBearCt >= 1)
+
+// --- D. Theo dõi trạng thái NARROW SIDEWAY DOWN ---
+var bool  inNarrowDown        = false
+var int   narrowStartBarDown  = na
+var int   narrowDownBullCt    = 0
+var int   narrowDownBearCt    = 0
+var float narrowHighDown      = na
+var float narrowLowDown       = na
+var bool  hasFvgInNarrowDown  = false
+
+// Bắt đầu Sideway Down dạng 1 (trên đỉnh nến thấp nhất trước đó - không có FVG)
+bool condValleyAbove = (supertrendDir == -1) and not na(valleyHighInDown) and (low > valleyHighInDown)
+
+// Điều kiện kết thúc Sideway Down
+bool condNarrowDownEnd = (close < math.min(low[1], low[2])) or (hasFvgInNarrowDown and not na(lastBullFvgTop) and close <= lastBullFvgTop)
+
+if isSupertrendSell or supertrendDir != -1
+    inNarrowDown        := false
+    narrowStartBarDown  := na
+    narrowDownBullCt    := 0
+    narrowDownBearCt    := 0
+    narrowHighDown      := na
+    narrowLowDown       := na
+    lastBullFvgTop      := na
+    hasFvgInNarrowDown  := false
+else if supertrendDir == -1
+    // Nếu xuất hiện FVG tăng mới trong sóng giảm -> Bắt đầu tính lại vùng Sideway theo FVG đó
+    if isBullishFvg
+        lastBullFvgTop     := low
+        inNarrowDown       := true
+        hasFvgInNarrowDown := true
+        narrowStartBarDown := bar_index - 1
+        narrowDownBullCt   := (close[1] > open[1] ? 1 : 0) + (close > open ? 1 : 0)
+        narrowDownBearCt   := (close[1] < open[1] ? 1 : 0) + (close < open ? 1 : 0)
+        narrowHighDown     := math.max(high[1], high)
+        narrowLowDown      := math.min(low[1], low)
+    else if not inNarrowDown
+        if condValleyAbove
+            inNarrowDown       := true
+            hasFvgInNarrowDown := false
+            narrowStartBarDown := bar_index
+            narrowDownBullCt   := close > open ? 1 : 0
+            narrowDownBearCt   := close < open ? 1 : 0
+            narrowHighDown     := high
+            narrowLowDown      := low
+    else
+        // Đang trong sideway down
+        narrowDownBullCt += (close > open ? 1 : 0)
+        narrowDownBearCt += (close < open ? 1 : 0)
+        narrowHighDown   := math.max(nz(narrowHighDown, high), high)
+        narrowLowDown    := math.min(nz(narrowLowDown, low), low)
+        
+        if condNarrowDownEnd
+            inNarrowDown := false
+            if hasFvgInNarrowDown
+                lastBullFvgTop     := na
+                hasFvgInNarrowDown := false
+
+bool isNarrowDownActive = inNarrowDown and (narrowDownBullCt + narrowDownBearCt >= 3) and (narrowDownBullCt >= 1 and narrowDownBearCt >= 1)
+
+// 4.5. Đánh giá điều kiện Sideway theo Phương pháp được chọn
+bool isSidewayRaw = false
+
+if sidewayMethod == "Narrow Sideway"
+    isSidewayRaw := isNarrowUpActive or isNarrowDownActive
+else if sidewayMethod == "ADX Thấp"
+    isSidewayRaw := adxValue < adxThresh
+else if sidewayMethod == "Choppiness Index Cao"
+    isSidewayRaw := chopValue > chopThresh
+else if sidewayMethod == "Kaufman ER Thấp"
+    isSidewayRaw := ker < erThresh
+else if sidewayMethod == "Biên độ nén BB Width"
+    isSidewayRaw := bbSqueeze
+else // "Kết hợp (ADX + Kaufman ER + CHOP)"
+    isSidewayRaw := (adxValue < adxThresh or chopValue > chopThresh) and (ker < erThresh or bbSqueeze)
+
+// Phân loại trạng thái:
+bool isSidewayUp   = detectSideway and (supertrendDir == 1) and (sidewayMethod == "Narrow Sideway" ? isNarrowUpActive : isSidewayRaw)
+bool isSidewayDown = detectSideway and (supertrendDir == -1) and (sidewayMethod == "Narrow Sideway" ? isNarrowDownActive : isSidewayRaw)
+bool isTrendingUp  = (supertrendDir == 1) and not isSidewayUp
+bool isTrendingDown = (supertrendDir == -1) and not isSidewayDown
+
+// 4.6. THEO DÕI VÙNG FIRST PULLBACK (THEO SÓNG SUPERTREND)
+var int   revBarIdxUp        = na
+var bool  inFirstPbUp        = false
+var bool  hadFirstPbUp       = false
+var int   pbStartBarUp       = na
+var float pbHighUp           = na
+var float pbLowUp            = na
+var box   pbBoxUp            = na
+var bool  pbLongTrigger      = false
+
+var int   revBarIdxDown      = na
+var bool  inFirstPbDown      = false
+var bool  hadFirstPbDown     = false
+var int   pbStartBarDown     = na
+var float pbHighDown         = na
+var float pbLowDown          = na
+var box   pbBoxDown          = na
+var bool  pbShortTrigger     = false
+
+pbLongTrigger  := false
+pbShortTrigger := false
+
+// --- A. First Pullback trong Sóng Tăng (Supertrend Up) ---
+if isSupertrendBuy
+    revBarIdxUp   := bar_index
+    inFirstPbUp   := false
+    hadFirstPbUp  := false
+    pbStartBarUp  := na
+    pbHighUp      := na
+    pbLowUp       := na
+    pbBoxUp       := na
+else if supertrendDir == 1 and not hadFirstPbUp
+    int barsSinceRevUp = bar_index - nz(revBarIdxUp, bar_index)
+    int atrWindowUp    = int(math.round(effectivePeriod))
+    
+    if not inFirstPbUp
+        // Bắt đầu khi phá qua đáy 3 nến trước đó và còn trong khoảng ATR Period từ nến Reversal
+        bool condStartPbUp = (bar_index >= 3) and (low < math.min(low[1], math.min(low[2], low[3]))) and (barsSinceRevUp <= atrWindowUp)
+        if condStartPbUp
+            inFirstPbUp  := true
+            pbStartBarUp := bar_index
+            pbHighUp     := high
+            pbLowUp      := low
+            if showSidewayBox
+                pbBoxUp := box.new(
+                     left         = bar_index,
+                     top          = high,
+                     right        = bar_index,
+                     bottom       = low,
+                     border_color = color.new(#3b82f6, 0),
+                     border_width = 2,
+                     border_style = line.style_solid,
+                     bgcolor      = color.new(#3b82f6, 88),
+                     text         = "First Pullback Up",
+                     text_size    = size.tiny,
+                     text_color   = color.new(#1d4ed8, 0),
+                     text_valign  = text.align_top,
+                     text_halign  = text.align_left
+                )
+    else
+        // Đang trong vùng First Pullback Up: cập nhật đỉnh, đáy và mở rộng box
+        pbHighUp := math.max(nz(pbHighUp, high), high)
+        pbLowUp  := math.min(nz(pbLowUp, low), low)
+        if not na(pbBoxUp)
+            box.set_right(pbBoxUp, bar_index)
+            box.set_top(pbBoxUp, pbHighUp)
+            box.set_bottom(pbBoxUp, pbLowUp)
+            
+        // Điều kiện kết thúc: có nến phá đỉnh 2 nến trước HOẶC đạt cây nến thứ ATR Period tính từ Reversal
+        bool condEndPbUp = (bar_index >= 2 and close > math.max(high[1], high[2])) or (barsSinceRevUp >= atrWindowUp)
+        if condEndPbUp
+            inFirstPbUp   := false
+            hadFirstPbUp  := true
+            // Entry sau khi vùng kết thúc nếu giá vẫn nằm trên Supertrend
+            if close > supertrendVal
+                pbLongTrigger := true
+
+    // Hết thời gian chờ tạo Pullback mà chưa xuất hiện
+    if not inFirstPbUp and (barsSinceRevUp >= atrWindowUp)
+        hadFirstPbUp := true
+
+// --- B. First Pullback trong Sóng Giảm (Supertrend Down) ---
+if isSupertrendSell
+    revBarIdxDown   := bar_index
+    inFirstPbDown   := false
+    hadFirstPbDown  := false
+    pbStartBarDown  := na
+    pbHighDown      := na
+    pbLowDown       := na
+    pbBoxDown       := na
+else if supertrendDir == -1 and not hadFirstPbDown
+    int barsSinceRevDown = bar_index - nz(revBarIdxDown, bar_index)
+    int atrWindowDown    = int(math.round(effectivePeriod))
+    
+    if not inFirstPbDown
+        // Bắt đầu khi phá qua đỉnh 3 nến trước đó và còn trong khoảng ATR Period từ nến Reversal
+        bool condStartPbDown = (bar_index >= 3) and (high > math.max(high[1], math.max(high[2], high[3]))) and (barsSinceRevDown <= atrWindowDown)
+        if condStartPbDown
+            inFirstPbDown  := true
+            pbStartBarDown := bar_index
+            pbHighDown     := high
+            pbLowDown      := low
+            if showSidewayBox
+                pbBoxDown := box.new(
+                     left         = bar_index,
+                     top          = high,
+                     right        = bar_index,
+                     bottom       = low,
+                     border_color = color.new(#a855f7, 0),
+                     border_width = 2,
+                     border_style = line.style_solid,
+                     bgcolor      = color.new(#a855f7, 88),
+                     text         = "First Pullback Down",
+                     text_size    = size.tiny,
+                     text_color   = color.new(#7e22ce, 0),
+                     text_valign  = text.align_top,
+                     text_halign  = text.align_left
+                )
+    else
+        // Đang trong vùng First Pullback Down: cập nhật đỉnh, đáy và mở rộng box
+        pbHighDown := math.max(nz(pbHighDown, high), high)
+        pbLowDown  := math.min(nz(pbLowDown, low), low)
+        if not na(pbBoxDown)
+            box.set_right(pbBoxDown, bar_index)
+            box.set_top(pbBoxDown, pbHighDown)
+            box.set_bottom(pbBoxDown, pbLowDown)
+            
+        // Điều kiện kết thúc: có nến phá đáy 2 nến trước HOẶC đạt cây nến thứ ATR Period tính từ Reversal
+        bool condEndPbDown = (bar_index >= 2 and close < math.min(low[1], low[2])) or (barsSinceRevDown >= atrWindowDown)
+        if condEndPbDown
+            inFirstPbDown   := false
+            hadFirstPbDown  := true
+            // Entry sau khi vùng kết thúc nếu giá vẫn nằm dưới Supertrend
+            if close < supertrendVal
+                pbShortTrigger := true
+
+    // Hết thời gian chờ tạo Pullback mà chưa xuất hiện
+    if not inFirstPbDown and (barsSinceRevDown >= atrWindowDown)
+        hadFirstPbDown := true
+
+
+// ==============================================================================
+// 5. QUẢN LÝ LỆNH, RRR VÀ THỐNG KÊ (STRATEGY & STATISTICS ENGINE)
+// ==============================================================================
+
+// Biến lưu trữ trạng thái vị thế và các mức giá
+var float entryPrice   = na
+var float slPrice      = na
+var float tp1Price     = na
+var float tp2Price     = na
+var float initialRisk  = na
+var int   activeDir    = 0     // 1: Long, -1: Short, 0: Flat
+var int   entryBarIdx  = na
+
+var bool  tp1Reached   = false
+var bool  tp2Reached   = false
+var bool  slReached    = false
+
+// --- THEO DÕI CÁC VÙNG NARROW SIDEWAY TRONG SÓNG SUPERTREND ---
+var bool  hasPendingSidewayUp     = false
+var float currentSwHighUp         = na
+var float currentSwLowUp          = na
+
+var bool  hasPendingSidewayDown   = false
+var float currentSwHighDown       = na
+var float currentSwLowDown        = na
+
+var float lastSidewayHigh         = na
+var float lastSidewayLow          = na
+
+// Khi Supertrend đổi chiều -> Bắt đầu sóng mới, reset theo dõi Sideway
+if isSupertrendBuy or isSupertrendSell
+    hasPendingSidewayUp   := false
+    currentSwHighUp       := na
+    currentSwLowUp        := na
+    hasPendingSidewayDown := false
+    currentSwHighDown     := na
+    currentSwLowDown      := na
+    lastSidewayHigh       := na
+    lastSidewayLow        := na
+
+// Trong chu kỳ Supertrend Tăng (supertrendDir == 1)
+if supertrendDir == 1
+    if isSidewayUp
+        float curHigh = sidewayMethod == "Narrow Sideway" ? nz(narrowHighUp, high) : high
+        float curLow  = sidewayMethod == "Narrow Sideway" ? nz(narrowLowUp, low) : low
+        
+        if not isSidewayUp[1]
+            hasPendingSidewayUp := true
+            currentSwHighUp     := curHigh
+            currentSwLowUp      := curLow
+        else
+            currentSwHighUp     := math.max(nz(currentSwHighUp, curHigh), curHigh)
+            currentSwLowUp      := math.min(nz(currentSwLowUp, curLow), curLow)
+            
+        lastSidewayHigh := currentSwHighUp
+        lastSidewayLow  := currentSwLowUp
+
+// Trong chu kỳ Supertrend Giảm (supertrendDir == -1)
+if supertrendDir == -1
+    if isSidewayDown
+        float curHigh = sidewayMethod == "Narrow Sideway" ? nz(narrowHighDown, high) : high
+        float curLow  = sidewayMethod == "Narrow Sideway" ? nz(narrowLowDown, low) : low
+        
+        if not isSidewayDown[1]
+            hasPendingSidewayDown := true
+            currentSwHighDown     := curHigh
+            currentSwLowDown      := curLow
+        else
+            currentSwHighDown     := math.max(nz(currentSwHighDown, curHigh), curHigh)
+            currentSwLowDown      := math.min(nz(currentSwLowDown, curLow), curLow)
+            
+        lastSidewayHigh := currentSwHighDown
+        lastSidewayLow  := currentSwLowDown
+
+// Biến tích lũy Thống kê (Counters)
+var int countTotalTrades = 0
+var int countSL          = 0
+var int countTP1         = 0
+var int countTP2         = 0
+
+// --- ĐIỀU KIỆN VÀO LỆNH (ENTRY CONDITIONS) ---
+bool longSignal  = false
+bool shortSignal = false
+
+if entryType == "Supertrend Flip"
+    longSignal  := isSupertrendBuy
+    shortSignal := isSupertrendSell
+else if entryType == "Break Sideway"
+    // Long khi đang trong Supertrend tăng, có vùng Sideway vừa xuất hiện, nến hiện tại phá vỡ đỉnh Sideway
+    longSignal  := (supertrendDir == 1) and hasPendingSidewayUp and not isSidewayUp and not na(currentSwHighUp) and (close > currentSwHighUp or ta.crossover(close, currentSwHighUp))
+    // Short khi đang trong Supertrend giảm, có vùng Sideway vừa xuất hiện, nến hiện tại phá vỡ đáy Sideway
+    shortSignal := (supertrendDir == -1) and hasPendingSidewayDown and not isSidewayDown and not na(currentSwLowDown) and (close < currentSwLowDown or ta.crossunder(close, currentSwLowDown))
+else if entryType == "First Pullback"
+    // Long khi vừa kết thúc First Pullback và giá vẫn nằm trên Supertrend
+    longSignal  := (supertrendDir == 1) and pbLongTrigger
+    // Short khi vừa kết thúc First Pullback và giá vẫn nằm dưới Supertrend
+    shortSignal := (supertrendDir == -1) and pbShortTrigger
+
+bool longCondition  = allowLong and longSignal and (not filterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+bool shortCondition = allowShort and shortSignal and (not filterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+
+if longCondition
+    hasPendingSidewayUp := false
+
+if shortCondition
+    hasPendingSidewayDown := false
+
+// --- XỬ LÝ LỆNH LONG MỚI ---
+if longCondition
+    entryPrice := close
+    
+    // Tính Stop Loss theo slType
+    float baseSl = supertrendVal
+    if slType == "Sideway Zone"
+        float swLow = (entryType == "First Pullback" and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (sidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : supertrendVal)))
+        baseSl := swLow
+    else
+        baseSl := supertrendVal
+        
+    // Đảm bảo mức SL hợp lệ dưới giá vào lệnh Long
+    float risk = entryPrice - baseSl
+    if risk <= 0.0 or risk < (baseAtr * 0.1)
+        risk   := baseAtr * 1.5
+        baseSl := entryPrice - risk
+        
+    slPrice      := baseSl
+    initialRisk  := risk
+    tp1Price     := entryPrice + rrrTp1 * risk
+    tp2Price     := entryPrice + rrrTp2 * risk
+    activeDir    := 1
+    entryBarIdx  := bar_index
+    tp1Reached   := false
+    tp2Reached   := false
+    slReached    := false
+    
+    countTotalTrades += 1
+    string entryComment = entryType == "Supertrend Flip" ? "Long (ST Flip)" : (entryType == "Break Sideway" ? "Long (Break Sideway)" : "Long (First Pullback)")
+    strategy.entry("Long", strategy.long, comment = entryComment)
+
+// --- XỬ LÝ LỆNH SHORT MỚI ---
+if shortCondition
+    entryPrice := close
+    
+    // Tính Stop Loss theo slType
+    float baseSl = supertrendVal
+    if slType == "Sideway Zone"
+        float swHigh = (entryType == "First Pullback" and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (sidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : supertrendVal)))
+        baseSl := swHigh
+    else
+        baseSl := supertrendVal
+        
+    // Đảm bảo mức SL hợp lệ trên giá vào lệnh Short
+    float risk = baseSl - entryPrice
+    if risk <= 0.0 or risk < (baseAtr * 0.1)
+        risk   := baseAtr * 1.5
+        baseSl := entryPrice + risk
+        
+    slPrice      := baseSl
+    initialRisk  := risk
+    tp1Price     := entryPrice - rrrTp1 * risk
+    tp2Price     := entryPrice - rrrTp2 * risk
+    activeDir    := -1
+    entryBarIdx  := bar_index
+    tp1Reached   := false
+    tp2Reached   := false
+    slReached    := false
+    
+    countTotalTrades += 1
+    string entryComment = entryType == "Supertrend Flip" ? "Short (ST Flip)" : (entryType == "Break Sideway" ? "Short (Break Sideway)" : "Short (First Pullback)")
+    strategy.entry("Short", strategy.short, comment = entryComment)
+
+// --- QUẢN LÝ THEO DÕI VỊ THẾ & THỐNG KÊ CHI TIẾT ---
+
+// 1. Quản lý vị thế Long
+if strategy.position_size > 0
+    // Kiểm tra chạm TP1
+    if not tp1Reached and high >= tp1Price
+        tp1Reached := true
+        countTP1   += 1
+        if moveSlToBe
+            slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn
+            
+    // Kiểm tra chạm TP2
+    if not tp2Reached and high >= tp2Price
+        tp2Reached := true
+        countTP2   += 1
+        
+    // Kiểm tra dính SL
+    if not slReached and low <= slPrice
+        slReached := true
+        countSL   += 1
+
+    // Luôn luôn duy trì lệnh Exit liên tục khi đang có vị thế
+    strategy.exit("TP1_L", from_entry = "Long", qty_percent = tp1QtyPct, limit = tp1Price, stop = slPrice, comment_profit = "TP1 Long", comment_loss = "SL Long")
+    strategy.exit("TP2_L", from_entry = "Long", limit = tp2Price, stop = slPrice, comment_profit = "TP2 Long", comment_loss = "SL Long")
+    
+    // Đóng vị thế nếu Supertrend đảo chiều ngược
+    if closeOnFlip and isSupertrendSell
+        strategy.close("Long", comment = "ST Đảo chiều Giảm")
+
+// 2. Quản lý vị thế Short
+if strategy.position_size < 0
+    // Kiểm tra chạm TP1
+    if not tp1Reached and low <= tp1Price
+        tp1Reached := true
+        countTP1   += 1
+        if moveSlToBe
+            slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn
+            
+    // Kiểm tra chạm TP2
+    if not tp2Reached and low <= tp2Price
+        tp2Reached := true
+        countTP2   += 1
+        
+    // Kiểm tra dính SL
+    if not slReached and high >= slPrice
+        slReached := true
+        countSL   += 1
+
+    // Luôn luôn duy trì lệnh Exit liên tục khi đang có vị thế
+    strategy.exit("TP1_S", from_entry = "Short", qty_percent = tp1QtyPct, limit = tp1Price, stop = slPrice, comment_profit = "TP1 Short", comment_loss = "SL Short")
+    strategy.exit("TP2_S", from_entry = "Short", limit = tp2Price, stop = slPrice, comment_profit = "TP2 Short", comment_loss = "SL Short")
+    
+    // Đóng vị thế nếu Supertrend đảo chiều ngược
+    if closeOnFlip and isSupertrendBuy
+        strategy.close("Short", comment = "ST Đảo chiều Tăng")
+
+// Reset cờ trạng thái khi vị thế đã đóng hoàn toàn và không có tín hiệu mới
+if strategy.position_size == 0 and not (longCondition or shortCondition)
+    activeDir := 0
+
+
+// ==============================================================================
+// 6. ĐỒ HỌA TRỰC QUAN & VẼ MỨC GIÁ (VISUALIZATION)
+// ==============================================================================
+
+// 6.1. Vẽ Hình Chữ Nhật (Box) bao quanh cụm nến Sideway
+var box sidewayBox      = na
+var int currentSideMode = 0 // 1: Sideway Up, -1: Sideway Down, 0: None
+
+bool isSidewayActive = isSidewayUp or isSidewayDown
+int activeSideMode   = isSidewayUp ? 1 : (isSidewayDown ? -1 : 0)
+
+if showSidewayBox and detectSideway
+    // Bắt đầu một cụm Sideway mới hoặc chuyển đổi giữa Sideway Up <-> Down hoặc vừa reset theo FVG
+    if isSidewayActive and (not isSidewayActive[1] or activeSideMode != currentSideMode[1] or na(sidewayBox))
+        currentSideMode := activeSideMode
+        color bBorder    = activeSideMode == 1 ? color.new(#f59e0b, 20) : color.new(#ec4899, 20)
+        color bBg        = activeSideMode == 1 ? color.new(#f59e0b, 88) : color.new(#ec4899, 88)
+        string bText     = activeSideMode == 1 ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Up" : "Sideway Up") : (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Down" : "Sideway Down")
+        color tColor     = activeSideMode == 1 ? color.new(#d97706, 0) : color.new(#db2777, 0)
+        
+        int startLeftBar = activeSideMode == 1 ? (not na(narrowStartBarUp) ? narrowStartBarUp : bar_index) : (not na(narrowStartBarDown) ? narrowStartBarDown : bar_index)
+        float topPrice   = activeSideMode == 1 ? (not na(narrowHighUp) ? narrowHighUp : high) : (not na(narrowHighDown) ? narrowHighDown : high)
+        float botPrice   = activeSideMode == 1 ? (not na(narrowLowUp) ? narrowLowUp : low) : (not na(narrowLowDown) ? narrowLowDown : low)
+        
+        sidewayBox := box.new(
+             left         = startLeftBar,
+             top          = topPrice,
+             right        = bar_index,
+             bottom       = botPrice,
+             border_color = bBorder,
+             border_width = 1,
+             border_style = line.style_solid,
+             bgcolor      = bBg,
+             text         = bText,
+             text_size    = size.tiny,
+             text_color   = tColor,
+             text_valign  = text.align_top,
+             text_halign  = text.align_left
+        )
+    // Đang trong chu kỳ Sideway: kéo dài đáy/đỉnh và mở rộng sang phải theo từng nến mới
+    else if isSidewayActive and not na(sidewayBox)
+        float topPrice = activeSideMode == 1 ? (not na(narrowHighUp) ? narrowHighUp : high) : (not na(narrowHighDown) ? narrowHighDown : high)
+        float botPrice = activeSideMode == 1 ? (not na(narrowLowUp) ? narrowLowUp : low) : (not na(narrowLowDown) ? narrowLowDown : low)
+        box.set_right(sidewayBox, bar_index)
+        box.set_top(sidewayBox, topPrice)
+        box.set_bottom(sidewayBox, botPrice)
+    // Thoát khỏi vùng Sideway
+    else if not isSidewayActive
+        currentSideMode := 0
+        sidewayBox      := na
+
+// 6.2. Vẽ các đường Entry, SL, TP1, TP2 cho vị thế hiện tại (tự động kết thúc khi đóng lệnh)
+bool isTradeActive = (strategy.position_size != 0) or (longCondition or shortCondition)
+
+plot(showTradeLevels and isTradeActive ? entryPrice : na, "Mức Entry", color = color.new(#38bdf8, 0), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dashed)
+plot(showTradeLevels and isTradeActive ? slPrice : na, "Mức Stoploss (SL)", color = color.new(#ef4444, 0), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dashed)
+plot(showTradeLevels and isTradeActive ? tp1Price : na, "Mức Take Profit 1 (RRR 2:1)", color = color.new(#22c55e, 0), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dashed)
+plot(showTradeLevels and isTradeActive ? tp2Price : na, "Mức Take Profit 2 (RRR 4:1)", color = color.new(#10b981, 0), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dashed)
+
+
+// ==============================================================================
+// 7. BẢNG THỐNG KÊ DASHBOARD (STATISTICS TABLE)
+// ==============================================================================
+
+var table dashTable = na
+
+if showTable and barstate.islast
+    string posTable = tablePos == "Top Right" ? position.top_right :
+                      tablePos == "Bottom Right" ? position.bottom_right :
+                      tablePos == "Top Left" ? position.top_left : position.bottom_left
+                      
+    string szTable  = tableSize == "Tiny" ? size.tiny :
+                      tableSize == "Normal" ? size.normal :
+                      tableSize == "Large" ? size.large : size.small
+                      
+    // Khởi tạo bảng 2 cột x 12 dòng
+    dashTable := table.new(posTable, 2, 12, bgcolor = color.new(#111827, 10), border_width = 1, border_color = color.new(#374151, 0), frame_color = color.new(#4b5563, 0), frame_width = 1)
+    
+    // --- Header ---
+    table.cell(dashTable, 0, 0, "THÔNG SỐ HỆ THỐNG", bgcolor = color.new(#1e40af, 10), text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 0, "GIÁ TRỊ THỐNG KÊ", bgcolor = color.new(#1e40af, 10), text_color = color.white, text_size = szTable)
+    
+    // 1. Chế độ Supertrend & Thông số
+    string modeStr = isAdaptive ? "Adaptive (Tự động)" : "Fixed (Cố định)"
+    color  modeCol = isAdaptive ? color.new(#06b6d4, 0) : color.new(#9ca3af, 0)
+    table.cell(dashTable, 0, 1, "Chế độ Supertrend", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 1, modeStr + " [P:" + str.tostring(effectivePeriod, "#") + " | F:" + str.tostring(effectiveFactor, "#.#") + "]", text_color = modeCol, text_size = szTable)
+    
+    // 2. Kiểu Vào lệnh & Kiểu Stoploss
+    string dispEntryType = entryType == "Supertrend Flip" ? "ST Flip" : (entryType == "Break Sideway" ? "Break Sideway" : "First Pullback")
+    table.cell(dashTable, 0, 2, "Kiểu Vào Lệnh / SL", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 2, dispEntryType + " | SL: " + (slType == "Supertrend" ? "ST" : "Sideway"), text_color = color.new(#38bdf8, 0), text_size = szTable)
+
+    // 3. Trạng thái Thị trường hiện tại
+    string stateStr = isSidewayUp ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Up ⏸️ (Giá trên ST)" : "Sideway Up ⏸️ (Giá trên ST)") :
+                      isSidewayDown ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Down ⏸️ (Giá dưới ST)" : "Sideway Down ⏸️ (Giá dưới ST)") :
+                      isTrendingUp ? "Trending Up 🚀 (Tăng mạnh)" : "Trending Down 🔻 (Giảm mạnh)"
+    color  stateCol = isSidewayUp ? color.new(#f59e0b, 0) :
+                      isSidewayDown ? color.new(#ec4899, 0) :
+                      isTrendingUp ? color.new(#10b981, 0) : color.new(#ef4444, 0)
+    table.cell(dashTable, 0, 3, "Trạng thái Thị trường", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 3, stateStr, text_color = stateCol, text_size = szTable)
+    
+    // 4. Vị thế hiện tại
+    string posStr = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size) + ")" : strategy.position_size < 0 ? "SHORT (" + str.tostring(strategy.position_size) + ")" : "FLAT (Chờ tín hiệu)"
+    color  posCol = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    table.cell(dashTable, 0, 4, "Vị thế hiện tại", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 4, posStr, bgcolor = posCol, text_color = color.white, text_size = szTable)
+    
+    // --- Tính toán thống kê chính xác từ strategy.closedtrades theo từng lượt vào lệnh (Unique Trade Entry) ---
+    int calcCountTP1 = 0
+    int calcCountTP2 = 0
+    int calcCountSL  = 0
+    int uniqueTrades = 0
+    
+    if strategy.closedtrades > 0
+        int i = 0
+        while i < strategy.closedtrades
+            int   currentEntryTime = strategy.closedtrades.entry_time(i)
+            bool  tradeHitTP1      = false
+            bool  tradeHitTP2      = false
+            bool  tradeHitSL       = false
+            float tradePnlSum      = 0.0
+            
+            // Quét tất cả các phần thoát lệnh (slices) thuộc cùng 1 lệnh vào (cùng entry_time)
+            int j = i
+            while j < strategy.closedtrades and strategy.closedtrades.entry_time(j) == currentEntryTime
+                string exComment = strategy.closedtrades.exit_comment(j)
+                float  tradePnl   = strategy.closedtrades.profit(j)
+                tradePnlSum     += tradePnl
+                
+                if str.contains(exComment, "TP2") and tradePnl > 0
+                    tradeHitTP2 := true
+                if str.contains(exComment, "TP1") and tradePnl > 0
+                    tradeHitTP1 := true
+                if str.contains(exComment, "SL") or tradePnl < 0
+                    tradeHitSL  := true
+                j += 1
+                
+            uniqueTrades += 1
+            if tradeHitTP1
+                calcCountTP1 += 1
+            if tradeHitTP2
+                calcCountTP2 += 1
+            // Tính là lệnh dính SL nếu không chạm bất kỳ TP nào và bị đóng lệnh lỗ / SL
+            if not tradeHitTP1 and not tradeHitTP2 and (tradeHitSL or tradePnlSum <= 0)
+                calcCountSL += 1
+                
+            i := j
+    else
+        calcCountTP1 := countTP1
+        calcCountTP2 := countTP2
+        calcCountSL  := countSL
+        uniqueTrades := countTotalTrades
+
+    int dispTotalTrades = uniqueTrades > 0 ? uniqueTrades : (countTotalTrades > 0 ? countTotalTrades : 0)
+    int totalTradesRef  = dispTotalTrades > 0 ? dispTotalTrades : 1
+    
+    float slRate  = dispTotalTrades > 0 ? (float(calcCountSL) / float(totalTradesRef)) * 100.0 : 0.0
+    float tp1Rate = dispTotalTrades > 0 ? (float(calcCountTP1) / float(totalTradesRef)) * 100.0 : 0.0
+    float tp2Rate = dispTotalTrades > 0 ? (float(calcCountTP2) / float(totalTradesRef)) * 100.0 : 0.0
+
+    // 5. Tổng số lệnh đã vào
+    table.cell(dashTable, 0, 5, "Tổng số lệnh đã mở", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 5, str.tostring(dispTotalTrades), text_color = color.white, text_size = szTable)
+    
+    // 6. Thống kê Số lần Stop Loss
+    table.cell(dashTable, 0, 6, "🛑 Số lần Stoploss (SL)", text_color = color.new(#fca5a5, 0), text_size = szTable)
+    table.cell(dashTable, 1, 6, str.tostring(calcCountSL) + " (" + str.tostring(slRate, "#.#") + "%)", text_color = color.new(#ef4444, 0), text_size = szTable)
+    
+    // 7. Thống kê Số lần chạm TP1 (RRR 2:1)
+    table.cell(dashTable, 0, 7, "🎯 Số lần Chạm TP1 (2:1)", text_color = color.new(#86efac, 0), text_size = szTable)
+    table.cell(dashTable, 1, 7, str.tostring(calcCountTP1) + " (" + str.tostring(tp1Rate, "#.#") + "%)", text_color = color.new(#22c55e, 0), text_size = szTable)
+    
+    // 8. Thống kê Số lần chạm TP2 (RRR 4:1)
+    table.cell(dashTable, 0, 8, "🏆 Số lần Chạm TP2 (4:1)", text_color = color.new(#6ee7b7, 0), text_size = szTable)
+    table.cell(dashTable, 1, 8, str.tostring(calcCountTP2) + " (" + str.tostring(tp2Rate, "#.#") + "%)", text_color = color.new(#10b981, 0), text_size = szTable)
+    
+    // 9. Tỷ lệ Winrate tổng thể trên sàn Backtest
+    float winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100.0 : 0.0
+    table.cell(dashTable, 0, 9, "Tỷ lệ thắng (Win Rate)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 9, str.tostring(winRate, "#.#") + "% (" + str.tostring(strategy.wintrades) + "/" + str.tostring(strategy.closedtrades) + ")", text_color = winRate >= 50 ? color.green : color.orange, text_size = szTable)
+    
+    // 10. Lợi nhuận ròng (Net Profit)
+    color pnlCol = strategy.netprofit >= 0 ? color.green : color.red
+    table.cell(dashTable, 0, 10, "Lợi nhuận ròng (USD)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 10, str.tostring(strategy.netprofit, "#.##") + " USD", text_color = pnlCol, text_size = szTable)
+    
+    // 11. Max Drawdown
+    table.cell(dashTable, 0, 11, "Sụt giảm tối đa (Max DD)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 11, str.tostring(strategy.max_drawdown, "#.##") + " USD (" + str.tostring(strategy.max_drawdown_percent, "#.#") + "%)", text_color = color.new(#f87171, 0), text_size = szTable)
