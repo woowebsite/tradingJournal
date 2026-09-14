@@ -193,7 +193,7 @@ const TradingViewChart = ({
             const colors = {
                 entry: '#10b981', // green
                 takeprofit: '#3b82f6', // blue
-                stoploss: '#ef4444', // red
+                stoploss: '#fb923c', // white
                 exit: '#fb923c', // orange
                 unknown: '#9ca3af'
             };
@@ -332,7 +332,7 @@ const TradingViewChart = ({
         const hasVWAP = Boolean(showVWAP || tmpl === 'vwap' || tmpl.includes('supertrend_vwap') || tmpl.includes('breakout'));
         const isVwapOnly = tmpl === 'vwap';
         const hasSupertrend = showSupertrend === true || (showSupertrend !== false && !isVwapOnly && !hasIchimoku);
-        
+
         // MA is drawn ONLY IF maPeriod is valid AND (showMA is true OR template is Supertrend_MA, VWAP, Ichimoku) AND showMA is not false
         const shouldDrawMA = Boolean(maPeriod) && showMA !== false && (
             showMA === true ||
@@ -415,7 +415,7 @@ const TradingViewChart = ({
                     color,
                     shape,
                     text, // On chart: ONLY "Long", "Short", "TP", "SL", "Exit"
-                    size: 2
+                    size: 1
                 };
             }).filter(Boolean);
 
@@ -427,7 +427,7 @@ const TradingViewChart = ({
                     color: '#fbbf24',
                     shape: 'arrowUp',
                     text: 'Pattern',
-                    size: 2.5,
+                    size: 1.5,
                 });
             }
 
@@ -700,16 +700,15 @@ const TradingViewChart = ({
                                                 style={{ backgroundColor: sig.color }}
                                             />
                                             <span style={{ color: sig.color }}>
-                                                {isEntry ? (isLong ? '🟢 Long Entry' : '🔴 Short Entry') :
-                                                 isTP ? '🎯 Take Profit' :
-                                                 isSL ? '🛑 Stop Loss' :
-                                                 isExit ? '🏁 Exit' : (sig.action || 'Signal')}
+                                                {isEntry ? (isLong ? 'Long Entry' : 'Short Entry') :
+                                                    isTP ? 'Take Profit' :
+                                                        isSL ? 'Stop Loss' :
+                                                            isExit ? '🏁 Exit' : (sig.action || 'Signal')}
                                             </span>
                                         </div>
                                         {pnl !== undefined && pnl !== null && (
-                                            <span className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${
-                                                Number(pnl) >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                            }`}>
+                                            <span className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${Number(pnl) >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                                }`}>
                                                 {Number(pnl) >= 0 ? '+' : ''}{Number(pnl).toFixed(2)}%
                                             </span>
                                         )}

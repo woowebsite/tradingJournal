@@ -170,7 +170,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                 color: colors[rawType] || colors.unknown,
                 shape: isEntry ? 'arrowUp' : 'arrowDown',
                 text: displayText,
-                size: 2
+                size: 1
             };
         });
 
@@ -263,7 +263,7 @@ const RealtimeChart = ({ symbol, jwtToken, setShowOtpModal, strategyRules = [], 
                 color: colors[rawType] || colors.unknown,
                 shape: isEntry ? 'arrowUp' : 'arrowDown',
                 text: displayText,
-                size: 2
+                size: 1
             });
         });
 

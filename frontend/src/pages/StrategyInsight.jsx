@@ -114,7 +114,7 @@ const PATTERN_CONFIGS = {
         tag: '3 Nến Giảm',
         type: 'bear',
         badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-        chartSignal: { type: 'stoploss', name: '3 Nến Giảm', text: '3-Bear', color: '#f43f5e' },
+        chartSignal: { type: 'stoploss', name: '3 Nến Giảm', text: '3-Bear', color: '#fb923c' },
         desc: 'Thống kê hành vi và xác suất nến tiếp theo sau chuỗi 3 nến giảm liên tiếp.'
     },
     'bullish_engulfing': {
@@ -134,7 +134,7 @@ const PATTERN_CONFIGS = {
         tag: 'Bear Engulfing',
         type: 'bear',
         badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-        chartSignal: { type: 'stoploss', name: 'Bearish Engulfing', text: 'Bear-Engulf', color: '#f43f5e' },
+        chartSignal: { type: 'stoploss', name: 'Bearish Engulfing', text: 'Bear-Engulf', color: '#ffffff' },
         desc: 'Thống kê hành vi và xác suất nến tiếp theo sau mô hình Nhấn Chìm Giảm (Bearish Engulfing).'
     },
     'bullish_pinbar': {
@@ -154,7 +154,7 @@ const PATTERN_CONFIGS = {
         tag: 'Bear Pinbar',
         type: 'bear',
         badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-        chartSignal: { type: 'stoploss', name: 'Bearish Pinbar', text: 'Bear-Pinbar', color: '#f43f5e' },
+        chartSignal: { type: 'stoploss', name: 'Bearish Pinbar', text: 'Bear-Pinbar', color: '#ffffff' },
         desc: 'Thống kê hành vi và xác suất nến tiếp theo sau mô hình Bearish Pinbar (Râu trên dài, từ chối giá cao).'
     }
 };

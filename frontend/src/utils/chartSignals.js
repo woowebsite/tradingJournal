@@ -48,7 +48,7 @@ export const getSignalMarkerConfig = ({ type = '', posType = '', action = '' } =
         return {
             markerType: 'stoploss',
             shortLabel: 'SL',
-            color: '#ef4444', // Red
+            color: '#fb923c', // White
             shape: 'circle',
             position: isShort ? 'aboveBar' : 'belowBar'
         };
