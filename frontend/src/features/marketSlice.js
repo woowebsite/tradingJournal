@@ -2,6 +2,7 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 import { getCryptoHistory } from '../services/binance';
 import { getStockHistory, getDerivativeHistory } from '../services/24hmoney';
+import { getYahooFinanceHistory } from '../services/yahooFinance';
 
 import { getFuturesHistory, getIntradaySnapshots, getTechnicalIndicators, updateMarketInfo } from '../services/tcbs';
 
@@ -343,9 +344,29 @@ export const loadExternalHistory = createAsyncThunk(
             } else if (String(marketType || '').toLowerCase() === 'derivative') {
                 externalData = await getDerivativeHistory(symbol.split(':')[0], resStr || '5', 2000);
             } else {
-                // Default to TCBS (Stocks)
-                const ticket = symbol.split(':')[0];
-                externalData = await getStockHistory(ticket);
+                const ticket = symbol.split(':')[0].trim().toUpperCase();
+                const isUsOrGlobalIndex = [
+                    'USTEC', 'USTECH', 'USTEC.P', 'NAS100', 'NAS100.P', 'NAS100USD', 'US100', 'US100.P',
+                    'NASDAQ', 'IXIC', '^IXIC', 'NDX', '^NDX', 'NASDAQ100', 'NQ', 'NQ=F', 'QQQ',
+                    'US500', 'US500.P', 'SPX500', 'ES', 'ES=F', 'SP500', 'S&P500', 'SPX', 'GSPC', '^GSPC', 'SPY',
+                    'US30', 'US30.P', 'DJ30', 'WALLSTREET', 'YM', 'YM=F', 'DOW', 'DOWJONES', 'DJI', '^DJI', 'DIA',
+                    'GER40', 'GER30', 'DAX', 'UK100', 'FTSE', 'JPN225', 'NIKKEI', 'HK50',
+                    'GOLD', 'GC=F', 'XAUUSD', 'XAUUSD.P', 'SILVER', 'SI=F', 'XAGUSD',
+                    'BRENT', 'BZ=F', 'UKOIL', 'WTI', 'CL=F', 'USOIL', 'CRUDEOIL', 'NATGAS', 'COPPER',
+                    'DXY', 'DX-Y.NYB', 'USDX', 'US10Y', '^TNX', 'VIX', '^VIX',
+                    'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD'
+                ].includes(ticket) || ticket.startsWith('^') || ticket.includes('=') || ticket.includes('-') || String(marketType || '').toLowerCase().includes('us') || String(marketType || '').toLowerCase().includes('global') || String(marketType || '').toLowerCase().includes('forex') || String(marketType || '').toLowerCase().includes('cfd');
+
+                if (isUsOrGlobalIndex) {
+                    externalData = await getYahooFinanceHistory(ticket, resStr, 1500);
+                } else {
+                    // Try 24hMoney (VN stocks & indices)
+                    externalData = await getStockHistory(ticket, resStr);
+                    // Fallback to Yahoo Finance if 24hMoney returns empty
+                    if (!externalData || externalData.length === 0) {
+                        externalData = await getYahooFinanceHistory(ticket, resStr, 1500);
+                    }
+                }
             }
 
             if (!externalData || externalData.length === 0) return [];

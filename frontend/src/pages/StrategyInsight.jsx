@@ -32,7 +32,8 @@ import {
     Trash2,
     History,
     X,
-    CandlestickChart
+    CandlestickChart,
+    Info
 } from 'lucide-react';
 import { fetchWatchlists } from '../features/watchlistSlice';
 import { fetchSymbols } from '../features/marketSlice';
@@ -2282,10 +2283,6 @@ const StrategyInsight = () => {
                                                                     ? 'Phân bố tần suất & xác suất nến kế tiếp theo từng Thứ (Thứ 2 - Chủ Nhật)'
                                                                     : 'Phân bố tần suất & xác suất nến kế tiếp theo từng Khung giờ giao dịch (00:00 - 23:00)'}
                                                             </p>
-                                                            <p className="text-[11px] text-gray-400 mt-0.5">
-                                                                <span>Thanh bar bên trong là tỷ lệ nến kế tiếp <b className="text-emerald-400">Tăng (Xanh)</b> vs <b className="text-rose-400">Giảm (Đỏ)</b>.</span> <br />
-                                                                <span><b className="text-emerald-400">▲ Bull cao nhất</b> / <b className="text-rose-400">▼ Bear cao nhất</b> là {stats.timeDist.isDailyOrHigher ? 'ngày' : 'giờ'} có xác suất nến sau Tăng/Giảm mạnh nhất.</span>
-                                                            </p>
                                                         </div>
                                                     </div>
 
@@ -2398,6 +2395,30 @@ const StrategyInsight = () => {
                                                                 </div>
                                                             );
                                                         })}
+                                                </div>
+
+                                                {/* Instruction & Dynamic Explanation Banner */}
+                                                <div className="text-[11px] text-gray-300 space-y-1.5 bg-gray-950/60 p-3 rounded-xl border border-gray-800/80 shadow-inner">
+                                                    <div className="flex items-start gap-2 text-gray-300 leading-relaxed">
+                                                        <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                                                        <span>
+                                                            Thanh bar màu bên trong mỗi ô biểu thị tỷ lệ cây nến tiếp theo <b className="text-emerald-400 font-semibold">Tăng (Xanh)</b> vs <b className="text-rose-400 font-semibold">Giảm (Đỏ)</b>.
+                                                        </span>
+                                                    </div>
+                                                    <div className='flex'>
+                                                        {stats.timeDist.bestBullItem && stats.timeDist.bestBullItem.bullRate > 0 && (
+                                                            <div className="pl-5.5 text-gray-300 leading-relaxed">
+                                                                <span className="text-emerald-400 font-bold">▲ Bull cao nhất: {stats.timeDist.bestBullItem.label} ({stats.timeDist.bestBullItem.bullRate.toFixed(1)}%)</span>
+                                                                <span className="text-gray-400"> — Xuất hiện mô hình <b className="text-gray-200">{config.label}</b> vào <b className="text-gray-200">{stats.timeDist.bestBullItem.label}</b>, xác suất cây nến kế tiếp <b className="text-emerald-400">Tăng giá là {stats.timeDist.bestBullItem.bullRate.toFixed(1)}%</b>.</span>
+                                                            </div>
+                                                        )}
+                                                        {stats.timeDist.bestBearItem && stats.timeDist.bestBearItem.bearRate > 0 && (
+                                                            <div className="pl-5.5 text-gray-300 leading-relaxed">
+                                                                <span className="text-rose-400 font-bold">▼ Bear cao nhất: {stats.timeDist.bestBearItem.label} ({stats.timeDist.bestBearItem.bearRate.toFixed(1)}%)</span>
+                                                                <span className="text-gray-400"> — Xuất hiện mô hình <b className="text-gray-200">{config.label}</b> vào <b className="text-gray-200">{stats.timeDist.bestBearItem.label}</b>, xác suất cây nến kế tiếp <b className="text-rose-400">Giảm giá là {stats.timeDist.bestBearItem.bearRate.toFixed(1)}%</b>.</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}

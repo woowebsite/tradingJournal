@@ -278,6 +278,108 @@ def fetch_history_from_strapi(ticker: str, countback: int = 500, timeframe: str 
 
     return pd.DataFrame()
 
+def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1") -> pd.DataFrame:
+    """Lấy dữ liệu nến từ Yahoo Finance API cho Chỉ số & Cổ phiếu Quốc tế (NASDAQ, QQQ, NDX, SP500, GOLD, AAPL...)"""
+    clean = ticker.strip().upper()
+    sym_map = {
+        'USTEC': 'NQ=F', 'USTECH': 'NQ=F', 'USTEC.P': 'NQ=F', 'NAS100': 'NQ=F', 'NAS100.P': 'NQ=F', 'NAS100USD': 'NQ=F',
+        'US100': 'NQ=F', 'US100.P': 'NQ=F', 'NQ': 'NQ=F', 'NQ=F': 'NQ=F',
+        'NASDAQ': '^IXIC', 'NASDAQ-COMPOSITE': '^IXIC', 'IXIC': '^IXIC', '^IXIC': '^IXIC',
+        'NDX': '^NDX', '^NDX': '^NDX', 'NASDAQ100': '^NDX', 'QQQ': 'QQQ',
+        'US500': 'ES=F', 'US500.P': 'ES=F', 'SPX500': 'ES=F', 'ES': 'ES=F', 'ES=F': 'ES=F',
+        'SP500': '^GSPC', 'S&P500': '^GSPC', 'SPX': '^GSPC', 'GSPC': '^GSPC', '^GSPC': '^GSPC', 'SPY': 'SPY',
+        'US30': 'YM=F', 'US30.P': 'YM=F', 'DJ30': 'YM=F', 'WALLSTREET': 'YM=F', 'YM': 'YM=F', 'YM=F': 'YM=F',
+        'DOW': '^DJI', 'DOWJONES': '^DJI', 'DJI': '^DJI', '^DJI': '^DJI', 'DIA': 'DIA',
+        'GER40': '^GDAXI', 'GER30': '^GDAXI', 'DAX': '^GDAXI', 'UK100': '^FTSE', 'FTSE': '^FTSE',
+        'JPN225': '^N225', 'NIKKEI': '^N225', 'HK50': '^HSI',
+        'GOLD': 'GC=F', 'GC=F': 'GC=F', 'XAUUSD': 'GC=F', 'XAUUSD.P': 'GC=F',
+        'SILVER': 'SI=F', 'SI=F': 'SI=F', 'XAGUSD': 'SI=F',
+        'BRENT': 'BZ=F', 'BZ=F': 'BZ=F', 'UKOIL': 'BZ=F', 'WTI': 'CL=F', 'CL=F': 'CL=F', 'USOIL': 'CL=F',
+        'DXY': 'DX-Y.NYB', 'DX-Y.NYB': 'DX-Y.NYB', 'USDX': 'DX-Y.NYB', 'US10Y': '^TNX', '^TNX': '^TNX', 'VIX': '^VIX', '^VIX': '^VIX',
+        'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X', 'AUDUSD': 'AUDUSD=X',
+        'USDCAD': 'USDCAD=X', 'USDCHF': 'USDCHF=X', 'NZDUSD': 'NZDUSD=X'
+    }
+    yahoo_sym = sym_map.get(clean, clean)
+    tf = str(timeframe or "D1").strip().upper()
+
+    interval = "1d"
+    range_param = "5y"
+    if tf in ["M1", "1M", "1"]:
+        interval, range_param = "1m", "7d"
+    elif tf in ["M5", "5M", "5"]:
+        interval, range_param = "5m", "60d"
+    elif tf in ["M15", "15M", "15"]:
+        interval, range_param = "15m", "60d"
+    elif tf in ["M30", "30M", "30"]:
+        interval, range_param = "30m", "60d"
+    elif tf in ["H1", "1H", "60", "H4", "4H", "240"]:
+        interval, range_param = "1h", "730d"
+    elif tf in ["W1", "1W", "W"]:
+        interval, range_param = "1wk", "5y"
+
+    is_daily_or_weekly = interval in ["1d", "1wk", "1mo"]
+    include_pre_post = "false" if is_daily_or_weekly else "true"
+
+    candidate_symbols = [yahoo_sym]
+    if not is_daily_or_weekly:
+        if clean in ['^IXIC', 'NASDAQ', 'IXIC']:
+            candidate_symbols.extend(['NQ=F', 'QQQ'])
+        elif clean in ['^NDX', 'NDX', 'NASDAQ100', 'US100']:
+            candidate_symbols.extend(['NQ=F', 'QQQ'])
+        elif clean in ['^GSPC', 'SP500', 'SPX', 'S&P500']:
+            candidate_symbols.extend(['ES=F', 'SPY'])
+
+    for sym in candidate_symbols:
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={interval}&range={range_param}&includePrePost={include_pre_post}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*"
+            }
+            res = requests.get(url, headers=headers, timeout=12)
+            if res.status_code == 200:
+                res_json = res.json()
+                result = res_json.get("chart", {}).get("result", [{}])[0]
+                timestamps = result.get("timestamp", [])
+                quote = result.get("indicators", {}).get("quote", [{}])[0]
+                opens = quote.get("open", [])
+                highs = quote.get("high", [])
+                lows = quote.get("low", [])
+                closes = quote.get("close", [])
+                volumes = quote.get("volume", [])
+
+                candles = []
+                for i in range(len(timestamps)):
+                    ts = timestamps[i]
+                    c = closes[i] if i < len(closes) else None
+                    if ts is None or c is None or pd.isna(c):
+                        continue
+                    o = opens[i] if i < len(opens) and not pd.isna(opens[i]) else c
+                    h = highs[i] if i < len(highs) and not pd.isna(highs[i]) else max(o, c)
+                    l = lows[i] if i < len(lows) and not pd.isna(lows[i]) else min(o, c)
+                    v = volumes[i] if i < len(volumes) and not pd.isna(volumes[i]) else 0
+
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    candles.append({
+                        "date": dt.strftime("%Y-%m-%dT00:00:00.000Z") if is_daily_or_weekly else dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                        "time": dt.strftime("%Y-%m-%d") if is_daily_or_weekly else dt.strftime("%H:%M:%S"),
+                        "open": round(float(o), 2),
+                        "high": round(float(h), 2),
+                        "low": round(float(l), 2),
+                        "close": round(float(c), 2),
+                        "volume": float(v or 0)
+                    })
+
+                if candles:
+                    df = pd.DataFrame(candles)
+                    df["dt"] = pd.to_datetime(df["date"])
+                    df = df.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+                    if not df.empty:
+                        return df
+        except Exception:
+            pass
+    return pd.DataFrame()
+
 def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 500, timeframe: str = None) -> pd.DataFrame:
     tf = str(timeframe or resolution or "D1").strip().upper()
     ticker_clean = ticker.strip().upper()
@@ -318,6 +420,11 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
                 return df_ext.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
     except Exception:
         pass
+
+    # Yahoo Finance fallback for US/Global indices & stocks
+    df_yahoo = fetch_yahoo_candles(ticker_clean, countback=req_count, timeframe=tf)
+    if not df_yahoo.empty and len(df_yahoo) > 0:
+        return df_yahoo
 
     return fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
 

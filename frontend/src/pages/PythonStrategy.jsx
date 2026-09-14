@@ -12,6 +12,9 @@ import { getSymbolInsights, getSymbolInsightsBySymbol } from '../services/symbol
 import DeflatedSharpeRatioCard from '../components/DeflatedSharpeRatioCard';
 import { formatNumber } from '../utils/formatNumber';
 import { buildPythonChartSignals } from '../utils/chartSignals';
+import { subscribeBinanceKlineWS } from '../services/binance';
+import { getYahooFinanceHistory } from '../services/yahooFinance';
+import { getStockHistory } from '../services/24hmoney';
 
 // Strategy Registry
 import {
@@ -77,6 +80,11 @@ const PythonStrategy = () => {
     const [errorMessage, setErrorMessage] = useState('');
     const [activeTab, setActiveTab] = useState('all');
     const [focusDate, setFocusDate] = useState(null);
+
+    // 4b. Realtime Kline & Price States
+    const [liveCandle, setLiveCandle] = useState(null);
+    const [livePrice, setLivePrice] = useState(null);
+    const [wsStatus, setWsStatus] = useState('disconnected');
 
     // 5. Symbol Insight States
     const [symbolInsightStats, setSymbolInsightStats] = useState(null);
@@ -159,6 +167,107 @@ const PythonStrategy = () => {
 
         return [...new Set(normalized)];
     }, [selectedWatchlistId, accountWatchlists, symbols, querySymbol]);
+
+    // Kiểm tra Symbol hiện tại có thuộc thị trường Crypto/Binance không
+    const isCryptoSymbol = useMemo(() => {
+        const symName = String(selectedSymbol || '').toUpperCase();
+        return selectedAccount?.market?.Name === 'Crypto' ||
+            symName.includes('USDT') ||
+            symName.includes('USDC') ||
+            symName.includes('BUSD') ||
+            symName.endsWith('.P') ||
+            symName.includes('PERP') ||
+            symName.startsWith('BINANCE:');
+    }, [selectedAccount?.market?.Name, selectedSymbol]);
+
+    // Real-time Kline & Live Price Connection (WebSocket cho Crypto, Polling cho Stocks / Indices)
+    useEffect(() => {
+        const symName = selectedSymbol;
+        if (!symName) {
+            setWsStatus('disconnected');
+            setLiveCandle(null);
+            setLivePrice(null);
+            return;
+        }
+
+        const currentTf = timeframe || 'D1';
+
+        // 1. Đối với Crypto -> Dùng Binance WebSocket trực tiếp
+        if (isCryptoSymbol) {
+            const unsubscribe = subscribeBinanceKlineWS(
+                symName,
+                currentTf,
+                (candle) => {
+                    setLiveCandle(candle);
+                    if (candle.close !== undefined && candle.close !== null) {
+                        setLivePrice(candle.close);
+                    }
+                },
+                (status) => {
+                    setWsStatus(status);
+                }
+            );
+
+            return () => {
+                unsubscribe();
+            };
+        }
+
+        // 2. Đối với Cổ phiếu / Chỉ số (NASDAQ, QQQ, NQ=F, GOLD, VNINDEX...) -> Polling thời gian thực mỗi 5s
+        let isCancelled = false;
+        setWsStatus('connecting');
+
+        const pollLatestCandle = async () => {
+            if (isCancelled) return;
+            try {
+                const isUsOrGlobal = [
+                    'USTEC', 'USTECH', 'USTEC.P', 'NAS100', 'NAS100.P', 'NAS100USD', 'US100', 'US100.P',
+                    'NASDAQ', 'IXIC', '^IXIC', 'NDX', '^NDX', 'NASDAQ100', 'NQ', 'NQ=F', 'QQQ',
+                    'US500', 'US500.P', 'SPX500', 'ES', 'ES=F', 'SP500', 'S&P500', 'SPX', 'GSPC', '^GSPC', 'SPY',
+                    'US30', 'US30.P', 'DJ30', 'WALLSTREET', 'YM', 'YM=F', 'DOW', 'DOWJONES', 'DJI', '^DJI', 'DIA',
+                    'GER40', 'GER30', 'DAX', 'UK100', 'FTSE', 'JPN225', 'NIKKEI', 'HK50',
+                    'GOLD', 'GC=F', 'XAUUSD', 'XAUUSD.P', 'SILVER', 'SI=F', 'XAGUSD',
+                    'BRENT', 'BZ=F', 'UKOIL', 'WTI', 'CL=F', 'USOIL', 'CRUDEOIL', 'NATGAS', 'COPPER',
+                    'DXY', 'DX-Y.NYB', 'USDX', 'US10Y', '^TNX', 'VIX', '^VIX',
+                    'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD'
+                ].includes(symName.toUpperCase()) || symName.startsWith('^') || symName.includes('=');
+
+                let latestCandles = [];
+                if (isUsOrGlobal) {
+                    latestCandles = await getYahooFinanceHistory(symName, currentTf, 5);
+                } else {
+                    latestCandles = await getStockHistory(symName, currentTf, 5);
+                    if (!latestCandles || latestCandles.length === 0) {
+                        latestCandles = await getYahooFinanceHistory(symName, currentTf, 5);
+                    }
+                }
+
+                if (!isCancelled && Array.isArray(latestCandles) && latestCandles.length > 0) {
+                    const last = latestCandles[latestCandles.length - 1];
+                    setLiveCandle({
+                        ...last,
+                        isClosed: false,
+                    });
+                    if (last.close !== undefined && last.close !== null) {
+                        setLivePrice(last.close);
+                    }
+                    setWsStatus('connected');
+                }
+            } catch (err) {
+                if (!isCancelled) {
+                    setWsStatus('error');
+                }
+            }
+        };
+
+        pollLatestCandle();
+        const pollInterval = setInterval(pollLatestCandle, 5000);
+
+        return () => {
+            isCancelled = true;
+            clearInterval(pollInterval);
+        };
+    }, [isCryptoSymbol, selectedSymbol, timeframe]);
 
     // Tự động chọn Watchlist đầu tiên
     useEffect(() => {
@@ -933,6 +1042,10 @@ const PythonStrategy = () => {
                 onLoadMore={handleLoadMore}
                 loadingMore={loadingMore}
                 hasMore={hasMore}
+                liveCandle={liveCandle}
+                livePrice={livePrice}
+                wsStatus={wsStatus}
+                isCryptoSymbol={isCryptoSymbol}
             />
 
             {/* 9. Trades History Table */}

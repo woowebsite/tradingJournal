@@ -103,72 +103,122 @@ const TradingViewChart = ({
     // Find the corresponding candle time for a trade / signal (handles exact match, intraday bar span, and daily dates)
     const findMatchingCandleTime = useCallback((sig, sortedCandles) => {
         if (!sig || !sortedCandles || sortedCandles.length === 0) return null;
-        const rawDate = sig.date || sig.time || '';
-        if (!rawDate) return null;
+        const rawDate = sig.date || sig.tradingDate || sig.time || '';
+        if (!rawDate && sig.time === undefined) return null;
 
         // 1. Direct match on getTimeKey
         const directKey = getTimeKey(sig);
-        if (sortedCandles.some(c => c._timeKey === directKey)) {
-            return directKey;
+        if (directKey !== '' && directKey !== null && directKey !== undefined) {
+            const exact = sortedCandles.find(c => c._timeKey === directKey);
+            if (exact) return exact._timeKey;
         }
 
-        // 2. Intraday numeric timestamp matching (seconds)
+        // 2. Intraday matching (when candles have numeric timestamps in seconds)
         if (isIntraday) {
-            let sigSeconds = typeof directKey === 'number' ? directKey : null;
-            if (sigSeconds === null) {
-                const dt = new Date(rawDate);
+            let sigSeconds = null;
+            if (typeof directKey === 'number') {
+                sigSeconds = directKey;
+            } else if (typeof sig.time === 'number') {
+                sigSeconds = sig.time > 1e11 ? Math.floor(sig.time / 1000) : sig.time;
+            } else if (rawDate) {
+                let parseable = String(rawDate).trim();
+                const rawTime = String(sig.time || '').trim();
+                if (parseable && rawTime && rawTime.includes(':') && !parseable.includes('T') && !parseable.includes(':')) {
+                    parseable = `${parseable.split(' ')[0]}T${rawTime}Z`;
+                }
+                const dt = new Date(parseable);
                 if (!isNaN(dt.getTime())) {
                     sigSeconds = Math.floor(dt.getTime() / 1000);
                 }
             }
 
-            if (typeof sigSeconds === 'number') {
-                // Find candle whose open time is <= sigSeconds (the bar in which the trade occurred)
-                const candidate = sortedCandles
-                    .filter(c => typeof c._timeKey === 'number' && c._timeKey <= sigSeconds)
-                    .at(-1);
+            const numericCandles = sortedCandles.filter(c => typeof c._timeKey === 'number');
+            if (typeof sigSeconds === 'number' && numericCandles.length > 0) {
+                const firstCandle = numericCandles[0];
+                const lastCandle = numericCandles[numericCandles.length - 1];
 
-                if (candidate) {
-                    return candidate._timeKey;
+                // If signal is strictly before the earliest loaded candle, it's outside chart range
+                if (sigSeconds < firstCandle._timeKey) {
+                    return null;
                 }
 
-                // If signal was just created now and latest candle is the current candle
-                const lastCandle = sortedCandles[sortedCandles.length - 1];
-                if (lastCandle && typeof lastCandle._timeKey === 'number' && sigSeconds >= lastCandle._timeKey) {
+                // Estimate bar interval in seconds (default to 300s / 5m if only 1 candle)
+                let barInterval = 300;
+                if (numericCandles.length >= 2) {
+                    const diff = numericCandles[1]._timeKey - numericCandles[0]._timeKey;
+                    if (diff > 0 && diff < 86400) {
+                        barInterval = diff;
+                    }
+                }
+
+                // If signal is on or after the last candle
+                if (sigSeconds >= lastCandle._timeKey) {
+                    // Only attach to last candle if it's within the current bar span (or max 2 intervals)
+                    if (sigSeconds <= lastCandle._timeKey + Math.max(barInterval * 2, 600)) {
+                        return lastCandle._timeKey;
+                    }
+                    // Otherwise it belongs to a future bar not yet loaded on the chart
+                    return null;
+                }
+
+                // Binary search or find the bar: candle._timeKey <= sigSeconds < nextCandle._timeKey
+                for (let i = 0; i < numericCandles.length - 1; i++) {
+                    const current = numericCandles[i];
+                    const next = numericCandles[i + 1];
+                    if (sigSeconds >= current._timeKey && sigSeconds < next._timeKey) {
+                        return current._timeKey;
+                    }
+                }
+
+                if (sigSeconds >= lastCandle._timeKey) {
                     return lastCandle._timeKey;
                 }
 
-                // If signal was created right around the first candle
-                const firstCandle = sortedCandles[0];
-                if (firstCandle && typeof firstCandle._timeKey === 'number') {
-                    return firstCandle._timeKey;
-                }
+                return null;
             }
+
+            // If signal has date only ('YYYY-MM-DD') without intraday time, match the first bar of that date
+            const sigDateStr = String(rawDate).split('T')[0].split(' ')[0];
+            if (sigDateStr && sigDateStr.length === 10) {
+                const dateMatch = numericCandles.find(c => {
+                    const dt = new Date(c._timeKey * 1000);
+                    const cDateStr = dt.toISOString().split('T')[0];
+                    return cDateStr === sigDateStr;
+                });
+                if (dateMatch) return dateMatch._timeKey;
+            }
+
+            return null;
         }
 
         // 3. Daily / Date string matching ('YYYY-MM-DD')
-        const sigDateStr = String(rawDate).split('T')[0];
-        const dateMatch = sortedCandles.find(c => String(c._timeKey).split('T')[0] === sigDateStr);
-        if (dateMatch) {
-            return dateMatch._timeKey;
-        }
-
-        // Try local date string
-        try {
-            const dt = new Date(rawDate);
+        let sigDateStr = '';
+        if (typeof sig.time === 'number') {
+            const dt = new Date(sig.time > 1e11 ? sig.time : sig.time * 1000);
             if (!isNaN(dt.getTime())) {
-                const localStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-                const localMatch = sortedCandles.find(c => String(c._timeKey).split('T')[0] === localStr);
-                if (localMatch) return localMatch._timeKey;
+                sigDateStr = dt.toISOString().split('T')[0];
             }
-        } catch {
-            // ignore
+        } else {
+            sigDateStr = String(rawDate).split('T')[0].split(' ')[0];
         }
 
-        // Fallback: If signal is very recent, snap to the latest candle
-        const lastCandle = sortedCandles[sortedCandles.length - 1];
-        if (lastCandle) {
-            return lastCandle._timeKey;
+        if (sigDateStr) {
+            const dateMatch = sortedCandles.find(c => String(c._timeKey).split('T')[0].split(' ')[0] === sigDateStr);
+            if (dateMatch) {
+                return dateMatch._timeKey;
+            }
+
+            // Try local date string
+            try {
+                const dt = new Date(rawDate);
+                if (!isNaN(dt.getTime())) {
+                    const localStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                    const localMatch = sortedCandles.find(c => String(c._timeKey).split('T')[0].split(' ')[0] === localStr);
+                    if (localMatch) return localMatch._timeKey;
+                }
+            } catch {
+                // ignore
+            }
         }
 
         return null;
@@ -389,7 +439,7 @@ const TradingViewChart = ({
 
         // Markers (Signals and an optional externally-selected candle)
         if ((signals && signals.length > 0) || focusDate) {
-            const markers = signals.map(sig => {
+            const rawMarkers = (signals || []).map(sig => {
                 const matchedTime = findMatchingCandleTime(sig, sortedData);
                 if (!matchedTime) return null;
 
@@ -418,6 +468,16 @@ const TradingViewChart = ({
                     size: 1
                 };
             }).filter(Boolean);
+
+            // Deduplicate markers on same candle and position with identical text & shape to avoid stacked duplicate markers
+            const markerMap = new Map();
+            rawMarkers.forEach(m => {
+                const key = `${m.time}_${m.position}_${m.text}_${m.shape}_${m.color}`;
+                if (!markerMap.has(key)) {
+                    markerMap.set(key, m);
+                }
+            });
+            const markers = Array.from(markerMap.values());
 
             const focusKey = focusDate ? getTimeKey({ date: focusDate, time: focusDate }) : null;
             if (focusKey && sortedData.some(candle => candle._timeKey === focusKey)) {
@@ -645,7 +705,7 @@ const TradingViewChart = ({
         } catch (e) {
             console.warn('[Realtime Chart Update Warning]', e?.message || e);
         }
-    }, [liveCandle, isIntraday]);
+    }, [liveCandle, isIntraday, getTimeKey]);
 
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">
