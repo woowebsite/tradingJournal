@@ -253,6 +253,26 @@ def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1
             pass
     return pd.DataFrame()
 
+def clean_candle_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Làm sạch DataFrame nến, loại bỏ các nến có giá <= 0 hoặc NaN, đảm bảo không bị lỗi chia 0"""
+    if df is None or df.empty or len(df) == 0:
+        return pd.DataFrame()
+    req_cols = ['open', 'high', 'low', 'close', 'date']
+    if not all(col in df.columns for col in req_cols):
+        return pd.DataFrame()
+    df = df.copy()
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['open', 'high', 'low', 'close'])
+    df = df[(df['open'] > 0) & (df['high'] > 0) & (df['low'] > 0) & (df['close'] > 0)]
+    if 'volume' in df.columns:
+        df['volume'] = df['volume'].fillna(0.0).clip(lower=0.0)
+    if 'dt' not in df.columns:
+        df['dt'] = pd.to_datetime(df['date'])
+    df = df.drop_duplicates(subset=['date']).sort_values('dt').reset_index(drop=True)
+    return df
+
 def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 500, timeframe: str = None) -> pd.DataFrame:
     tf = str(timeframe or resolution or "D1").strip().upper()
     ticker_clean = ticker.strip().upper()
@@ -260,8 +280,9 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
 
     if is_crypto_symbol(ticker_clean):
         df_binance = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
-        if not df_binance.empty:
-            return df_binance
+        cleaned_b = clean_candle_df(df_binance)
+        if not cleaned_b.empty:
+            return cleaned_b
 
     resolution_24h = map_timeframe_to_24h(tf)
     to_ts = int(time.time())
@@ -273,32 +294,47 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
             data = res.json()
             if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
                 candles = []
-                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] and float(data["c"][0]) < 500 and not is_crypto_symbol(ticker_clean) else 1
+                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
+                first_close = float(data["c"][0])
+                if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"] and not is_crypto_symbol(ticker_clean):
+                    multiplier = 1000
+                else:
+                    multiplier = 1
                 is_daily = tf.upper() in ["D1", "1D", "D", "W1", "1W", "W"]
 
                 for i in range(len(data["t"])):
+                    c_val = float(data["c"][i]) * multiplier
+                    if c_val <= 0 or pd.isna(c_val):
+                        continue
+                    o_val = float(data["o"][i]) * multiplier if float(data["o"][i]) > 0 else c_val
+                    h_val = float(data["h"][i]) * multiplier if float(data["h"][i]) > 0 else max(o_val, c_val)
+                    l_val = float(data["l"][i]) * multiplier if float(data["l"][i]) > 0 else min(o_val, c_val)
+
                     dt = datetime.fromtimestamp(data["t"][i], tz=timezone.utc)
                     candles.append({
                         "date": dt.strftime("%Y-%m-%dT00:00:00.000Z") if is_daily else dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
                         "time": dt.strftime("%Y-%m-%d") if is_daily else dt.strftime("%H:%M:%S"),
-                        "open": round(float(data["o"][i]) * multiplier, 2),
-                        "high": round(float(data["h"][i]) * multiplier, 2),
-                        "low": round(float(data["l"][i]) * multiplier, 2),
-                        "close": round(float(data["c"][i]) * multiplier, 2),
+                        "open": round(o_val, 2),
+                        "high": round(h_val, 2),
+                        "low": round(l_val, 2),
+                        "close": round(c_val, 2),
                         "volume": float(data["v"][i]) if data.get("v") else 0.0,
                     })
                 df_ext = pd.DataFrame(candles)
-                df_ext["dt"] = pd.to_datetime(df_ext["date"])
-                return df_ext.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+                cleaned_ext = clean_candle_df(df_ext)
+                if not cleaned_ext.empty and len(cleaned_ext) > 0:
+                    return cleaned_ext
     except Exception:
         pass
 
     # Yahoo Finance fallback for US/Global indices & stocks
     df_yahoo = fetch_yahoo_candles(ticker_clean, countback=req_count, timeframe=tf)
-    if not df_yahoo.empty and len(df_yahoo) > 0:
-        return df_yahoo
+    cleaned_y = clean_candle_df(df_yahoo)
+    if not cleaned_y.empty and len(cleaned_y) > 0:
+        return cleaned_y
 
-    return fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
+    df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
+    return clean_candle_df(df_strapi)
 
 # ==============================================================================
 # 2. CHỈ BÁO: SUPERTREND & SPREAD PERCENTILES

@@ -610,6 +610,15 @@ const PythonStrategy = () => {
                 if (result?.candles?.length) {
                     setCountback(result.candles.length);
                 }
+                if (result && !result.error && Array.isArray(result.candles)) {
+                    setScanResult(result);
+                    if (result.bestParams) {
+                        setBestInfo(result.bestParams);
+                        setActiveAppliedConfigRank(1);
+                        const updatedBest = applyStrategyOptimizeConfig(selectedStrategyFile, result.bestParams, params);
+                        setParams(updatedBest);
+                    }
+                }
                 if (ticker !== selectedSymbol) {
                     setSelectedSymbol(ticker);
                 }
@@ -635,9 +644,10 @@ const PythonStrategy = () => {
         setBestInfo(config);
         setOptimizationModalOpen(false);
 
-        // Chạy scan ngay với cấu hình mới
-        handleScan(ticker, countback, timeframe, updatedParams);
-    }, [selectedSymbol, selectedStrategyFile, params, countback, timeframe, handleScan]);
+        // Chạy scan ngay với cấu hình mới trên cùng tập nến đã tối ưu
+        const targetCountback = scanResult?.candles?.length || countback || 5000;
+        handleScan(ticker, targetCountback, timeframe, updatedParams);
+    }, [selectedSymbol, selectedStrategyFile, params, countback, timeframe, handleScan, scanResult]);
 
     // Reset về giá trị mặc định
     const handleResetDefault = useCallback(() => {
@@ -690,13 +700,20 @@ const PythonStrategy = () => {
         handleScan(targetSymbol || selectedSymbol, reqCount, targetTf, mergedParams);
     };
 
+    // Áp dụng Template từ Modal (Nạp cấu hình và chạy Scan)
     const handleApplyTemplateModal = async (tpl) => {
         if (!tpl) return;
         const tplId = String(tpl.id || tpl.documentId);
         const sym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || selectedSymbol || '').trim().toUpperCase();
         handleSelectTemplate(tplId, sym);
+    };
 
-        // Tự động gán template này làm default template cho symbol
+    // Đặt Template làm Mặc định cho Symbol (Chỉ gán default ngầm, không kích hoạt scan nặng)
+    const handleSetDefaultTemplate = async (tpl) => {
+        if (!tpl) return;
+        const tplId = String(tpl.id || tpl.documentId);
+        const sym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || selectedSymbol || '').trim().toUpperCase();
+
         const targetSymObj = (Array.isArray(symbols) ? symbols : []).find(s =>
             String(s.Name || s.name || '').trim().toUpperCase() === sym
         );
@@ -704,8 +721,7 @@ const PythonStrategy = () => {
         if (targetSymId && tplId) {
             try {
                 await assignDefaultStrategyTemplate(targetSymId, tplId);
-                const updatedTemplates = await getStrategyTemplates();
-                setTemplates(updatedTemplates || []);
+                getStrategyTemplates().then(data => setTemplates(data || [])).catch(() => {});
                 dispatch(fetchSymbols());
             } catch (err) {
                 console.error('Failed to assign default template to symbol in PythonStrategy:', err);
@@ -1129,7 +1145,7 @@ const PythonStrategy = () => {
                 }
                 selectedSymbol={selectedSymbol}
                 onApplyTemplate={handleApplyTemplateModal}
-                onSetDefaultTemplate={handleApplyTemplateModal}
+                onSetDefaultTemplate={handleSetDefaultTemplate}
                 onDeleteTemplate={handleDeleteTemplate}
             />
         </div>

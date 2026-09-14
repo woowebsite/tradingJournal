@@ -755,6 +755,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         }
     }, [dispatch, selectedAccount?.market?.Name, selectedSymbol, selectedSymbolId, symbolTemplates, templates, timeframe, histories]);
 
+    // Áp dụng Template từ Modal (Nạp cấu hình template vào Chart)
     const handleApplyTemplateFromModal = useCallback(async (tpl) => {
         if (!tpl) return;
         const tplId = String(tpl.documentId || tpl.id);
@@ -762,25 +763,35 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
         // If template belongs to another symbol, switch symbol if present in symbols list
         const tSym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || '').trim().toUpperCase();
+        if (tSym && Array.isArray(symbols)) {
+            const matchSym = symbols.find(s => String(s.Name || s.name || '').trim().toUpperCase() === tSym);
+            if (matchSym) {
+                const symId = matchSym.documentId || matchSym.id;
+                setSelectedSymbolId(symId);
+                setSearchParams({ symbol: matchSym.Name || matchSym.name }, { replace: true });
+            }
+        }
+    }, [handleSelectTemplate, symbols, setSearchParams]);
+
+    // Đặt Template làm Mặc định cho Symbol (Chỉ gán default ngầm, không kích hoạt reload giao diện nặng)
+    const handleSetDefaultTemplate = useCallback(async (tpl) => {
+        if (!tpl) return;
+        const tplId = String(tpl.documentId || tpl.id);
+        const tSym = String(tpl.symbolName || tpl.symbol?.Name || tpl.symbol?.name || '').trim().toUpperCase();
         let targetSymObj = selectedSymbol;
 
         if (tSym && Array.isArray(symbols)) {
             const matchSym = symbols.find(s => String(s.Name || s.name || '').trim().toUpperCase() === tSym);
             if (matchSym) {
                 targetSymObj = matchSym;
-                const symId = matchSym.documentId || matchSym.id;
-                setSelectedSymbolId(symId);
-                setSearchParams({ symbol: matchSym.Name || matchSym.name }, { replace: true });
             }
         }
 
-        // Tự động gán template này làm template default cho symbol
         const targetSymId = targetSymObj?.documentId || targetSymObj?.id || tpl.symbol?.documentId || tpl.symbol?.id;
         if (targetSymId && tplId) {
             try {
                 await assignDefaultStrategyTemplate(targetSymId, tplId);
-                const updatedTemplates = await getStrategyTemplates();
-                setTemplates(updatedTemplates || []);
+                getStrategyTemplates().then(data => setTemplates(data || [])).catch(() => {});
                 if (selectedAccount?.market) {
                     const marketId = selectedAccount.market.documentId || selectedAccount.market.id;
                     dispatch(fetchSymbols(marketId));
@@ -791,7 +802,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 console.error('Failed to assign default template to symbol:', err);
             }
         }
-    }, [handleSelectTemplate, symbols, selectedSymbol, selectedAccount, dispatch, setSearchParams]);
+    }, [symbols, selectedSymbol, selectedAccount, dispatch]);
 
     const handleDeleteTemplate = useCallback(async (templateId, e) => {
         if (e) e.stopPropagation();
@@ -1791,7 +1802,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 defaultTemplateId={selectedSymbol?.strategy_template?.documentId || selectedSymbol?.strategy_template?.id || (typeof selectedSymbol?.strategy_template === 'string' || typeof selectedSymbol?.strategy_template === 'number' ? selectedSymbol.strategy_template : null)}
                 selectedSymbol={selectedSymbol?.Name || selectedSymbol?.name || ''}
                 onApplyTemplate={handleApplyTemplateFromModal}
-                onSetDefaultTemplate={handleApplyTemplateFromModal}
+                onSetDefaultTemplate={handleSetDefaultTemplate}
                 onDeleteTemplate={handleDeleteTemplate}
             />
         </div>

@@ -17,7 +17,8 @@ import {
     ArrowUpDown,
     ExternalLink,
     Tag,
-    Star
+    Star,
+    Loader2
 } from 'lucide-react';
 
 const getStrategyDisplayName = (stratFile = '') => {
@@ -96,6 +97,27 @@ const StrategyTemplatesListModal = ({
     const [search, setSearch] = useState('');
     const [sortBy, setSortBy] = useState('updatedAt'); // 'updatedAt', 'winRate', 'profitFactor', 'pnl', 'trades', 'name'
     const [sortDir, setSortDir] = useState('desc'); // 'asc', 'desc'
+    const [localDefaultId, setLocalDefaultId] = useState(defaultTemplateId || null);
+    const [settingDefaultId, setSettingDefaultId] = useState(null);
+
+    // Đồng bộ localDefaultId khi defaultTemplateId từ prop thay đổi
+    React.useEffect(() => {
+        if (defaultTemplateId) {
+            setLocalDefaultId(defaultTemplateId);
+        }
+    }, [defaultTemplateId]);
+
+    const handleSetDefault = async (tpl) => {
+        if (!tpl) return;
+        const tplDocId = String(tpl.documentId || tpl.id || '');
+        setLocalDefaultId(tplDocId); // Optimistic UI update tức thì
+        setSettingDefaultId(tplDocId);
+        try {
+            await onSetDefaultTemplate?.(tpl);
+        } finally {
+            setSettingDefaultId(null);
+        }
+    };
 
     const cleanSelectedSymbol = String(
         typeof selectedSymbol === 'object' && selectedSymbol !== null
@@ -168,6 +190,7 @@ const StrategyTemplatesListModal = ({
 
     const isDefaultTemplate = (tpl) => {
         const tplDocId = String(tpl.documentId || tpl.id || '');
+        if (localDefaultId && String(localDefaultId) === tplDocId) return true;
         if (defaultTemplateId && String(defaultTemplateId) === tplDocId) return true;
         return Boolean(tpl.isDefault);
     };
@@ -332,12 +355,17 @@ const StrategyTemplatesListModal = ({
                                             {onSetDefaultTemplate && !isDefault && (
                                                 <button
                                                     type="button"
-                                                    onClick={() => onSetDefaultTemplate(tpl)}
-                                                    className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-gray-800 hover:bg-amber-600/20 text-gray-300 hover:text-amber-300 border border-gray-700 hover:border-amber-500/40 transition flex items-center gap-1 cursor-pointer"
+                                                    disabled={Boolean(settingDefaultId)}
+                                                    onClick={() => handleSetDefault(tpl)}
+                                                    className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-gray-800 hover:bg-amber-600/20 text-gray-300 hover:text-amber-300 border border-gray-700 hover:border-amber-500/40 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
                                                     title="Đặt làm template mặc định cho symbol này"
                                                 >
-                                                    <Star size={12} className="text-amber-400" />
-                                                    <span>Đặt mặc định</span>
+                                                    {settingDefaultId === tplId ? (
+                                                        <Loader2 size={12} className="animate-spin text-amber-400" />
+                                                    ) : (
+                                                        <Star size={12} className="text-amber-400" />
+                                                    )}
+                                                    <span>{settingDefaultId === tplId ? 'Đang lưu...' : 'Đặt mặc định'}</span>
                                                 </button>
                                             )}
                                             <button

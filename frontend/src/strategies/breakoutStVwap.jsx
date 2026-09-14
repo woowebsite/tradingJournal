@@ -86,7 +86,8 @@ export const breakoutStVwapStrategy = {
                 { value: 'st_only', label: 'Chỉ dùng Supertrend' },
                 { value: 'vwap_only', label: 'Chỉ dùng VWAP' },
             ],
-            optimizable: false,
+            optimizable: true,
+            defaultOpt: true,
         },
         {
             name: 'entrySetup',
@@ -153,7 +154,7 @@ export const breakoutStVwapStrategy = {
             allowShort: params.allowShort !== undefined ? params.allowShort : true,
             tpSupertrend: Boolean(params.tpSupertrend),
             tpType: params.tpType || 'P90',
-            slType: params.slType || 'P75',
+            slType: params.slType || 'current_bar',
             customTpVal: parseFloat(params.customTpVal) || 0,
             customSlVal: parseFloat(params.customSlVal) || 0,
             riskReward: parseFloat(params.riskReward) || 1.5,
@@ -175,10 +176,10 @@ export const breakoutStVwapStrategy = {
             entrySetup: setup,
             allowBreakoutHigh,
             allowSweepLow,
-            allowLong: params.allowLong,
-            allowShort: params.allowShort,
-            tpType: params.tpType,
-            slType: params.slType,
+            allowLong: params.allowLong !== undefined ? params.allowLong : true,
+            allowShort: params.allowShort !== undefined ? params.allowShort : true,
+            tpType: params.tpType || 'P90',
+            slType: params.slType || 'current_bar',
             tpSupertrend: params.tpSupertrend,
             optConfig: {
                 stPeriod: Boolean(optFlags.stPeriod),
@@ -197,21 +198,23 @@ export const breakoutStVwapStrategy = {
         const nextSetup = config.entrySetup !== undefined ? config.entrySetup : (
             config.allowBreakoutHigh !== undefined && config.allowSweepLow !== undefined
                 ? (config.allowBreakoutHigh && !config.allowSweepLow ? 'setup1' : (!config.allowBreakoutHigh && config.allowSweepLow ? 'setup2' : 'both'))
-                : currentParams.entrySetup
+                : (currentParams.entrySetup || 'both')
         );
 
         return {
             ...currentParams,
             stPeriod: config.stPeriod !== undefined ? config.stPeriod : currentParams.stPeriod,
             stMultiplier: config.stMultiplier !== undefined ? config.stMultiplier : currentParams.stMultiplier,
-            vwapAnchor: config.vwapAnchor !== undefined ? config.vwapAnchor : currentParams.vwapAnchor,
-            indicatorFilter: config.indicatorFilter !== undefined ? config.indicatorFilter : currentParams.indicatorFilter,
+            vwapAnchor: config.vwapAnchor !== undefined ? config.vwapAnchor : (currentParams.vwapAnchor || 'year'),
+            indicatorFilter: config.indicatorFilter !== undefined ? config.indicatorFilter : (currentParams.indicatorFilter || 'st_or_vwap'),
             entrySetup: nextSetup,
             allowBreakoutHigh: nextSetup === 'setup1' || nextSetup === 'both',
             allowSweepLow: nextSetup === 'setup2' || nextSetup === 'both',
-            tpType: config.tpType !== undefined ? config.tpType : currentParams.tpType,
-            slType: config.slType !== undefined ? config.slType : currentParams.slType,
-            tpSupertrend: config.tpSupertrend !== undefined ? config.tpSupertrend : currentParams.tpSupertrend,
+            tpType: config.tpType !== undefined ? config.tpType : (currentParams.tpType || 'P90'),
+            slType: config.slType !== undefined ? config.slType : (currentParams.slType || 'current_bar'),
+            tpSupertrend: config.tpSupertrend !== undefined ? Boolean(config.tpSupertrend) : Boolean(currentParams.tpSupertrend),
+            allowLong: config.allowLong !== undefined ? Boolean(config.allowLong) : (currentParams.allowLong !== undefined ? Boolean(currentParams.allowLong) : true),
+            allowShort: config.allowShort !== undefined ? Boolean(config.allowShort) : (currentParams.allowShort !== undefined ? Boolean(currentParams.allowShort) : true),
         };
     },
 
@@ -230,7 +233,103 @@ export const breakoutStVwapStrategy = {
     // Tạo mô tả mặc định khi lưu Template
     generateDescription: (params) => {
         const setupStr = params.entrySetup === 'setup1' ? 'Setup 1 (Vượt đỉnh)' : (params.entrySetup === 'setup2' ? 'Setup 2 (Phá đáy)' : 'Both Setups');
-        return `Breakout ST(${params.stPeriod}, ${params.stMultiplier}) + VWAP(${params.vwapAnchor || 'year'}) | ${setupStr} | TP: ${params.tpType} | SL: ${params.slType} | ${params.allowLong ? 'Long' : ''} ${params.allowShort ? 'Short' : ''}`.trim();
+        const filterMap = {
+            'st_or_vwap': 'ST or VWAP',
+            'st_and_vwap': 'ST & VWAP',
+            'st_only': 'ST Only',
+            'vwap_only': 'VWAP Only'
+        };
+        const filterStr = filterMap[params.indicatorFilter] || params.indicatorFilter || 'ST or VWAP';
+        return `Breakout ST(${params.stPeriod}, ${params.stMultiplier}) + VWAP(${params.vwapAnchor || 'year'}) | Lọc: ${filterStr} | ${setupStr} | TP: ${params.tpType} | SL: ${params.slType} | ${params.allowLong ? 'Long' : ''} ${params.allowShort ? 'Short' : ''}`.trim();
+    },
+
+    // Hiển thị tóm tắt cấu hình ở thanh Status Bar
+    renderStatusBarSummary: (params) => {
+        const filterMap = {
+            'st_or_vwap': 'ST or VWAP',
+            'st_and_vwap': 'ST & VWAP',
+            'st_only': 'ST Only',
+            'vwap_only': 'VWAP Only'
+        };
+        return (
+            <>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-xs font-medium font-mono">
+                    <TrendingUp size={12} className="text-cyan-400" />
+                    ST({params.stPeriod}, {params.stMultiplier})
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/20 text-xs font-medium font-mono">
+                    <Filter size={12} className="text-purple-400" />
+                    Lọc: {filterMap[params.indicatorFilter] || params.indicatorFilter}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
+                    <Target size={12} className="text-emerald-400" />
+                    TP: {params.tpType}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-xs font-medium">
+                    <ShieldAlert size={12} className="text-rose-400" />
+                    SL: {params.slType}
+                </span>
+            </>
+        );
+    },
+
+    // Hiển thị tóm tắt cấu hình trong Banner Best Info
+    renderBestInfoDetails: (info) => {
+        const filterMap = {
+            'st_or_vwap': 'ST or VWAP',
+            'st_and_vwap': 'ST & VWAP',
+            'st_only': 'ST Only',
+            'vwap_only': 'VWAP Only'
+        };
+        return (
+            <>
+                {' '}| <span className="font-mono text-cyan-300">ST({info.stPeriod}, {info.stMultiplier})</span>
+                {' '}| <span className="text-purple-300 font-semibold font-mono">Lọc: {filterMap[info.indicatorFilter] || info.indicatorFilter || 'ST or VWAP'}</span>
+                {' '}| TP: <span className="text-emerald-300 font-semibold">{info.tpType || 'P90'}</span>
+                {' '}| SL: <span className="text-rose-300 font-semibold">{info.slType || 'P75'}</span>
+            </>
+        );
+    },
+
+    // Hiển thị tóm tắt trên bảng Leaderboard Modal
+    renderLeaderboardBadges: (item) => {
+        const filterMap = {
+            'st_or_vwap': 'ST or VWAP',
+            'st_and_vwap': 'ST & VWAP',
+            'st_only': 'ST Only',
+            'vwap_only': 'VWAP Only'
+        };
+        const setupMap = {
+            'setup1': 'Vượt đỉnh',
+            'setup2': 'Phá đáy',
+            'both': 'Both'
+        };
+        return (
+            <>
+                <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono font-semibold text-[11px]">
+                    ST({item.stPeriod}, {item.stMultiplier})
+                </span>
+                <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium text-[11px]">
+                    {filterMap[item.indicatorFilter] || item.indicatorFilter || 'ST or VWAP'}
+                </span>
+                {item.entrySetup && item.entrySetup !== 'custom' && (
+                    <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-medium text-[11px]">
+                        {setupMap[item.entrySetup] || item.entrySetup}
+                    </span>
+                )}
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-medium text-[11px]">
+                    TP: {item.tpType}
+                </span>
+                <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium text-[11px]">
+                    SL: {item.slType}
+                </span>
+                {item.tpSupertrend && (
+                    <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px]">
+                        TP ST
+                    </span>
+                )}
+            </>
+        );
     }
 };
 

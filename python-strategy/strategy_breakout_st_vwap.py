@@ -380,6 +380,26 @@ def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1
             pass
     return pd.DataFrame()
 
+def clean_candle_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Làm sạch DataFrame nến, loại bỏ các nến có giá <= 0 hoặc NaN, đảm bảo không bị lỗi chia 0"""
+    if df is None or df.empty or len(df) == 0:
+        return pd.DataFrame()
+    req_cols = ['open', 'high', 'low', 'close', 'date']
+    if not all(col in df.columns for col in req_cols):
+        return pd.DataFrame()
+    df = df.copy()
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['open', 'high', 'low', 'close'])
+    df = df[(df['open'] > 0) & (df['high'] > 0) & (df['low'] > 0) & (df['close'] > 0)]
+    if 'volume' in df.columns:
+        df['volume'] = df['volume'].fillna(0.0).clip(lower=0.0)
+    if 'dt' not in df.columns:
+        df['dt'] = pd.to_datetime(df['date'])
+    df = df.drop_duplicates(subset=['date']).sort_values('dt').reset_index(drop=True)
+    return df
+
 def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 500, timeframe: str = None) -> pd.DataFrame:
     tf = str(timeframe or resolution or "D1").strip().upper()
     ticker_clean = ticker.strip().upper()
@@ -387,8 +407,9 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
 
     if is_crypto_symbol(ticker_clean):
         df_binance = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
-        if not df_binance.empty and len(df_binance) > 0:
-            return df_binance
+        cleaned_binance = clean_candle_df(df_binance)
+        if not cleaned_binance.empty and len(cleaned_binance) > 0:
+            return cleaned_binance
 
     resolution_24h = map_timeframe_to_24h(tf)
     to_ts = int(time.time())
@@ -402,31 +423,47 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
             data = res.json()
             if data.get("s") == "ok" and "t" in data and len(data["t"]) > 0:
                 candles = []
-                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] and float(data["c"][0]) < 500 and not is_crypto_symbol(ticker_clean) else 1
+                multiplier = 1000 if ticker_clean not in ["VNINDEX", "VN30", "HNX", "UPCOM", "VN30F1M"] else 1
+                first_close = float(data["c"][0])
+                if first_close < 500 and ticker_clean not in ["VNINDEX", "VN30", "VN30F1M"] and not is_crypto_symbol(ticker_clean):
+                    multiplier = 1000
+                else:
+                    multiplier = 1
 
                 for i in range(len(data["t"])):
+                    c_val = float(data["c"][i]) * multiplier
+                    if c_val <= 0 or pd.isna(c_val):
+                        continue
+                    o_val = float(data["o"][i]) * multiplier if float(data["o"][i]) > 0 else c_val
+                    h_val = float(data["h"][i]) * multiplier if float(data["h"][i]) > 0 else max(o_val, c_val)
+                    l_val = float(data["l"][i]) * multiplier if float(data["l"][i]) > 0 else min(o_val, c_val)
+
                     dt = datetime.fromtimestamp(data["t"][i], tz=timezone.utc)
                     candles.append({
                         "date": dt.strftime("%Y-%m-%dT00:00:00.000Z") if is_daily_or_weekly else dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
                         "time": dt.strftime("%Y-%m-%d") if is_daily_or_weekly else dt.strftime("%H:%M:%S"),
-                        "open": round(float(data["o"][i]) * multiplier, 2),
-                        "high": round(float(data["h"][i]) * multiplier, 2),
-                        "low": round(float(data["l"][i]) * multiplier, 2),
-                        "close": round(float(data["c"][i]) * multiplier, 2),
+                        "open": round(o_val, 2),
+                        "high": round(h_val, 2),
+                        "low": round(l_val, 2),
+                        "close": round(c_val, 2),
                         "volume": float(data["v"][i]) if data.get("v") else 0.0,
                     })
                 df_ext = pd.DataFrame(candles)
-                df_ext["dt"] = pd.to_datetime(df_ext["date"])
-                return df_ext.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+                cleaned_ext = clean_candle_df(df_ext)
+                if not cleaned_ext.empty and len(cleaned_ext) > 0:
+                    return cleaned_ext
     except Exception:
         pass
 
     # Yahoo Finance fallback for US/Global indices & stocks
     df_yahoo = fetch_yahoo_candles(ticker_clean, countback=req_count, timeframe=tf)
-    if not df_yahoo.empty and len(df_yahoo) > 0:
-        return df_yahoo
+    cleaned_yahoo = clean_candle_df(df_yahoo)
+    if not cleaned_yahoo.empty and len(cleaned_yahoo) > 0:
+        return cleaned_yahoo
 
-    return fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
+    df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
+    return clean_candle_df(df_strapi)
+
 
 # ==============================================================================
 # 2. TÍNH TOÁN CHỈ BÁO: SUPERTREND, ANCHORED VWAP & SPREAD PERCENTILES
@@ -1315,11 +1352,14 @@ def optimize_strategy(
     countback: int = 5000,
     allow_long: bool = True,
     allow_short: bool = True,
+    allow_breakout_high: bool = True,
+    allow_sweep_low: bool = True,
+    current_entry_setup: str = "both",
     current_st_period: int = 10,
     current_st_multiplier: float = 3.0,
     current_vwap_anchor: str = "year",
     current_tp_type: str = "P90",
-    current_sl_type: str = "P75",
+    current_sl_type: str = "current_bar",
     current_tp_supertrend: bool = False,
     current_indicator_filter: str = "st_or_vwap",
     opt_config: Dict = None
@@ -1340,34 +1380,45 @@ def optimize_strategy(
 
     opt_st_period = opt_config.get("stPeriod", True)
     opt_st_multiplier = opt_config.get("stMultiplier", True)
+    opt_entry_setup = opt_config.get("entrySetup", True)
     opt_tp_type = opt_config.get("tpType", True)
     opt_sl_type = opt_config.get("slType", True)
     opt_tp_supertrend = opt_config.get("tpSupertrend", True)
-    opt_filter = opt_config.get("indicatorFilter", False)
+    opt_filter = opt_config.get("indicatorFilter", True)
 
     st_periods = [7, 10, 14] if opt_st_period else [int(current_st_period or 10)]
     st_mults = [2.0, 3.0, 4.0] if opt_st_multiplier else [float(current_st_multiplier or 3.0)]
+    
+    # Xác định entry setups
+    fallback_setup = "setup1" if (allow_breakout_high and not allow_sweep_low) else ("setup2" if (not allow_breakout_high and allow_sweep_low) else "both")
+    eff_setup = current_entry_setup or fallback_setup
+    entry_setups = ["setup1", "setup2", "both"] if opt_entry_setup else [str(eff_setup)]
+
     tp_types = ["P50", "P75", "P90", "P99", "RR1.5", "RR2.0", "close_today", "close_next_day"] if opt_tp_type else [str(current_tp_type or "P90")]
     sl_types = ["current_bar", "prev_bar", "P50", "P75", "P90"] if opt_sl_type else [str(current_sl_type or "current_bar")]
     tp_sts = [False, True] if opt_tp_supertrend else [bool(current_tp_supertrend)]
-    filters = ["st_or_vwap", "st_and_vwap", "st_only"] if opt_filter else [str(current_indicator_filter or "st_or_vwap")]
+    filters = ["st_or_vwap", "st_and_vwap", "st_only", "vwap_only"] if opt_filter else [str(current_indicator_filter or "st_or_vwap")]
 
     combinations = []
     for st_p in st_periods:
         for st_m in st_mults:
-            for tp_t in tp_types:
-                for sl_t in sl_types:
-                    for tp_s in tp_sts:
-                        for f_mode in filters:
-                            combinations.append({
-                                "st_period": st_p,
-                                "st_multiplier": st_m,
-                                "vwap_anchor": current_vwap_anchor,
-                                "tp_type": tp_t,
-                                "sl_type": sl_t,
-                                "tp_supertrend": tp_s,
-                                "indicator_filter": f_mode
-                            })
+            for e_setup in entry_setups:
+                for tp_t in tp_types:
+                    for sl_t in sl_types:
+                        for tp_s in tp_sts:
+                            for f_mode in filters:
+                                combinations.append({
+                                    "st_period": st_p,
+                                    "st_multiplier": st_m,
+                                    "vwap_anchor": current_vwap_anchor,
+                                    "entry_setup": e_setup,
+                                    "allow_breakout_high": e_setup in ["setup1", "both"],
+                                    "allow_sweep_low": e_setup in ["setup2", "both"],
+                                    "tp_type": tp_t,
+                                    "sl_type": sl_t,
+                                    "tp_supertrend": tp_s,
+                                    "indicator_filter": f_mode
+                                })
 
     def run_eval(c):
         res = scan_strategy_signals(
@@ -1377,6 +1428,8 @@ def optimize_strategy(
             vwap_anchor=c["vwap_anchor"],
             allow_long=allow_long,
             allow_short=allow_short,
+            allow_breakout_high=c["allow_breakout_high"],
+            allow_sweep_low=c["allow_sweep_low"],
             indicator_filter=c["indicator_filter"],
             tp_type=c["tp_type"],
             sl_type=c["sl_type"],
@@ -1394,11 +1447,21 @@ def optimize_strategy(
         gl = abs(sum(t.get("pnl_percent", 0) for t in loss))
         pf = round(gp / gl, 2) if gl > 0 else (99.9 if gp > 0 else 0.0)
 
+        # Tính điểm fitness
+        capped_pf = min(pf, 10.0)
+        trade_weight = np.sqrt(len(trades))
+        wr_factor = 1.0 if wr >= 40.0 else max(0.2, wr / 40.0)
+        pnl_weight = max(0.1, pnl) if pnl > 0 else (pnl / 10.0)
+        fitness = capped_pf * trade_weight * pnl_weight * wr_factor
+
         return {
             "config": c,
+            "score": fitness,
             "profitFactor": pf,
             "winRate": wr,
             "totalPnlPercent": pnl,
+            "grossProfit": round(gp, 2),
+            "grossLoss": round(gl, 2),
             "totalTrades": len(trades),
             "closedTrades": tot,
             "winTrades": len(win),
@@ -1409,68 +1472,94 @@ def optimize_strategy(
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         evaluated = list(executor.map(run_eval, combinations))
 
-    evaluated.sort(key=lambda x: (x["profitFactor"], x["totalPnlPercent"], x["winRate"]), reverse=True)
-    best = evaluated[0] if evaluated else None
+    evaluated.sort(key=lambda x: (x["score"], x["profitFactor"], x["totalPnlPercent"], x["winRate"]), reverse=True)
 
-    best_combo = best["config"] if best else {
-        "st_period": current_st_period,
-        "st_multiplier": current_st_multiplier,
-        "vwap_anchor": current_vwap_anchor,
-        "tp_type": current_tp_type,
-        "sl_type": current_sl_type,
-        "tp_supertrend": current_tp_supertrend,
-        "indicator_filter": current_indicator_filter
+    top_configs = []
+    seen = set()
+    for item in evaluated:
+        cfg = item["config"]
+        key = (cfg["st_period"], cfg["st_multiplier"], cfg["vwap_anchor"], cfg["indicator_filter"], cfg["entry_setup"], cfg["tp_type"], cfg["sl_type"], cfg["tp_supertrend"])
+        if key not in seen:
+            seen.add(key)
+            top_configs.append({
+                "rank": len(top_configs) + 1,
+                "stPeriod": cfg["st_period"],
+                "stMultiplier": cfg["st_multiplier"],
+                "vwapAnchor": cfg["vwap_anchor"],
+                "indicatorFilter": cfg["indicator_filter"],
+                "entrySetup": cfg["entry_setup"],
+                "allowBreakoutHigh": cfg["allow_breakout_high"],
+                "allowSweepLow": cfg["allow_sweep_low"],
+                "tpType": cfg["tp_type"],
+                "slType": cfg["sl_type"],
+                "tpSupertrend": cfg["tp_supertrend"],
+                "allowLong": allow_long,
+                "allowShort": allow_short,
+                "profitFactor": item["profitFactor"],
+                "winRate": item["winRate"],
+                "totalPnlPercent": item["totalPnlPercent"],
+                "grossProfit": item["grossProfit"],
+                "grossLoss": item["grossLoss"],
+                "totalTrades": item["totalTrades"],
+                "closedTrades": item["closedTrades"],
+                "winTrades": item["winTrades"],
+                "lossTrades": item["lossTrades"]
+            })
+            if len(top_configs) >= 25:
+                break
+
+    best = top_configs[0] if top_configs else None
+
+    best_combo = best if best else {
+        "stPeriod": current_st_period,
+        "stMultiplier": current_st_multiplier,
+        "vwapAnchor": current_vwap_anchor,
+        "indicatorFilter": current_indicator_filter,
+        "entrySetup": eff_setup,
+        "allowBreakoutHigh": eff_setup in ["setup1", "both"],
+        "allowSweepLow": eff_setup in ["setup2", "both"],
+        "tpType": current_tp_type,
+        "slType": current_sl_type,
+        "tpSupertrend": current_tp_supertrend,
     }
 
     full_result = scan_symbol_json(
         ticker=ticker,
-        countback=countback,
-        st_period=best_combo["st_period"],
-        st_multiplier=best_combo["st_multiplier"],
-        vwap_anchor=best_combo["vwap_anchor"],
+        countback=len(df),
+        st_period=best_combo["stPeriod"],
+        st_multiplier=best_combo["stMultiplier"],
+        vwap_anchor=best_combo["vwapAnchor"],
         allow_long=allow_long,
         allow_short=allow_short,
-        indicator_filter=best_combo["indicator_filter"],
-        tp_type=best_combo["tp_type"],
-        sl_type=best_combo["sl_type"],
-        tp_supertrend=best_combo["tp_supertrend"],
+        allow_breakout_high=best_combo["allowBreakoutHigh"],
+        allow_sweep_low=best_combo["allowSweepLow"],
+        indicator_filter=best_combo["indicatorFilter"],
+        tp_type=best_combo["tpType"],
+        sl_type=best_combo["slType"],
+        tp_supertrend=best_combo["tpSupertrend"],
         timeframe=timeframe
     )
 
-    top_configs = []
-    for item in evaluated[:10]:
-        cfg = item["config"]
-        top_configs.append({
-            "stPeriod": cfg["st_period"],
-            "stMultiplier": cfg["st_multiplier"],
-            "vwapAnchor": cfg["vwap_anchor"],
-            "tpType": cfg["tp_type"],
-            "slType": cfg["sl_type"],
-            "tpSupertrend": cfg["tp_supertrend"],
-            "indicatorFilter": cfg["indicator_filter"],
-            "profitFactor": item["profitFactor"],
-            "winRate": item["winRate"],
-            "totalPnlPercent": item["totalPnlPercent"],
-            "totalTrades": item["totalTrades"],
-            "closedTrades": item["closedTrades"],
-            "winTrades": item["winTrades"],
-            "lossTrades": item["lossTrades"]
-        })
-
     full_result["bestParams"] = {
-        "stPeriod": best_combo["st_period"],
-        "stMultiplier": best_combo["st_multiplier"],
-        "vwapAnchor": best_combo["vwap_anchor"],
-        "tpType": best_combo["tp_type"],
-        "slType": best_combo["sl_type"],
-        "tpSupertrend": best_combo["tp_supertrend"],
-        "indicatorFilter": best_combo["indicator_filter"],
+        "rank": 1,
+        "stPeriod": best_combo["stPeriod"],
+        "stMultiplier": best_combo["stMultiplier"],
+        "vwapAnchor": best_combo["vwapAnchor"],
+        "indicatorFilter": best_combo["indicatorFilter"],
+        "entrySetup": best_combo["entrySetup"],
+        "allowBreakoutHigh": best_combo["allowBreakoutHigh"],
+        "allowSweepLow": best_combo["allowSweepLow"],
+        "tpType": best_combo["tpType"],
+        "slType": best_combo["slType"],
+        "tpSupertrend": best_combo["tpSupertrend"],
         "allowLong": allow_long,
         "allowShort": allow_short,
         "profitFactor": full_result.get("summary", {}).get("profitFactor", 0.0),
         "winRate": full_result.get("summary", {}).get("winRate", 0.0),
         "totalTrades": full_result.get("summary", {}).get("totalTrades", 0),
         "totalPnlPercent": full_result.get("summary", {}).get("totalPnlPercent", 0.0),
+        "grossProfit": full_result.get("summary", {}).get("grossProfit", 0.0),
+        "grossLoss": full_result.get("summary", {}).get("grossLoss", 0.0),
         "closedTrades": full_result.get("summary", {}).get("closedTrades", 0)
     }
     full_result["topConfigs"] = top_configs
@@ -1503,6 +1592,9 @@ if __name__ == "__main__":
     # Indicator Filter Condition
     parser.add_argument("--indicator-filter", type=str, default="st_or_vwap", help="Indicator filter: st_or_vwap, st_and_vwap, st_only, vwap_only, none")
 
+    # Entry Setup
+    parser.add_argument("--entry-setup", type=str, default="both", choices=["setup1", "setup2", "both"], help="Entry setup (setup1, setup2, both)")
+
     # Setup triggers
     parser.add_argument("--allow-breakout-high", dest="allow_breakout_high", action="store_true", default=True, help="Cho phép Mua vượt đỉnh / Bán phá đáy")
     parser.add_argument("--no-breakout-high", dest="allow_breakout_high", action="store_false", help="Tắt setup vượt đỉnh")
@@ -1517,7 +1609,7 @@ if __name__ == "__main__":
 
     # TP & SL Spread Dropdowns
     parser.add_argument("--tp-type", type=str, default="P90", help="Take Profit type (P25, P50, P75, P90, P99, RR1.5, RR2.0)")
-    parser.add_argument("--sl-type", type=str, default="P75", help="Stop Loss type (P25, P50, P75, P90)")
+    parser.add_argument("--sl-type", type=str, default="current_bar", help="Stop Loss type (current_bar, prev_bar, P25, P50, P75, P90)")
     parser.add_argument("--custom-tp-val", type=float, default=0.0, help="Custom TP spread value")
     parser.add_argument("--custom-sl-val", type=float, default=0.0, help="Custom SL spread value")
     parser.add_argument("--rr", "--risk-reward", dest="risk_reward", type=float, default=1.5, help="Risk : Reward ratio")
@@ -1542,6 +1634,9 @@ if __name__ == "__main__":
             countback=args.countback,
             allow_long=args.allow_long,
             allow_short=args.allow_short,
+            allow_breakout_high=args.allow_breakout_high,
+            allow_sweep_low=args.allow_sweep_low,
+            current_entry_setup=args.entry_setup,
             current_st_period=args.st_period,
             current_st_multiplier=args.st_multiplier,
             current_vwap_anchor=args.vwap_anchor,
@@ -1579,7 +1674,7 @@ if __name__ == "__main__":
         bp = res.get("bestParams", {})
         if args.optimize:
             print(f"[*] KẾT QUẢ TỐI ƯU HÓA BREAKOUT + ST & VWAP ({args.ticker} • {args.timeframe}):")
-            print(f"    - Bộ tham số tốt nhất: ST({bp.get('stPeriod')}, {bp.get('stMultiplier')}) | Filter: {bp.get('indicatorFilter')} | TP: {bp.get('tpType')} | SL: {bp.get('slType')}")
+            print(f"    - Bộ tham số tốt nhất: ST({bp.get('stPeriod')}, {bp.get('stMultiplier')}) | Setup: {bp.get('entrySetup')} | Filter: {bp.get('indicatorFilter')} | TP: {bp.get('tpType')} | SL: {bp.get('slType')}")
             print(f"    - Profit Factor: {summary.get('profitFactor')} | Win Rate: {summary.get('winRate')}% ({summary.get('closedTrades')} trades)")
             print(f"    - Tổng PnL: {summary.get('totalPnlPercent')}%")
         else:

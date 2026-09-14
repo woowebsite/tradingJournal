@@ -416,11 +416,31 @@ def fetch_history_from_strapi(ticker: str, countback: int = 500, timeframe: str 
                     df = df.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
                     if len(df) > target_count:
                         df = df.tail(target_count).reset_index(drop=True)
-                    return df
+                    return clean_candle_df(df)
         except Exception:
             pass
 
     return pd.DataFrame()
+
+def clean_candle_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Làm sạch DataFrame nến, loại bỏ các nến có giá <= 0 hoặc NaN, đảm bảo không bị lỗi chia 0"""
+    if df is None or df.empty or len(df) == 0:
+        return pd.DataFrame()
+    req_cols = ['open', 'high', 'low', 'close', 'date']
+    if not all(col in df.columns for col in req_cols):
+        return pd.DataFrame()
+    df = df.copy()
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['open', 'high', 'low', 'close'])
+    df = df[(df['open'] > 0) & (df['high'] > 0) & (df['low'] > 0) & (df['close'] > 0)]
+    if 'volume' in df.columns:
+        df['volume'] = df['volume'].fillna(0.0).clip(lower=0.0)
+    if 'dt' not in df.columns:
+        df['dt'] = pd.to_datetime(df['date'])
+    df = df.drop_duplicates(subset=['date']).sort_values('dt').reset_index(drop=True)
+    return df
 
 def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1") -> pd.DataFrame:
     """Lấy dữ liệu nến từ Yahoo Finance API cho Chỉ số & Cổ phiếu Quốc tế (NASDAQ, QQQ, NDX, SP500, GOLD, AAPL...)"""
@@ -496,11 +516,11 @@ def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1
                 for i in range(len(timestamps)):
                     ts = timestamps[i]
                     c = closes[i] if i < len(closes) else None
-                    if ts is None or c is None or pd.isna(c):
+                    if ts is None or c is None or pd.isna(c) or float(c) <= 0:
                         continue
-                    o = opens[i] if i < len(opens) and not pd.isna(opens[i]) else c
-                    h = highs[i] if i < len(highs) and not pd.isna(highs[i]) else max(o, c)
-                    l = lows[i] if i < len(lows) and not pd.isna(lows[i]) else min(o, c)
+                    o = opens[i] if i < len(opens) and not pd.isna(opens[i]) and float(opens[i]) > 0 else c
+                    h = highs[i] if i < len(highs) and not pd.isna(highs[i]) and float(highs[i]) > 0 else max(o, c)
+                    l = lows[i] if i < len(lows) and not pd.isna(lows[i]) and float(lows[i]) > 0 else min(o, c)
                     v = volumes[i] if i < len(volumes) and not pd.isna(volumes[i]) else 0
 
                     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
@@ -516,10 +536,9 @@ def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1
 
                 if candles:
                     df = pd.DataFrame(candles)
-                    df["dt"] = pd.to_datetime(df["date"])
-                    df = df.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
-                    if not df.empty:
-                        return df
+                    cleaned = clean_candle_df(df)
+                    if not cleaned.empty and len(cleaned) > 0:
+                        return cleaned
         except Exception:
             pass
     return pd.DataFrame()
@@ -538,9 +557,9 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
     # 1. Ưu tiên dữ liệu Binance đối với tiền mã hóa Crypto
     if is_crypto_symbol(ticker_clean):
         df_binance = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
-        if not df_binance.empty and len(df_binance) > 0:
-            df_binance = df_binance.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
-            return df_binance
+        cleaned_binance = clean_candle_df(df_binance)
+        if not cleaned_binance.empty and len(cleaned_binance) > 0:
+            return cleaned_binance
 
     # 2. Lấy dữ liệu 24hMoney cho Stock / Index / Derivatives
     df_external = pd.DataFrame()
@@ -564,6 +583,13 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
                     multiplier = 1
 
                 for i in range(len(data["t"])):
+                    c_val = float(data["c"][i]) * multiplier
+                    if c_val <= 0 or pd.isna(c_val):
+                        continue
+                    o_val = float(data["o"][i]) * multiplier if float(data["o"][i]) > 0 else c_val
+                    h_val = float(data["h"][i]) * multiplier if float(data["h"][i]) > 0 else max(o_val, c_val)
+                    l_val = float(data["l"][i]) * multiplier if float(data["l"][i]) > 0 else min(o_val, c_val)
+
                     dt = datetime.fromtimestamp(data["t"][i], tz=timezone.utc)
                     if is_daily_or_weekly:
                         date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
@@ -575,16 +601,17 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
                     candles.append({
                         "date": date_str,
                         "time": time_str,
-                        "open": round(float(data["o"][i]) * multiplier, 2),
-                        "high": round(float(data["h"][i]) * multiplier, 2),
-                        "low": round(float(data["l"][i]) * multiplier, 2),
-                        "close": round(float(data["c"][i]) * multiplier, 2),
-                        "volume": float(data["v"][i]),
+                        "open": round(o_val, 2),
+                        "high": round(h_val, 2),
+                        "low": round(l_val, 2),
+                        "close": round(c_val, 2),
+                        "volume": float(data["v"][i]) if data.get("v") else 0.0,
                     })
 
                 df_external = pd.DataFrame(candles)
-                df_external["dt"] = pd.to_datetime(df_external["date"])
-                df_external = df_external.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
+                cleaned_ext = clean_candle_df(df_external)
+                if not cleaned_ext.empty and len(cleaned_ext) > 0:
+                    return cleaned_ext
     except Exception:
         pass
 
@@ -593,20 +620,19 @@ def fetch_market_candles(ticker: str, resolution: str = "D1", countback: int = 5
 
     # 3. Ưu tiên Yahoo Finance cho các Chỉ số / Cổ phiếu Quốc tế (NASDAQ, QQQ, SP500, GOLD, AAPL...)
     df_yahoo = fetch_yahoo_candles(ticker_clean, countback=req_count, timeframe=tf)
-    if not df_yahoo.empty and len(df_yahoo) > 0:
-        return df_yahoo
+    cleaned_yahoo = clean_candle_df(df_yahoo)
+    if not cleaned_yahoo.empty and len(cleaned_yahoo) > 0:
+        return cleaned_yahoo
 
     # Nếu chưa lấy được từ 24hMoney, thử lại Binance (cho trường hợp mã crypto không có hậu tố .P)
     df_binance_fallback = fetch_binance_candles(ticker_clean, countback=req_count, timeframe=tf)
-    if not df_binance_fallback.empty and len(df_binance_fallback) > 0:
-        df_binance_fallback = df_binance_fallback.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
-        return df_binance_fallback
+    cleaned_bf = clean_candle_df(df_binance_fallback)
+    if not cleaned_bf.empty and len(cleaned_bf) > 0:
+        return cleaned_bf
 
     # 4. Fallback đọc từ Strapi symbol-histories
     df_strapi = fetch_history_from_strapi(ticker_clean, countback=req_count, timeframe=tf)
-    if not df_strapi.empty and len(df_strapi) > 0:
-        df_strapi = df_strapi.drop_duplicates(subset=["date"]).sort_values("dt").reset_index(drop=True)
-        return df_strapi
+    return clean_candle_df(df_strapi)
 
     return pd.DataFrame()
 
