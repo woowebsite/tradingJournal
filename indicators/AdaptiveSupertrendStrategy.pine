@@ -3,10 +3,10 @@ strategy(
      title                   = "Adaptive Supertrend Sideway Strategy",
      shorttitle              = "Adaptive ST Sideway",
      overlay                 = true,
-     initial_capital         = 10000,
+     initial_capital         = 100000,
      currency                = currency.USD,
      default_qty_type        = strategy.percent_of_equity,
-     default_qty_value       = 100,
+     default_qty_value       = 30,
      commission_type         = strategy.commission.percent,
      commission_value        = 0.05,
      process_orders_on_close = true,
@@ -32,6 +32,13 @@ maxPeriod       = input.int(20, "Adaptive Max Period", minval = 1, maxval = 100,
 minFactor       = input.float(2.0, "Adaptive Min Factor", minval = 0.5, maxval = 10.0, step = 0.1, group = grp_adapt_lim, tooltip = "Hệ số nhân tối thiểu khi thị trường êm ả / trend mượt (Mặc định: 2.0)")
 maxFactor       = input.float(5.0, "Adaptive Max Factor", minval = 1.0, maxval = 15.0, step = 0.1, group = grp_adapt_lim, tooltip = "Hệ số nhân tối đa khi thị trường biến động giật / nhiễu (Mặc định: 5.0)")
 
+// Group 1.2: Bộ lọc Xu hướng VWAP Anchor ---
+grp_vwap        = "1.2. Bộ lọc Xu hướng VWAP Anchor"
+useVwapFilter   = input.bool(true, "Bật bộ lọc Xu hướng VWAP Anchor", group = grp_vwap, tooltip = "Lọc tín hiệu vào lệnh dựa trên tương quan vị trí giữa giá đóng cửa và đường Anchored VWAP.")
+vwapAnchor      = input.string("Day", "Chu kỳ neo VWAP (Anchor Period)", options = ["Year", "Quarter", "Month", "Week", "Day"], group = grp_vwap, tooltip = "Chu kỳ thời gian neo lại đường VWAP:\n- Year: Đầu mỗi năm\n- Quarter: Đầu mỗi quý (3 tháng)\n- Month: Đầu mỗi tháng\n- Week: Đầu mỗi tuần\n- Day: Đầu mỗi ngày")
+vwapTrendType   = input.string("Follow Trend", "Kiểu theo xu hướng (Trend Type)", options = ["Follow Trend", "Counter Trend"], group = grp_vwap, tooltip = "Follow Trend: Long khi giá trên VWAP, Short khi giá dưới VWAP.\nCounter Trend: Long khi giá dưới VWAP, Short khi giá trên VWAP.")
+showVwapLine    = input.bool(true, "Vẽ đường Anchored VWAP trên biểu đồ", group = grp_vwap)
+
 // --- Group 2: Nhận diện Sideway (Sideway Up & Sideway Down) ---
 grp_side        = "2. Nhận diện Trạng thái Sideway"
 detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
@@ -42,15 +49,17 @@ erThresh        = input.float(0.30, "Ngưỡng Kaufman ER (Dưới ngưỡng là
 
 // --- Group 3: Quản lý Vào lệnh & Tỷ lệ RRR (Entry / SL / TP1 / TP2) ---
 grp_trade       = "3. Quản lý Vào lệnh & Thoát lệnh RRR"
-entryType       = input.string("Supertrend Flip", "Kiểu vào lệnh (Entry Type)", options = ["Supertrend Flip", "Break Sideway", "First Pullback"], group = grp_trade, tooltip = "Supertrend Flip: Vào lệnh ngay khi Supertrend đảo chiều xu hướng.\nBreak Sideway: Vào lệnh khi giá phá vỡ đỉnh (Long) hoặc đáy (Short) của bất kỳ vùng Sideway nào khi chưa có lệnh.\nFirst Pullback: Vào lệnh sau khi kết thúc vùng First Pullback đầu tiên của sóng Supertrend mà giá vẫn duy trì xu hướng.")
-slType          = input.string("Supertrend", "Kiểu Stop Loss (Stoploss Type)", options = ["Supertrend", "Sideway Zone"], group = grp_trade, tooltip = "Supertrend: Đặt SL theo đường Supertrend tại thời điểm vào lệnh.\nSideway Zone: Đặt SL dưới đáy vùng Sideway (Long) hoặc trên đỉnh vùng Sideway (Short).")
+entryType       = input.string("Supertrend Flip", "Kiểu vào lệnh (Entry Type)", options = ["Supertrend Flip", "Break Sideway", "First Pullback", "Pullback + Sideway", "Break HL"], group = grp_trade, tooltip = "Supertrend Flip: Vào lệnh ngay khi Supertrend đảo chiều xu hướng.\nBreak Sideway: Vào lệnh khi giá phá vỡ đỉnh (Long) hoặc đáy (Short) của bất kỳ vùng Sideway nào khi chưa có lệnh.\nFirst Pullback: Vào lệnh sau khi kết thúc vùng First Pullback đầu tiên của sóng Supertrend mà giá vẫn duy trì xu hướng.\nPullback + Sideway: Cho phép vào lệnh khi xảy ra Pullback hoặc Sideway. Sau khi lệnh Pullback chốt lời, vẫn tiếp tục vào thêm lệnh nếu xuất hiện Break Sideway.\nBreak HL: Vào lệnh Long khi phá vỡ High nến trước và nằm trên Supertrend tăng; Short khi phá vỡ Low nến trước và nằm dưới Supertrend giảm.")
+slType          = input.string("Supertrend", "Kiểu Stop Loss (Stoploss Type)", options = ["Supertrend", "Sideway Zone", "Entry Candle", "Previous Candle"], group = grp_trade, tooltip = "Supertrend: Đặt SL theo đường Supertrend tại thời điểm vào lệnh.\nSideway Zone: Đặt SL dưới đáy vùng Sideway (Long) hoặc trên đỉnh vùng Sideway (Short).\nEntry Candle: Đặt SL tại Low của nến Entry (Long) hoặc High của nến Entry (Short).\nPrevious Candle: Đặt SL tại Low của nến trước đó (Long) hoặc High của nến trước đó (Short).")
+tpType          = input.string("Percent", "Kiểu Take Profit (TakeProfit Type)", options = ["ATR", "ATR (HTF)", "Percent", "Spread"], group = grp_trade, tooltip = "ATR: Khoảng cách TP1 và TP2 = Hệ số nhân x ATR (chu kỳ ATR Period tại thời điểm vào lệnh).\nATR (HTF): Khoảng cách TP1 và TP2 = Hệ số nhân x ATR(6) của khung thời gian lớn HTF.\nPercent: Khoảng cách TP1 và TP2 = Hệ số nhân x Khoảng cách Rủi ro ban đầu (Entry - SL).\nSpread: Khoảng cách TP1 và TP2 = Số tick x Bước giá tối thiểu (syminfo.mintick).")
+htfTf           = input.string("D1", "Khung thời gian HTF (Take Profit)", options = ["M5", "M30", "H4", "D1", "W1"], group = grp_trade, tooltip = "Khung thời gian lớn để tính ATR 6 phiên khi chọn Take Profit Type là ATR (HTF).")
 allowLong       = input.bool(true, "Cho phép lệnh Long (Mua)", group = grp_trade)
 allowShort      = input.bool(true, "Cho phép lệnh Short (Bán)", group = grp_trade)
 filterSideway   = input.bool(false, "Không mở vị thế mới nếu đang Sideway", group = grp_trade, tooltip = "Nếu bật, khi có tín hiệu vào lệnh nhưng thị trường đang nằm trong vùng Sideway sẽ bỏ qua.")
-rrrTp1          = input.float(2.0, "Tỷ lệ RRR cho Take Profit 1 (TP1)", minval = 0.5, step = 0.5, group = grp_trade, tooltip = "Khoảng cách TP1 = Entry + RRR_TP1 * Risk (Mặc định: 2:1)")
-rrrTp2          = input.float(4.0, "Tỷ lệ RRR cho Take Profit 2 (TP2)", minval = 1.0, step = 0.5, group = grp_trade, tooltip = "Khoảng cách TP2 = Entry + RRR_TP2 * Risk (Mặc định: 4:1)")
+rrrTp1          = input.float(2.0, "Hệ số / Tỷ lệ cho Take Profit 1 (TP1)", minval = 0.0001, step = 0.01, group = grp_trade, tooltip = "Khoảng cách TP1 = Entry ± rrrTp1 * (Risk, ATR, ATR HTF hoặc syminfo.mintick) (Mặc định: 2.0)")
+rrrTp2          = input.float(4.0, "Hệ số / Tỷ lệ cho Take Profit 2 (TP2)", minval =0.0001, step = 0.01, group = grp_trade, tooltip = "Khoảng cách TP2 = Entry ± rrrTp2 * (Risk, ATR, ATR HTF hoặc syminfo.mintick) (Mặc định: 4.0)")
 tp1QtyPct       = input.float(50.0, "% Khối lượng chốt lời tại TP1", minval = 1.0, maxval = 100.0, step = 5.0, group = grp_trade, tooltip = "Tỷ lệ phần trăm vị thế sẽ chốt lời khi chạm TP1 (Mặc định: 50%)")
-moveSlToBe      = input.bool(true, "Dời SL về Hòa vốn (Break-Even) sau khi đạt TP1", group = grp_trade, tooltip = "Tự động nâng/hạ Stoploss về giá Entry khi giá đã cắn TP1 để bảo toàn vốn.")
+moveSlToBe      = input.string("RRR = 1", "Dời SL về Hòa vốn (Break-Even)", options = ["RRR = 1", "TP 1", "TP 2", "Không (None)"], group = grp_trade, tooltip = "Tự động dời Stoploss về giá Entry khi giá đạt các mốc sau:\n- RRR = 1: Khi giá đi được 1R (bằng khoảng cách Risk ban đầu).\n- TP 1: Khi giá chạm mức chốt lời TP1.\n- TP 2: Khi giá chạm mức chốt lời TP2.\n- Không (None): Giữ nguyên Stoploss ban đầu.")
 closeOnFlip     = input.bool(true, "Đóng vị thế còn lại khi Supertrend đảo chiều ngược", group = grp_trade, tooltip = "Tự động đóng toàn bộ khối lượng còn lại nếu Supertrend đổi màu ngược hướng.")
 
 // --- Group 4: Hiển thị & Đồ họa ---
@@ -146,6 +155,30 @@ downTrend  = plot(supertrendDir == -1 ? supertrendVal : na, "Supertrend Downtren
 
 fill(bodyMiddle, upTrend,   title = "Uptrend Background Cloud",   color = color.new(#00e676, 90), fillgaps = false)
 fill(bodyMiddle, downTrend, title = "Downtrend Background Cloud", color = color.new(#ff1744, 90), fillgaps = false)
+
+// --- 3.2. Tính toán Anchored VWAP ---
+calcAnchorVwap(string anchor) =>
+    string tf = anchor == "Year" ? "12M" : anchor == "Quarter" ? "3M" : anchor == "Month" ? "M" : anchor == "Week" ? "W" : "D"
+    bool isNewPeriod = ta.change(time(tf)) != 0
+    var float sumSrcVol = 0.0
+    var float sumVol    = 0.0
+    if isNewPeriod or barstate.isfirst
+        sumSrcVol := hlc3 * nz(volume, 1.0)
+        sumVol    := nz(volume, 1.0)
+    else
+        sumSrcVol += hlc3 * nz(volume, 1.0)
+        sumVol    += nz(volume, 1.0)
+    sumVol != 0.0 ? sumSrcVol / sumVol : hlc3
+
+float vwapValue = calcAnchorVwap(vwapAnchor)
+plot(useVwapFilter and showVwapLine ? vwapValue : na, "Anchored VWAP", color = color.new(#ffffff, 0), linewidth = 2, style = plot.style_line)
+
+// --- 3.3. Tính toán ATR(6) Khung Thời Gian Lớn (HTF ATR) ---
+getHtfResolution(string tf) =>
+    tf == "M5"  ? "5"   : tf == "M30" ? "30"  : tf == "H4"  ? "240" : tf == "D1"  ? "D"   : tf == "W1"  ? "W"   : "D"
+
+string htfRes = getHtfResolution(htfTf)
+float  atrHtf = request.security(syminfo.tickerid, htfRes, ta.atr(6))
 
 // ==============================================================================
 // 4. NHẬN DIỆN TRẠNG THÁI SIDEWAY (SIDEWAY UP & SIDEWAY DOWN)
@@ -394,7 +427,7 @@ else if supertrendDir == 1 and not hadFirstPbUp
                      right        = bar_index,
                      bottom       = low,
                      border_color = color.new(#3b82f6, 0),
-                     border_width = 2,
+                     border_width = 1,
                      border_style = line.style_solid,
                      bgcolor      = color.new(#3b82f6, 88),
                      text         = "First Pullback Up",
@@ -453,7 +486,7 @@ else if supertrendDir == -1 and not hadFirstPbDown
                      right        = bar_index,
                      bottom       = low,
                      border_color = color.new(#a855f7, 0),
-                     border_width = 2,
+                     border_width = 1,
                      border_style = line.style_solid,
                      bgcolor      = color.new(#a855f7, 88),
                      text         = "First Pullback Down",
@@ -498,6 +531,7 @@ var float initialRisk  = na
 var int   activeDir    = 0     // 1: Long, -1: Short, 0: Flat
 var int   entryBarIdx  = na
 
+var bool  rrr1Reached  = false
 var bool  tp1Reached   = false
 var bool  tp2Reached   = false
 var bool  slReached    = false
@@ -506,10 +540,12 @@ var bool  slReached    = false
 var bool  hasPendingSidewayUp     = false
 var float currentSwHighUp         = na
 var float currentSwLowUp          = na
+var int   lastSidewayEndBarUp     = na
 
 var bool  hasPendingSidewayDown   = false
 var float currentSwHighDown       = na
 var float currentSwLowDown        = na
+var int   lastSidewayEndBarDown   = na
 
 var float lastSidewayHigh         = na
 var float lastSidewayLow          = na
@@ -519,9 +555,11 @@ if isSupertrendBuy or isSupertrendSell
     hasPendingSidewayUp   := false
     currentSwHighUp       := na
     currentSwLowUp        := na
+    lastSidewayEndBarUp   := na
     hasPendingSidewayDown := false
     currentSwHighDown     := na
     currentSwLowDown      := na
+    lastSidewayEndBarDown := na
     lastSidewayHigh       := na
     lastSidewayLow        := na
 
@@ -533,6 +571,7 @@ if supertrendDir == 1
         
         if not isSidewayUp[1]
             hasPendingSidewayUp := true
+            lastSidewayEndBarUp := na
             currentSwHighUp     := curHigh
             currentSwLowUp      := curLow
         else
@@ -541,6 +580,15 @@ if supertrendDir == 1
             
         lastSidewayHigh := currentSwHighUp
         lastSidewayLow  := currentSwLowUp
+    else
+        // Vừa thoát khỏi vùng Sideway Up: ghi nhận nến kết thúc
+        if isSidewayUp[1] and hasPendingSidewayUp
+            lastSidewayEndBarUp := bar_index
+            
+        // Nếu đã quá 3 nến kể từ khi kết thúc Sideway mà chưa phá vỡ -> Hủy trạng thái chờ Break
+        if not na(lastSidewayEndBarUp) and (bar_index - lastSidewayEndBarUp > 3)
+            hasPendingSidewayUp := false
+            lastSidewayEndBarUp := na
 
 // Trong chu kỳ Supertrend Giảm (supertrendDir == -1)
 if supertrendDir == -1
@@ -550,6 +598,7 @@ if supertrendDir == -1
         
         if not isSidewayDown[1]
             hasPendingSidewayDown := true
+            lastSidewayEndBarDown := na
             currentSwHighDown     := curHigh
             currentSwLowDown      := curLow
         else
@@ -558,6 +607,15 @@ if supertrendDir == -1
             
         lastSidewayHigh := currentSwHighDown
         lastSidewayLow  := currentSwLowDown
+    else
+        // Vừa thoát khỏi vùng Sideway Down: ghi nhận nến kết thúc
+        if isSidewayDown[1] and hasPendingSidewayDown
+            lastSidewayEndBarDown := bar_index
+            
+        // Nếu đã quá 3 nến kể từ khi kết thúc Sideway mà chưa phá vỡ -> Hủy trạng thái chờ Break
+        if not na(lastSidewayEndBarDown) and (bar_index - lastSidewayEndBarDown > 3)
+            hasPendingSidewayDown := false
+            lastSidewayEndBarDown := na
 
 // Biến tích lũy Thống kê (Counters)
 var int countTotalTrades = 0
@@ -569,38 +627,85 @@ var int countTP2         = 0
 bool longSignal  = false
 bool shortSignal = false
 
+bool isWithin3BarsSwUp   = hasPendingSidewayUp and not isSidewayUp and not na(lastSidewayEndBarUp) and (bar_index - lastSidewayEndBarUp <= 3)
+bool isWithin3BarsSwDown = hasPendingSidewayDown and not isSidewayDown and not na(lastSidewayEndBarDown) and (bar_index - lastSidewayEndBarDown <= 3)
+
+bool isBreakSidewayLong  = (supertrendDir == 1) and isWithin3BarsSwUp and not na(currentSwHighUp) and (close > currentSwHighUp or ta.crossover(close, currentSwHighUp))
+bool isBreakSidewayShort = (supertrendDir == -1) and isWithin3BarsSwDown and not na(currentSwLowDown) and (close < currentSwLowDown or ta.crossunder(close, currentSwLowDown))
+bool isFirstPbLong       = (supertrendDir == 1) and pbLongTrigger
+bool isFirstPbShort      = (supertrendDir == -1) and pbShortTrigger
+
 if entryType == "Supertrend Flip"
     longSignal  := isSupertrendBuy
     shortSignal := isSupertrendSell
 else if entryType == "Break Sideway"
-    // Long khi đang trong Supertrend tăng, có vùng Sideway vừa xuất hiện, nến hiện tại phá vỡ đỉnh Sideway
-    longSignal  := (supertrendDir == 1) and hasPendingSidewayUp and not isSidewayUp and not na(currentSwHighUp) and (close > currentSwHighUp or ta.crossover(close, currentSwHighUp))
-    // Short khi đang trong Supertrend giảm, có vùng Sideway vừa xuất hiện, nến hiện tại phá vỡ đáy Sideway
-    shortSignal := (supertrendDir == -1) and hasPendingSidewayDown and not isSidewayDown and not na(currentSwLowDown) and (close < currentSwLowDown or ta.crossunder(close, currentSwLowDown))
+    // Long khi đang trong Supertrend tăng, nến hiện tại phá vỡ đỉnh Sideway trong vòng tối đa 3 nến
+    longSignal  := isBreakSidewayLong
+    // Short khi đang trong Supertrend giảm, nến hiện tại phá vỡ đáy Sideway trong vòng tối đa 3 nến
+    shortSignal := isBreakSidewayShort
 else if entryType == "First Pullback"
     // Long khi vừa kết thúc First Pullback và giá vẫn nằm trên Supertrend
-    longSignal  := (supertrendDir == 1) and pbLongTrigger
+    longSignal  := isFirstPbLong
     // Short khi vừa kết thúc First Pullback và giá vẫn nằm dưới Supertrend
-    shortSignal := (supertrendDir == -1) and pbShortTrigger
+    shortSignal := isFirstPbShort
+else if entryType == "Pullback + Sideway"
+    // Kết hợp: Vào lệnh khi có First Pullback HOẶC khi phá vỡ Break Sideway trong vòng 3 nến
+    longSignal  := isFirstPbLong or isBreakSidewayLong
+    shortSignal := isFirstPbShort or isBreakSidewayShort
 
-bool longCondition  = allowLong and longSignal and (not filterSideway or not isSidewayRaw) and (strategy.position_size == 0)
-bool shortCondition = allowShort and shortSignal and (not filterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+// --- Đánh giá bộ lọc Xu hướng VWAP Anchor ---
+bool vwapLongOk  = true
+bool vwapShortOk = true
+
+if useVwapFilter
+    if vwapTrendType == "Follow Trend"
+        vwapLongOk  := close > vwapValue
+        vwapShortOk := close < vwapValue
+    else if vwapTrendType == "Counter Trend"
+        vwapLongOk  := close < vwapValue
+        vwapShortOk := close > vwapValue
+
+// 1. Điều kiện vào lệnh thông thường (Market On Close)
+bool longCondition  = (entryType != "Break HL") and allowLong and longSignal and vwapLongOk and (not filterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+bool shortCondition = (entryType != "Break HL") and allowShort and shortSignal and vwapShortOk and (not filterSideway or not isSidewayRaw) and (strategy.position_size == 0)
 
 if longCondition
     hasPendingSidewayUp := false
+    lastSidewayEndBarUp := na
 
 if shortCondition
     hasPendingSidewayDown := false
+    lastSidewayEndBarDown := na
 
-// --- XỬ LÝ LỆNH LONG MỚI ---
+// 2. Đặt lệnh chờ Stop cho chế độ Break HL (Buy Stop trên High nến trước / Sell Stop dưới Low nến trước)
+if entryType == "Break HL" and strategy.position_size == 0
+    bool setupBreakHLLong  = allowLong and (supertrendDir == 1) and (close > supertrendVal) and vwapLongOk and (not filterSideway or not isSidewayRaw)
+    bool setupBreakHLShort = allowShort and (supertrendDir == -1) and (close < supertrendVal) and vwapShortOk and (not filterSideway or not isSidewayRaw)
+    
+    if setupBreakHLLong
+        strategy.entry("Long", strategy.long, stop = high, comment = "Long (Break HL)")
+    else
+        strategy.cancel("Long")
+        
+    if setupBreakHLShort
+        strategy.entry("Short", strategy.short, stop = low, comment = "Short (Break HL)")
+    else
+        strategy.cancel("Short")
+
+// --- XỬ LÝ LỆNH LONG MỚI (MARKET ORDER CHO ST FLIP / BREAK SIDEWAY / FIRST PULLBACK / PULLBACK + SIDEWAY) ---
 if longCondition
     entryPrice := close
     
     // Tính Stop Loss theo slType
     float baseSl = supertrendVal
     if slType == "Sideway Zone"
-        float swLow = (entryType == "First Pullback" and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (sidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : supertrendVal)))
+        bool isPbLongEntry = (entryType == "First Pullback") or (entryType == "Pullback + Sideway" and isFirstPbLong)
+        float swLow = (isPbLongEntry and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (sidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : supertrendVal)))
         baseSl := swLow
+    else if slType == "Entry Candle"
+        baseSl := low
+    else if slType == "Previous Candle"
+        baseSl := low[1]
     else
         baseSl := supertrendVal
         
@@ -612,27 +717,35 @@ if longCondition
         
     slPrice      := baseSl
     initialRisk  := risk
-    tp1Price     := entryPrice + rrrTp1 * risk
-    tp2Price     := entryPrice + rrrTp2 * risk
+    float curAtr = calcDynamicAtr(effectivePeriod)
+    float tpUnit = tpType == "ATR" ? curAtr : (tpType == "ATR (HTF)" ? nz(atrHtf, curAtr) : (tpType == "Spread" ? syminfo.mintick : risk))
+    tp1Price     := entryPrice + rrrTp1 * tpUnit
+    tp2Price     := entryPrice + rrrTp2 * tpUnit
     activeDir    := 1
     entryBarIdx  := bar_index
+    rrr1Reached  := false
     tp1Reached   := false
     tp2Reached   := false
     slReached    := false
     
     countTotalTrades += 1
-    string entryComment = entryType == "Supertrend Flip" ? "Long (ST Flip)" : (entryType == "Break Sideway" ? "Long (Break Sideway)" : "Long (First Pullback)")
+    string entryComment = entryType == "Supertrend Flip" ? "Long (ST Flip)" : (entryType == "Break Sideway" ? "Long (Break Sideway)" : (entryType == "First Pullback" ? "Long (First Pullback)" : (entryType == "Pullback + Sideway" ? (isFirstPbLong ? "Long (First PB)" : "Long (Break SW)") : "Long (Break HL)")))
     strategy.entry("Long", strategy.long, comment = entryComment)
 
-// --- XỬ LÝ LỆNH SHORT MỚI ---
+// --- XỬ LÝ LỆNH SHORT MỚI (MARKET ORDER CHO ST FLIP / BREAK SIDEWAY / FIRST PULLBACK / PULLBACK + SIDEWAY) ---
 if shortCondition
     entryPrice := close
     
     // Tính Stop Loss theo slType
     float baseSl = supertrendVal
     if slType == "Sideway Zone"
-        float swHigh = (entryType == "First Pullback" and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (sidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : supertrendVal)))
+        bool isPbShortEntry = (entryType == "First Pullback") or (entryType == "Pullback + Sideway" and isFirstPbShort)
+        float swHigh = (isPbShortEntry and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (sidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : supertrendVal)))
         baseSl := swHigh
+    else if slType == "Entry Candle"
+        baseSl := high
+    else if slType == "Previous Candle"
+        baseSl := high[1]
     else
         baseSl := supertrendVal
         
@@ -644,33 +757,116 @@ if shortCondition
         
     slPrice      := baseSl
     initialRisk  := risk
-    tp1Price     := entryPrice - rrrTp1 * risk
-    tp2Price     := entryPrice - rrrTp2 * risk
+    float curAtrS = calcDynamicAtr(effectivePeriod)
+    float tpUnitS = tpType == "ATR" ? curAtrS : (tpType == "ATR (HTF)" ? nz(atrHtf, curAtrS) : (tpType == "Spread" ? syminfo.mintick : risk))
+    tp1Price     := entryPrice - rrrTp1 * tpUnitS
+    tp2Price     := entryPrice - rrrTp2 * tpUnitS
     activeDir    := -1
     entryBarIdx  := bar_index
+    rrr1Reached  := false
     tp1Reached   := false
     tp2Reached   := false
     slReached    := false
     
     countTotalTrades += 1
-    string entryComment = entryType == "Supertrend Flip" ? "Short (ST Flip)" : (entryType == "Break Sideway" ? "Short (Break Sideway)" : "Short (First Pullback)")
+    string entryComment = entryType == "Supertrend Flip" ? "Short (ST Flip)" : (entryType == "Break Sideway" ? "Short (Break Sideway)" : (entryType == "First Pullback" ? "Short (First Pullback)" : (entryType == "Pullback + Sideway" ? (isFirstPbShort ? "Short (First PB)" : "Short (Break SW)") : "Short (Break HL)")))
     strategy.entry("Short", strategy.short, comment = entryComment)
+
+// --- XỬ LÝ KHỞI TẠO THÔNG SỐ KHI LỆNH BREAK HL KHỚP LỆNH CHỜ (BUY STOP / SELL STOP) ---
+bool isJustEnteredLong  = (strategy.position_size > 0 and nz(strategy.position_size[1], 0) <= 0)
+bool isJustEnteredShort = (strategy.position_size < 0 and nz(strategy.position_size[1], 0) >= 0)
+
+if entryType == "Break HL" and isJustEnteredLong
+    entryPrice := strategy.position_avg_price
+    
+    // Tính Stop Loss theo slType
+    float baseSl = supertrendVal
+    if slType == "Sideway Zone"
+        float swLow = not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (sidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : supertrendVal))
+        baseSl := swLow
+    else if slType == "Entry Candle"
+        baseSl := low
+    else if slType == "Previous Candle"
+        baseSl := low[1]
+    else
+        baseSl := supertrendVal
+        
+    float risk = entryPrice - baseSl
+    if risk <= 0.0 or risk < (baseAtr * 0.1)
+        risk   := baseAtr * 1.5
+        baseSl := entryPrice - risk
+        
+    slPrice      := baseSl
+    initialRisk  := risk
+    float curAtr = calcDynamicAtr(effectivePeriod)
+    float tpUnit = tpType == "ATR" ? curAtr : (tpType == "ATR (HTF)" ? nz(atrHtf, curAtr) : (tpType == "Spread" ? syminfo.mintick : risk))
+    tp1Price     := entryPrice + rrrTp1 * tpUnit
+    tp2Price     := entryPrice + rrrTp2 * tpUnit
+    activeDir    := 1
+    entryBarIdx  := bar_index
+    rrr1Reached  := false
+    tp1Reached   := false
+    tp2Reached   := false
+    slReached    := false
+    countTotalTrades += 1
+
+if entryType == "Break HL" and isJustEnteredShort
+    entryPrice := strategy.position_avg_price
+    
+    // Tính Stop Loss theo slType
+    float baseSl = supertrendVal
+    if slType == "Sideway Zone"
+        float swHigh = not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (sidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : supertrendVal))
+        baseSl := swHigh
+    else if slType == "Entry Candle"
+        baseSl := high
+    else if slType == "Previous Candle"
+        baseSl := high[1]
+    else
+        baseSl := supertrendVal
+        
+    float risk = baseSl - entryPrice
+    if risk <= 0.0 or risk < (baseAtr * 0.1)
+        risk   := baseAtr * 1.5
+        baseSl := entryPrice + risk
+        
+    slPrice      := baseSl
+    initialRisk  := risk
+    float curAtrS = calcDynamicAtr(effectivePeriod)
+    float tpUnitS = tpType == "ATR" ? curAtrS : (tpType == "ATR (HTF)" ? nz(atrHtf, curAtrS) : (tpType == "Spread" ? syminfo.mintick : risk))
+    tp1Price     := entryPrice - rrrTp1 * tpUnitS
+    tp2Price     := entryPrice - rrrTp2 * tpUnitS
+    activeDir    := -1
+    entryBarIdx  := bar_index
+    rrr1Reached  := false
+    tp1Reached   := false
+    tp2Reached   := false
+    slReached    := false
+    countTotalTrades += 1
 
 // --- QUẢN LÝ THEO DÕI VỊ THẾ & THỐNG KÊ CHI TIẾT ---
 
 // 1. Quản lý vị thế Long
 if strategy.position_size > 0
+    // Kiểm tra chạm mốc RRR = 1
+    if not rrr1Reached and not na(entryPrice) and not na(initialRisk) and high >= (entryPrice + initialRisk)
+        rrr1Reached := true
+        if moveSlToBe == "RRR = 1"
+            slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt RRR 1:1
+            
     // Kiểm tra chạm TP1
     if not tp1Reached and high >= tp1Price
         tp1Reached := true
         countTP1   += 1
-        if moveSlToBe
-            slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn
+        if moveSlToBe == "TP 1"
+            slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP1
             
     // Kiểm tra chạm TP2
     if not tp2Reached and high >= tp2Price
         tp2Reached := true
         countTP2   += 1
+        if moveSlToBe == "TP 2"
+            slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP2
         
     // Kiểm tra dính SL
     if not slReached and low <= slPrice
@@ -687,17 +883,25 @@ if strategy.position_size > 0
 
 // 2. Quản lý vị thế Short
 if strategy.position_size < 0
+    // Kiểm tra chạm mốc RRR = 1
+    if not rrr1Reached and not na(entryPrice) and not na(initialRisk) and low <= (entryPrice - initialRisk)
+        rrr1Reached := true
+        if moveSlToBe == "RRR = 1"
+            slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt RRR 1:1
+            
     // Kiểm tra chạm TP1
     if not tp1Reached and low <= tp1Price
         tp1Reached := true
         countTP1   += 1
-        if moveSlToBe
-            slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn
+        if moveSlToBe == "TP 1"
+            slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP1
             
     // Kiểm tra chạm TP2
     if not tp2Reached and low <= tp2Price
         tp2Reached := true
         countTP2   += 1
+        if moveSlToBe == "TP 2"
+            slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP2
         
     // Kiểm tra dính SL
     if not slReached and high >= slPrice
@@ -806,9 +1010,10 @@ if showTable and barstate.islast
     table.cell(dashTable, 1, 1, modeStr + " [P:" + str.tostring(effectivePeriod, "#") + " | F:" + str.tostring(effectiveFactor, "#.#") + "]", text_color = modeCol, text_size = szTable)
     
     // 2. Kiểu Vào lệnh & Kiểu Stoploss
-    string dispEntryType = entryType == "Supertrend Flip" ? "ST Flip" : (entryType == "Break Sideway" ? "Break Sideway" : "First Pullback")
+    string dispEntryType = entryType == "Supertrend Flip" ? "ST Flip" : (entryType == "Break Sideway" ? "Break Sideway" : (entryType == "First Pullback" ? "First Pullback" : (entryType == "Pullback + Sideway" ? "PB + Sideway" : "Break HL")))
+    string dispSlType    = slType == "Supertrend" ? "ST" : (slType == "Sideway Zone" ? "Sideway" : (slType == "Entry Candle" ? "Entry Candle" : "Prev Candle"))
     table.cell(dashTable, 0, 2, "Kiểu Vào Lệnh / SL", text_color = color.white, text_size = szTable)
-    table.cell(dashTable, 1, 2, dispEntryType + " | SL: " + (slType == "Supertrend" ? "ST" : "Sideway"), text_color = color.new(#38bdf8, 0), text_size = szTable)
+    table.cell(dashTable, 1, 2, dispEntryType + " | SL: " + dispSlType, text_color = color.new(#38bdf8, 0), text_size = szTable)
 
     // 3. Trạng thái Thị trường hiện tại
     string stateStr = isSidewayUp ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Up ⏸️ (Giá trên ST)" : "Sideway Up ⏸️ (Giá trên ST)") :

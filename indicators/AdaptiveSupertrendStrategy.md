@@ -37,21 +37,58 @@ Chiến lược giao dịch chuyên sâu trên TradingView sử dụng thuật t
 ### 3. Vào Lệnh (Entry) & Quản Trị Rủi Ro RRR 2:1 / 4:1
 - **Tùy chọn Kiểu Vào Lệnh (`entryType`):**
   - **`Supertrend Flip`:** Vào lệnh ngay khi Supertrend đổi màu / đảo chiều xu hướng.
-  - **`Break Sideway`:** Vào lệnh khi giá phá vỡ đỉnh (đối với Long) hoặc đáy (đối với Short) của bất kỳ vùng Sideway nào xuất hiện trong sóng Supertrend hiện tại, miễn là lúc đó chưa có vị thế mở (`strategy.position_size == 0`).
+  - **`Break Sideway`:** Vào lệnh khi giá phá vỡ đỉnh (đối với Long) hoặc đáy (đối với Short) của vùng Sideway gần nhất trong sóng Supertrend hiện tại, **với điều kiện khoảng cách từ lúc kết thúc Sideway tới nến phá vỡ tối đa không quá 3 nến** (`distance <= 3 nến`), loại bỏ hoàn toàn các trường hợp giá trôi dạt quá xa vùng Sideway cũ.
   - **`First Pullback`:**
     - **Lệnh Long:** Bắt đầu tính từ cây nến đầu tiên phá qua đáy 3 nến trước đó (`Low < min(Low[1..3])`), kết thúc khi xuất hiện nến phá đỉnh 2 nến trước đó (`Close > max(High[1..2])`) hoặc khi đạt tối đa số nến bằng ATR Period kể từ nến Reversal đảo chiều Supertrend. Vào lệnh Long sau khi vùng Pullback này kết thúc và giá vẫn đóng cửa trên đường Supertrend.
     - **Lệnh Short:** Bắt đầu tính từ cây nến đầu tiên phá qua đỉnh 3 nến trước đó (`High > max(High[1..3])`), kết thúc khi xuất hiện nến phá đáy 2 nến trước đó (`Close < min(Low[1..2])`) hoặc khi đạt tối đa số nến bằng ATR Period kể từ nến Reversal. Vào lệnh Short sau khi vùng Pullback này kết thúc và giá vẫn đóng cửa dưới đường Supertrend.
-    - **Đồ họa:** Vùng First Pullback được vẽ viền nổi bật độ dày `linewidth = 2` (Xanh dương cho Pullback Up, Tím cho Pullback Down).
+    - **Đồ họa:** Vùng First Pullback được vẽ viền nổi bật độ dày `linewidth = 1` (Xanh dương cho Pullback Up, Tím cho Pullback Down).
+  - **`Pullback + Sideway` (Kết hợp Pullback và Break Sideway):**
+    - **Cơ chế hoạt động:** Cho phép chiến lược vào lệnh khi xuất hiện tín hiệu **First Pullback** HOẶC **Break Sideway** (trong vòng 3 nến).
+    - **Liên hoàn vị thế (Chaining trades):** Sau khi lệnh First Pullback đã chốt lời hoàn tất (trạng thái tài khoản trở về `Flat`), nếu trong cùng con sóng Supertrend đó tiếp tục hình thành vùng tích lũy Sideway mới và giá phá vỡ vùng này trong vòng 3 nến, hệ thống sẽ **tự động mở tiếp lệnh theo Break Sideway**.
+  - **`Break HL` (Lệnh chờ Stop phá đỉnh/đáy nến):**
+    - **Cơ chế:** Đặt lệnh chờ **Buy Stop** hoặc **Sell Stop** tại đỉnh/đáy của cây nến vừa đóng; lệnh sẽ khớp ngay lập tức khi giá trong nến tiếp theo chạm vào mức giá này mà **không cần chờ nến đóng cửa**.
+    - **Lệnh Long (Buy Stop):** Khi thị trường đang trong xu hướng Supertrend tăng (`supertrendDir == 1` & `Close > Supertrend`), đặt lệnh chờ Buy Stop tại đỉnh nến trước (`stop = High`). Khớp lệnh ngay khi giá phá vỡ đỉnh này.
+    - **Lệnh Short (Sell Stop):** Khi thị trường đang trong xu hướng Supertrend giảm (`supertrendDir == -1` & `Close < Supertrend`), đặt lệnh chờ Sell Stop tại đáy nến trước (`stop = Low`). Khớp lệnh ngay khi giá phá vỡ đáy này.
 - **Tùy chọn Kiểu Stop Loss (`slType`):**
   - **`Supertrend`:** Đặt Stop Loss tại đường Supertrend tại thời điểm nến vào lệnh.
   - **`Sideway Zone`:** Đặt Stop Loss dưới đáy vùng Sideway / Pullback đối với lệnh Long, và trên đỉnh vùng Sideway / Pullback đối với lệnh Short.
+  - **`Entry Candle`:** Đặt Stop Loss tại giá **Low** của chính cây nến vào lệnh (đối với Long) hoặc giá **High** của cây nến vào lệnh (đối với Short).
+  - **`Previous Candle`:** Đặt Stop Loss tại giá **Low** của cây nến liền trước đó `Low[1]` (đối với Long) hoặc giá **High** của cây nến liền trước đó `High[1]` (đối với Short).
+- **Tùy chọn Kiểu Take Profit (`tpType`):**
+  - **`Percent` (Theo tỷ lệ RRR / Risk):**
+    - Khoảng cách TP1 = $Entry \pm rrrTp1 \times Risk$ (với $Risk = |Entry - SL|$).
+    - Khoảng cách TP2 = $Entry \pm rrrTp2 \times Risk$.
+  - **`ATR` (Theo biến động ATR hiện tại):**
+    - Khoảng cách TP1 = $Entry \pm rrrTp1 \times ATR$ (với chu kỳ ATR Period hiệu dụng tại thời điểm vào lệnh).
+    - Khoảng cách TP2 = $Entry \pm rrrTp2 \times ATR$.
+  - **`ATR (HTF)` (Theo ATR 6 phiên của khung thời gian lớn HTF):**
+    - Tùy chọn khung thời gian HTF (`htfTf`): `M5`, `M30`, `H4`, `D1`, `W1`.
+    - Khoảng cách TP1 = $Entry \pm rrrTp1 \times ATR(6)_{HTF}$ (Ví dụ: HTF là D1 có $ATR(6) = 18$ và $rrrTp1 = 2 \implies 18 \times 2 = 36$ giá).
+    - Khoảng cách TP2 = $Entry \pm rrrTp2 \times ATR(6)_{HTF}$.
+  - **`Spread` (Theo số tick giá / syminfo.mintick):**
+    - Khoảng cách TP1 = $Entry \pm rrrTp1 \times syminfo.mintick$ (tính theo số tick giá tối thiểu của sản phẩm).
+    - Khoảng cách TP2 = $Entry \pm rrrTp2 \times syminfo.mintick$.
 - **Mục tiêu Chốt lời (Take Profit - TP):**
-  - **TP1 (RRR 2:1):** $Entry \pm 2.0 \times Risk$ (Chốt 50% khối lượng vị thế).
-  - **TP2 (RRR 4:1):** $Entry \pm 4.0 \times Risk$ (Chốt toàn bộ khối lượng còn lại).
+  - **TP1:** Chốt 50% khối lượng vị thế.
+  - **TP2:** Chốt toàn bộ 50% khối lượng còn lại.
 - **Tính năng Dời SL về Hòa vốn (Break-Even):**
-  - Ngay khi giá cắn mức **TP1**, hệ thống tự động dời SL của phần khối lượng còn lại về mức giá vào lệnh $Entry$ để bảo toàn vốn.
+  - Cung cấp Dropdown linh hoạt với các lựa chọn:
+    - **`RRR = 1`:** Tự động nâng/hạ Stoploss về giá $Entry$ ngay khi giá đi được quãng đường $1R$ (bằng đúng khoảng cách Risk ban đầu).
+    - **`TP 1`:** Tự động dời SL về $Entry$ ngay khi giá chạm mục tiêu **TP1** (chốt lời 50%).
+    - **`TP 2`:** Tự động dời SL về $Entry$ khi giá chạm mục tiêu **TP2**.
+    - **`Không (None)`:** Giữ nguyên Stoploss ban đầu, không tự động dời.
 - **Hộp Đồ họa trực quan (Visual Trade Box):**
   - Tự động vẽ khung màu Xanh lá (vùng lợi nhuận TP1/TP2) và Đỏ (vùng rủi ro SL) cho từng lệnh.
+
+---
+
+### 3.1. Bộ Lọc Xu Hướng Anchored VWAP
+Bộ lọc khối lượng & giá bình quân đa khung thời gian giúp chọn lọc hướng giao dịch thuận lợi nhất:
+- **Chu kỳ neo (Anchor Period):** `Year` (Năm), `Quarter` (Quý - 3 tháng), `Month` (Tháng), `Week` (Tuần), `Day` (Ngày).
+- **Kiểu theo xu hướng (Trend Type):**
+  - **`Follow Trend` (Thuận xu hướng VWAP):** Chỉ cho phép mở lệnh **Long** khi $Close > VWAP$, và chỉ mở lệnh **Short** khi $Close < VWAP$.
+  - **`Counter Trend` (Đánh ngược xu hướng VWAP):** Chỉ cho phép mở lệnh **Long** khi $Close < VWAP$, và chỉ mở lệnh **Short** khi $Close > VWAP$.
+- **Trực quan:** Đường Anchored VWAP vẽ màu vàng cam nét liền (`linewidth = 2`) trên biểu đồ.
 
 ---
 
