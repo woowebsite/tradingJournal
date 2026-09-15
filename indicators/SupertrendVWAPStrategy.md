@@ -68,6 +68,14 @@ Chiến lược giao dịch chuyên sâu trên TradingView sử dụng thuật t
   - **`Spread` (Theo số tick giá / syminfo.mintick):**
     - Khoảng cách TP1 = $Entry \pm rrrTp1 \times syminfo.mintick$ (tính theo số tick giá tối thiểu của sản phẩm).
     - Khoảng cách TP2 = $Entry \pm rrrTp2 \times syminfo.mintick$.
+  - **`VWAP` (Theo 3 dải Upper/Lower của Anchored VWAP):**
+    - **3 Dải Upper & Lower:**
+      - $\text{Upper 1} / \text{Lower 1} = \text{VWAP} \pm (1.0 \times \text{StDev}_{\text{VWAP}})$ (Cố định tỷ lệ 1.0x, nét chấm xanh dương).
+      - $\text{Upper 2} / \text{Lower 2} = \text{VWAP} \pm (\text{TP1} \times \text{StDev}_{\text{VWAP}})$ (Tính theo hệ số TP1, nét đứt tím).
+      - $\text{Upper 3} / \text{Lower 3} = \text{VWAP} \pm (\text{TP2} \times \text{StDev}_{\text{VWAP}})$ (Tính theo hệ số TP2, nét liền đỏ/xanh lá).
+    - **Lệnh Long:** Chốt lời theo **Upper 2** (TP1) và **Upper 3** (TP2).
+    - **Lệnh Short:** Chốt lời theo **Lower 2** (TP1) và **Lower 3** (TP2).
+    - Mức giá chốt lời cập nhật động theo từng nến chạy theo các dải biên của VWAP.
 - **Mục tiêu Chốt lời (Take Profit - TP):**
   - **TP1:** Chốt 50% khối lượng vị thế.
   - **TP2:** Chốt toàn bộ 50% khối lượng còn lại.
@@ -88,7 +96,11 @@ Bộ lọc khối lượng & giá bình quân đa khung thời gian giúp chọn
 - **Kiểu theo xu hướng (Trend Type):**
   - **`Follow Trend` (Thuận xu hướng VWAP):** Chỉ cho phép mở lệnh **Long** khi $Close > VWAP$, và chỉ mở lệnh **Short** khi $Close < VWAP$.
   - **`Counter Trend` (Đánh ngược xu hướng VWAP):** Chỉ cho phép mở lệnh **Long** khi $Close < VWAP$, và chỉ mở lệnh **Short** khi $Close > VWAP$.
-- **Trực quan:** Đường Anchored VWAP vẽ màu vàng cam nét liền (`linewidth = 2`) trên biểu đồ.
+- **Điều kiện vùng giữa VWAP (`mustInMiddle`):**
+  - **`In Middle`:** Điểm vào lệnh (Entry) bắt buộc phải nằm **bên trong** dải giữa Upper 1 và Lower 1 ($\text{Lower 1} \le Entry \le \text{Upper 1}$).
+  - **`Out Middle`:** Điểm vào lệnh bắt buộc phải nằm **bên ngoài** dải Upper 1 và Lower 1 ($Entry > \text{Upper 1}$ hoặc $Entry < \text{Lower 1}$).
+  - **`None`:** Giữ nguyên logic cũ, không lọc theo vị trí dải giữa.
+- **Trực quan:** Đường Anchored VWAP vẽ màu trắng nét liền (`linewidth = 2`) và 3 dải Upper/Lower trên biểu đồ.
 
 ---
 
