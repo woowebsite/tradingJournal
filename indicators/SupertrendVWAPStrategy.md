@@ -6,6 +6,29 @@ Chiến lược giao dịch chuyên sâu trên TradingView sử dụng thuật t
 
 ## 🌟 Các Tính Năng Cốt Lõi
 
+### 0. Cấu hình Nhanh theo Template (Presets)
+Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham số chuẩn mà không cần thiết lập từng mục:
+1. **`Scalp using Supertrend`:**
+   - **Entry Type:** `Supertrend Flip`
+   - **Filter by Supertrend:** `Follow Trend`
+   - **Filter by VWAP:** `Tắt (false)`
+   - **Stoploss Type:** `Supertrend`
+   - **Take Profit Type:** `ATR` (RRR TP1 = 1.5, RRR TP2 = 3.0)
+   - **Dời SL về hòa vốn:** `TP 1`
+   - **Đóng vị thế còn lại:** `Supertrend đảo ngược chiều`
+2. **`Scalp using VWAP`:**
+   - **Filter by VWAP:** `Bật (true)`
+   - **Chu kỳ neo VWAP:** `Day` (Neo theo Ngày)
+   - **VWAP Trend Type:** `Follow Trend`
+   - **Vùng giữa VWAP:** `In Middle`
+   - **Entry Type:** `Breakdown`
+   - **Stoploss Type:** `Entry Candle`
+   - **Take Profit Type:** `VWAP` (Chốt theo dải Upper/Lower 2 và 3)
+   - **Dời SL về hòa vốn:** `TP 1`
+   - **Đóng vị thế còn lại:** `Chạm VWAP`
+3. **`None (Default)`:**
+   - Sử dụng các tùy chọn thủ công do người dùng điều chỉnh bên dưới.
+
 ### 1. Cơ Chế Thích Ứng (isAdaptive Mode)
 - **Khi BẬT `isAdaptive`:**
   - Tự động điều chỉnh **ATR Period** trong dải `[5 - 20]` và **Multiplier Factor** trong dải `[2.0 - 5.0]`.
@@ -14,6 +37,20 @@ Chiến lược giao dịch chuyên sâu trên TradingView sử dụng thuật t
     - **Thị trường hỗn loạn / Sideway ($KER \to 0.0$):** Tăng ATR Period lên tới 20 và Factor lên tới 5.0 nhằm lọc nhiễu, hạn chế tối đa các tín hiệu bẫy (whipsaw).
 - **Khi TẮT `isAdaptive`:**
   - Sử dụng thông số cố định theo tiêu chuẩn người dùng nhập (mặc định: `Period = 10`, `Factor = 3.0`).
+
+### 1.1. Bộ Lọc Xu Hướng Supertrend (Filter by Supertrend)
+- **`Follow Trend` (Thuận xu hướng Supertrend):**
+  - Mở lệnh **Long** khi giá nằm trên đường Supertrend ($Close > Supertrend$).
+  - Mở lệnh **Short** khi giá nằm dưới đường Supertrend ($Close < Supertrend$).
+- **`Counter Trend` (Ngược xu hướng Supertrend):**
+  - Mở lệnh **Long** khi giá nằm dưới đường Supertrend ($Close < Supertrend$).
+  - Mở lệnh **Short** khi giá nằm trên đường Supertrend ($Close > Supertrend$).
+- **`Sideway` (Trạng thái Sideway của Supertrend):**
+  - Cho phép **Long** khi đang trong sóng tăng và $Supertrend_{\text{Tăng}} < Supertrend_{\text{Giảm trước đó}}$.
+  - Cho phép **Short** khi đang trong sóng giảm và $Supertrend_{\text{Giảm}} > Supertrend_{\text{Tăng trước đó}}$.
+- **`Strong Trend` (Trạng thái Xu hướng mạnh của Supertrend):**
+  - Cho phép **Long** khi đang trong sóng tăng và $Supertrend_{\text{Tăng}} > Supertrend_{\text{Giảm trước đó}}$.
+  - Cho phép **Short** khi đang trong sóng giảm và $Supertrend_{\text{Giảm}} < Supertrend_{\text{Tăng trước đó}}$.
 
 ---
 
@@ -45,10 +82,10 @@ Chiến lược giao dịch chuyên sâu trên TradingView sử dụng thuật t
   - **`Pullback + Sideway` (Kết hợp Pullback và Break Sideway):**
     - **Cơ chế hoạt động:** Cho phép chiến lược vào lệnh khi xuất hiện tín hiệu **First Pullback** HOẶC **Break Sideway** (trong vòng 3 nến).
     - **Liên hoàn vị thế (Chaining trades):** Sau khi lệnh First Pullback đã chốt lời hoàn tất (trạng thái tài khoản trở về `Flat`), nếu trong cùng con sóng Supertrend đó tiếp tục hình thành vùng tích lũy Sideway mới và giá phá vỡ vùng này trong vòng 3 nến, hệ thống sẽ **tự động mở tiếp lệnh theo Break Sideway**.
-  - **`Break HL` (Lệnh chờ Stop phá đỉnh/đáy nến):**
-    - **Cơ chế:** Đặt lệnh chờ **Buy Stop** hoặc **Sell Stop** tại đỉnh/đáy của cây nến vừa đóng; lệnh sẽ khớp ngay lập tức khi giá trong nến tiếp theo chạm vào mức giá này mà **không cần chờ nến đóng cửa**.
-    - **Lệnh Long (Buy Stop):** Khi thị trường đang trong xu hướng Supertrend tăng (`supertrendDir == 1` & `Close > Supertrend`), đặt lệnh chờ Buy Stop tại đỉnh nến trước (`stop = High`). Khớp lệnh ngay khi giá phá vỡ đỉnh này.
-    - **Lệnh Short (Sell Stop):** Khi thị trường đang trong xu hướng Supertrend giảm (`supertrendDir == -1` & `Close < Supertrend`), đặt lệnh chờ Sell Stop tại đáy nến trước (`stop = Low`). Khớp lệnh ngay khi giá phá vỡ đáy này.
+  - **`Breakout` (Lệnh chờ Stop phá đỉnh/đáy nến trước 1 tick):**
+    - **Cơ chế:** Đặt lệnh chờ **Buy Stop** trên đỉnh nến trước 1 tick hoặc **Sell Stop** dưới đáy nến trước 1 tick; lệnh sẽ khớp ngay lập tức khi giá trong nến tiếp theo phá vỡ mức giá này mà **không cần chờ nến đóng cửa** và tránh hiện tượng khớp tức thì khi $Close = Low$ hoặc $Close = High$.
+    - **Lệnh Long (Buy Stop):** Khi thị trường đang trong xu hướng tăng, đặt lệnh chờ Buy Stop tại `stop = High + syminfo.mintick`. Khớp lệnh ngay khi giá vượt qua đỉnh nến trước.
+    - **Lệnh Short (Sell Stop):** Khi thị trường đang trong xu hướng giảm, đặt lệnh chờ Sell Stop tại `stop = Low - syminfo.mintick`. Khớp lệnh ngay khi giá phá thủng đáy nến trước.
 - **Tùy chọn Kiểu Stop Loss (`slType`):**
   - **`Supertrend`:** Đặt Stop Loss tại đường Supertrend tại thời điểm nến vào lệnh.
   - **`Sideway Zone`:** Đặt Stop Loss dưới đáy vùng Sideway / Pullback đối với lệnh Long, và trên đỉnh vùng Sideway / Pullback đối với lệnh Short.
@@ -76,9 +113,14 @@ Chiến lược giao dịch chuyên sâu trên TradingView sử dụng thuật t
     - **Lệnh Long:** Chốt lời theo **Upper 2** (TP1) và **Upper 3** (TP2).
     - **Lệnh Short:** Chốt lời theo **Lower 2** (TP1) và **Lower 3** (TP2).
     - Mức giá chốt lời cập nhật động theo từng nến chạy theo các dải biên của VWAP.
+- **Phương thức Chốt lời TP1 / TP2 (`tp1Mode`, `tp2Mode`):**
+  - **`Theo RRR / Tỷ lệ`:** Chốt lời theo mức giá TP cố định/động theo hệ số $rrrTp1$ / $rrrTp2$ và kiểu $tpType$.
+  - **`Breakout2` (Chỉ chốt khi đang có lời & cách Entry $\ge 3$ nến):** Long chốt khi $Close > \max(High[1], High[2])$, $Close > Entry$ và nến TP cách nến Entry tối thiểu 3 nến ($bar\_index - entryBarIdx \ge 3$); Short chốt khi $Close < \min(Low[1], Low[2])$, $Close < Entry$ và $bar\_index - entryBarIdx \ge 3$.
+  - **`Breakout3` (Chỉ chốt khi đang có lời & cách Entry $\ge 3$ nến):** Long chốt khi $Close > \max(High[1], High[2], High[3])$, $Close > Entry$ và nến TP cách nến Entry tối thiểu 3 nến ($bar\_index - entryBarIdx \ge 3$); Short chốt khi $Close < \min(Low[1], Low[2], Low[3])$, $Close < Entry$ và $bar\_index - entryBarIdx \ge 3$.
+  - **`FVG` (Chỉ chốt khi đang có lời & nến [2] sau Entry):** Long chốt khi xuất hiện khoảng trống tăng ($Low > High[2]$), $Close > Entry$ và nến số 2 ($High[2]$) phải xuất hiện sau nến vào lệnh ($bar\_index - 2 > entryBarIdx$); Short chốt khi xuất hiện khoảng trống giảm ($High < Low[2]$), $Close < Entry$ và nến số 2 ($Low[2]$) phải xuất hiện sau nến vào lệnh.
 - **Mục tiêu Chốt lời (Take Profit - TP):**
-  - **TP1:** Chốt 50% khối lượng vị thế.
-  - **TP2:** Chốt toàn bộ 50% khối lượng còn lại.
+  - **TP1:** Chốt 50% khối lượng vị thế (hoặc theo `%` cấu hình).
+  - **TP2:** Chốt toàn bộ khối lượng còn lại.
 - **Tính năng Dời SL về Hòa vốn (Break-Even):**
   - Cung cấp Dropdown linh hoạt với các lựa chọn:
     - **`RRR = 1`:** Tự động nâng/hạ Stoploss về giá $Entry$ ngay khi giá đi được quãng đường $1R$ (bằng đúng khoảng cách Risk ban đầu).
