@@ -26,7 +26,15 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
    - **Take Profit Type:** `VWAP` (Chốt theo dải Upper/Lower 2 và 3)
    - **Dời SL về hòa vốn:** `TP 1`
    - **Đóng vị thế còn lại:** `Chạm VWAP`
-3. **`None (Default)`:**
+3. **`VCP`:**
+   - **Sideway Method:** `VCP`
+   - **Filter by Supertrend:** `Follow Trend`
+   - **Filter by VWAP:** `Tắt (false)`
+   - **Entry Type:** `Break Sideway`
+   - **Stoploss Type:** `Sideway Zone`
+   - **Dời SL về hòa vốn:** `TP 1`
+   - **Đóng vị thế còn lại:** `None`
+4. **`None (Default)`:**
    - Sử dụng các tùy chọn thủ công do người dùng điều chỉnh bên dưới.
 
 ### 1. Cơ Chế Thích Ứng (isAdaptive Mode)
@@ -45,9 +53,9 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
 - **`Counter Trend` (Ngược xu hướng Supertrend):**
   - Mở lệnh **Long** khi giá nằm dưới đường Supertrend ($Close < Supertrend$).
   - Mở lệnh **Short** khi giá nằm trên đường Supertrend ($Close > Supertrend$).
-- **`Sideway` (Trạng thái Sideway của Supertrend):**
-  - Cho phép **Long** khi đang trong sóng tăng và $Supertrend_{\text{Tăng}} < Supertrend_{\text{Giảm trước đó}}$.
-  - Cho phép **Short** khi đang trong sóng giảm và $Supertrend_{\text{Giảm}} > Supertrend_{\text{Tăng trước đó}}$.
+- **`Swing` (Trạng thái Swing của Supertrend):**
+  - Cho phép **Long** khi đang trong sóng tăng và $Supertrend_{\text{Tăng}} < Supertrend_{\text{Giảm trước đó}}$ (Trạng thái thị trường "Tăng").
+  - Cho phép **Short** khi đang trong sóng giảm và $Supertrend_{\text{Giảm}} > Supertrend_{\text{Tăng trước đó}}$ (Trạng thái thị trường "Giảm").
 - **`Strong Trend` (Trạng thái Xu hướng mạnh của Supertrend):**
   - Cho phép **Long** khi đang trong sóng tăng và $Supertrend_{\text{Tăng}} > Supertrend_{\text{Giảm trước đó}}$.
   - Cho phép **Short** khi đang trong sóng giảm và $Supertrend_{\text{Giảm}} < Supertrend_{\text{Tăng trước đó}}$.
@@ -61,13 +69,29 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
   - **`Narrow Sideway` (Cấu trúc Price Action & FVG):**
     - **Narrow Sideway Up:** Bắt đầu khi đỉnh nến thấp hơn đáy cây nến cao nhất trước đó hoặc nằm dưới đáy FVG giảm trong xu hướng tăng; **yêu cầu chứa tối thiểu 3 nến** (trong đó có ít nhất 1 nến tăng và 1 nến giảm); kết thúc khi có nến đóng cửa cao hơn đỉnh 2 nến trước hoặc chạm vào FVG giảm. Nếu xuất hiện FVG giảm mới thì bắt đầu tính lại vùng Sideway theo FVG đó.
     - **Narrow Sideway Down:** Bắt đầu khi đáy nến cao hơn đỉnh cây nến thấp nhất trước đó hoặc nằm trên đỉnh FVG tăng trong xu hướng giảm; **yêu cầu chứa tối thiểu 3 nến** (trong đó có ít nhất 1 nến tăng và 1 nến giảm); kết thúc khi có nến đóng cửa thấp hơn đáy 2 nến trước hoặc chạm vào FVG tăng. Nếu xuất hiện FVG tăng mới thì bắt đầu tính lại vùng Sideway theo FVG đó.
+  - **`VCP` (Volatility Contraction Pattern theo Bollinger Band 1.0 StDev chu kỳ Adaptive):**
+    - **VCP Up (Sóng Tăng - Mở lệnh Long):**
+      - **1.** Toàn bộ nến trong mô hình VCP đều có giá mở cửa nằm trong Bollinger Band ($\text{Lower Band} \le Open \le \text{Upper Band}$).
+      - **2.** **Không có bất kỳ Low nào của nến nhỏ hơn Lower Band** ($Low \ge \text{Lower Band}$).
+      - **3.** Tất cả các nến đều có giá đóng cửa nằm trên Lower Band ($Close \ge \text{Lower Band}$).
+      - **4.** Vùng giá có ít nhất 2 nến có đỉnh nằm dưới Upper Band ($High < \text{Upper Band}$).
+      - **5.** Vùng giá kết thúc khi xuất hiện nến đóng cửa vượt lên trên dải Upper Band ($Close > \text{Upper Band}$).
+      - **6.** Tối thiểu phải chứa từ 3 nến trở lên (không bao gồm nến Breakout khỏi Upper Band).
+    - **VCP Down (Sóng Giảm - Mở lệnh Short):**
+      - **1.** Toàn bộ nến trong mô hình VCP Down đều có giá mở cửa nằm trong Bollinger Band ($\text{Lower Band} \le Open \le \text{Upper Band}$).
+      - **2.** **Không có bất kỳ High nào của nến lớn hơn Upper Band** ($High \le \text{Upper Band}$).
+      - **3.** Tất cả các nến đều có giá đóng cửa nằm dưới Upper Band ($Close \le \text{Upper Band}$).
+      - **4.** Vùng giá có ít nhất 2 nến có đáy nằm trên Lower Band ($Low > \text{Lower Band}$).
+      - **5.** Vùng giá kết thúc khi xuất hiện nến đóng cửa phá xuống dưới dải Lower Band ($Close < \text{Lower Band}$).
+      - **6.** Tối thiểu phải chứa từ 3 nến trở lên (không bao gồm nến Breakdown khỏi Lower Band).
+    - **Trực quan:** Tự động vẽ dải Bollinger Band 1.0 StDev (Upper nét đứt, MA nét liền, Lower nét đứt) trên biểu đồ khi chọn chế độ này.
   - *Kết hợp (ADX + Kaufman ER + Choppiness Index)*
   - *ADX Thấp* ($ADX < 20$)
   - *Choppiness Index Cao* ($CHOP > 60$)
   - *Kaufman ER Thấp* ($KER < 0.30$)
   - *Biên độ dải Bollinger Bands bị co thắt (BB Width Squeeze)*
 - **Trực quan hóa:**
-  - **Hộp chữ nhật động (Dynamic Sideway Box):** Tự động tạo và mở rộng một hình chữ nhật bao trọn toàn bộ cụm nến (từ đỉnh cao nhất đến đáy thấp nhất) trong suốt giai đoạn Sideway Up (khung viền vàng cam) hoặc Sideway Down (khung viền hồng).
+  - **Hộp chữ nhật động (Dynamic Sideway Box):** Tự động tạo và mở rộng một hình chữ nhật bao trọn toàn bộ cụm nến (từ đỉnh cao nhất đến đáy thấp nhất) trong suốt giai đoạn Sideway Up hoặc Sideway Down (đồng nhất khung viền và nền màu vàng cam `#f59e0b`).
 
 ---
 
@@ -78,7 +102,7 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
   - **`First Pullback`:**
     - **Lệnh Long:** Bắt đầu tính từ cây nến đầu tiên phá qua đáy 3 nến trước đó (`Low < min(Low[1..3])`), kết thúc khi xuất hiện nến phá đỉnh 2 nến trước đó (`Close > max(High[1..2])`) hoặc khi đạt tối đa số nến bằng ATR Period kể từ nến Reversal đảo chiều Supertrend. Vào lệnh Long sau khi vùng Pullback này kết thúc và giá vẫn đóng cửa trên đường Supertrend.
     - **Lệnh Short:** Bắt đầu tính từ cây nến đầu tiên phá qua đỉnh 3 nến trước đó (`High > max(High[1..3])`), kết thúc khi xuất hiện nến phá đáy 2 nến trước đó (`Close < min(Low[1..2])`) hoặc khi đạt tối đa số nến bằng ATR Period kể từ nến Reversal. Vào lệnh Short sau khi vùng Pullback này kết thúc và giá vẫn đóng cửa dưới đường Supertrend.
-    - **Đồ họa:** Vùng First Pullback được vẽ viền nổi bật độ dày `linewidth = 1` (Xanh dương cho Pullback Up, Tím cho Pullback Down).
+    - **Đồ họa:** Vùng First Pullback được vẽ viền nổi bật độ dày `linewidth = 1` (đồng nhất màu xanh dương `#3b82f6` cho cả First Pullback Up và First Pullback Down).
   - **`Pullback + Sideway` (Kết hợp Pullback và Break Sideway):**
     - **Cơ chế hoạt động:** Cho phép chiến lược vào lệnh khi xuất hiện tín hiệu **First Pullback** HOẶC **Break Sideway** (trong vòng 3 nến).
     - **Liên hoàn vị thế (Chaining trades):** Sau khi lệnh First Pullback đã chốt lời hoàn tất (trạng thái tài khoản trở về `Flat`), nếu trong cùng con sóng Supertrend đó tiếp tục hình thành vùng tích lũy Sideway mới và giá phá vỡ vùng này trong vòng 3 nến, hệ thống sẽ **tự động mở tiếp lệnh theo Break Sideway**.
@@ -149,7 +173,11 @@ Bộ lọc khối lượng & giá bình quân đa khung thời gian giúp chọn
 ### 4. Bảng Thống Kê Dashboard Chuyên Nghiệp
 Bảng thông số góc màn hình cập nhật liên tục các số liệu:
 1. **Chế độ Supertrend:** Hiển thị chế độ đang chạy (Adaptive hay Cố định) kèm thông số `[Period | Factor]` thực tế của nến hiện tại.
-2. **Trạng thái thị trường:** `Trending Up 🚀`, `Trending Down 🔻`, `Sideway Up ⏸️`, `Sideway Down ⏸️`.
+2. **Trạng thái thị trường (`marketState`):**
+   - **Tăng mạnh 🚀:** Supertrend Up và Supertrend sóng tăng > Supertrend sóng giảm trước đó.
+   - **Tăng 📈:** Supertrend Up (sóng tăng bình thường / chưa vượt cản sóng giảm trước).
+   - **Giảm mạnh 🔻:** Supertrend Down và Supertrend sóng giảm < Supertrend sóng tăng trước đó.
+   - **Giảm 📉:** Supertrend Down (sóng giảm bình thường / chưa ép thủng hỗ trợ sóng tăng trước).
 3. **Vị thế hiện tại:** `LONG`, `SHORT`, hoặc `FLAT` kèm khối lượng.
 4. **Tổng số lệnh đã mở:** Tổng lượt kích hoạt chiến lược.
 5. **🛑 Số lần dính Stoploss (SL):** Đếm chính xác số lần chạm SL cùng tỷ lệ `%`.

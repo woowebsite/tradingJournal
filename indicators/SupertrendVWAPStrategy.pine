@@ -21,13 +21,13 @@ strategy(
 
 // --- Group 0: Cấu hình Chung ---
 grp_common      = "Common"
-templateChoice  = input.string("None", "Template", options = ["None", "Scalp using Supertrend", "Scalp using VWAP"], group = grp_common, tooltip = "Chọn Template cấu hình có sẵn:\n- None: Sử dụng cài đặt thủ công từng mục bên dưới.\n- Scalp using Supertrend: Bộ thông số tối ưu cho Scalping theo Supertrend.\n- Scalp using VWAP: Bộ thông số tối ưu cho Scalping theo Anchored VWAP.")
+templateChoice  = input.string("None", "Template", options = ["None", "Scalp using Supertrend", "Scalp using VWAP", "VCP"], group = grp_common, tooltip = "Chọn Template cấu hình có sẵn:\n- None: Sử dụng cài đặt thủ công từng mục bên dưới.\n- Scalp using Supertrend: Bộ thông số tối ưu cho Scalping theo Supertrend.\n- Scalp using VWAP: Bộ thông số tối ưu cho Scalping theo Anchored VWAP.\n- VCP: Cấu hình chiến lược tích lũy VCP (Sideway VCP, Follow Trend, VWAP Tắt, Break Sideway, SL Sideway Zone, Dời SL về BE tại TP1, Đóng vị thế: None).")
 htfTf           = input.string("D1", "HTF", options = ["M5", "M30", "H4", "D1", "W1"], group = grp_common, tooltip = "Khung thời gian lớn để tính ATR 6 phiên khi chọn Take Profit Type là ATR (HTF).")
 
 // --- Group 1: Cấu hình Supertrend & Adaptive Mode ---
 grp_st          = "1. Cấu hình Supertrend & Chế độ Adaptive"
 isAdaptive      = input.bool(true, "Is Adaptive Supertrend", group = grp_st, tooltip = "Khi BẬT: ATR Period và Factor sẽ tự động co giãn theo độ biến động và độ nhiễu thị trường (Period: 5-20, Factor: 2.0-5.0).\nKhi TẮT: Sử dụng thông số cố định bên dưới (Mặc định 10, 3.0).")
-stTrendType     = input.string("Strong Trend", "Filter by Supertrend", options = ["Follow Trend", "Counter Trend", "Sideway", "Strong Trend"], group = grp_st, tooltip = "Chọn hướng/chế độ lọc theo Supertrend:\n- Follow Trend: Long khi giá nằm trên Supertrend, Short khi giá nằm dưới Supertrend.\n- Counter Trend: Long khi giá nằm dưới Supertrend, Short khi giá nằm trên Supertrend.\n- Sideway: Long khi Supertrend sóng tăng < Supertrend sóng giảm trước đó; Short khi Supertrend sóng giảm > Supertrend sóng tăng trước đó.\n- Strong Trend: Long khi Supertrend sóng tăng > Supertrend sóng giảm trước đó; Short khi Supertrend sóng giảm < Supertrend sóng tăng trước đó.")
+stTrendType     = input.string("Strong Trend", "Filter by Supertrend", options = ["Follow Trend", "Counter Trend", "Swing", "Strong Trend"], group = grp_st, tooltip = "Chọn hướng/chế độ lọc theo Supertrend:\n- Follow Trend: Long khi giá nằm trên Supertrend, Short khi giá nằm dưới Supertrend.\n- Counter Trend: Long khi giá nằm dưới Supertrend, Short khi giá nằm trên Supertrend.\n- Swing: Long khi Supertrend sóng tăng < Supertrend sóng giảm trước đó; Short khi Supertrend sóng giảm > Supertrend sóng tăng trước đó.\n- Strong Trend: Long khi Supertrend sóng tăng > Supertrend sóng giảm trước đó; Short khi Supertrend sóng giảm < Supertrend sóng tăng trước đó.")
 fixedPeriod     = input.int(10, "ATR Period (Cố định khi tắt Adaptive)", minval = 1, group = grp_st, tooltip = "Chu kỳ ATR cố định khi không sử dụng chế độ Adaptive (Mặc định: 10)")
 fixedFactor     = input.float(3.0, "Multiplier Factor (Cố định khi tắt Adaptive)", minval = 0.1, step = 0.1, group = grp_st, tooltip = "Hệ số nhân cố định khi không sử dụng chế độ Adaptive (Mặc định: 3.0)")
 
@@ -50,7 +50,7 @@ showVwapBands   = input.bool(true, "Vẽ 3 dải Upper/Lower của VWAP", group 
 // --- Group 2: Nhận diện Sideway (Sideway Up & Sideway Down) ---
 grp_side        = "2. Nhận diện Trạng thái Sideway"
 detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
-sidewayMethod   = input.string("Narrow Sideway", "Phương pháp nhận diện Sideway", options = ["Narrow Sideway", "Kết hợp (ADX + Kaufman ER + CHOP)", "ADX Thấp", "Choppiness Index Cao", "Kaufman ER Thấp", "Biên độ nén BB Width"], group = grp_side)
+sidewayMethod   = input.string("Narrow Sideway", "Sideway method", options = ["Narrow Sideway", "VCP", "Kết hợp (ADX + Kaufman ER + CHOP)", "ADX Thấp", "Choppiness Index Cao", "Kaufman ER Thấp", "Biên độ nén BB Width"], group = grp_side, tooltip = "Chọn phương pháp nhận diện vùng tích lũy / Sideway:\n- Narrow Sideway: Price Action nén biên độ & FVG.\n- VCP: Mẫu hình thu hẹp biến động (Volatility Contraction Pattern) theo Bollinger Band (1.0 StDev, chu kỳ Adaptive). VCP Up: toàn bộ Open nằm trong BB, không có Low < Lower Band, tối thiểu 2 nến High < Upper Band, kết thúc khi Close > Upper Band. VCP Down: toàn bộ Open nằm trong BB, không có High > Upper Band, tối thiểu 2 nến Low > Lower Band, kết thúc khi Close < Lower Band. Tối thiểu 3 nến trước khi Break.\n- Kết hợp (ADX + Kaufman ER + CHOP): Bộ lọc đa chỉ báo.")
 adxThresh       = input.float(20.0, "Ngưỡng ADX (Dưới ngưỡng là Sideway)", minval = 5.0, maxval = 50.0, step = 1.0, group = grp_side, tooltip = "Chỉ số ADX dưới mức này báo hiệu lực xu hướng yếu / tích lũy (Mặc định: 20)")
 chopThresh      = input.float(60.0, "Ngưỡng Choppiness Index (Trên ngưỡng là Sideway)", minval = 30.0, maxval = 90.0, step = 1.0, group = grp_side, tooltip = "Chỉ số CHOP trên mức này báo hiệu thị trường giật cục / không có xu hướng (Mặc định: 60)")
 erThresh        = input.float(0.30, "Ngưỡng Kaufman ER (Dưới ngưỡng là Sideway)", minval = 0.05, maxval = 0.9, step = 0.05, group = grp_side, tooltip = "Hiệu suất di chuyển giá Kaufman ER dưới mức này thể hiện nhiều nến chồng chéo / nhiễu (Mặc định: 0.30)")
@@ -88,25 +88,27 @@ tableSize       = input.string("Small", "Cỡ chữ Dashboard", options = ["Tiny
 // ==============================================================================
 bool isPresetST   = templateChoice == "Scalp using Supertrend"
 bool isPresetVWAP = templateChoice == "Scalp using VWAP"
+bool isPresetVCP  = templateChoice == "VCP"
 
 // Các biến hiệu dụng (Effective Parameters)
 bool   effIsAdaptive    = isPresetST ? true : (isPresetVWAP ? false : isAdaptive)
-string effStTrendType   = isPresetST ? "Follow Trend" : (isPresetVWAP ? "Follow Trend" : stTrendType)
-bool   effUseVwapFilter = isPresetST ? false : (isPresetVWAP ? true : useVwapFilter)
+string effStTrendType   = isPresetST ? "Follow Trend" : (isPresetVWAP ? "Follow Trend" : (isPresetVCP ? "Follow Trend" : stTrendType))
+bool   effUseVwapFilter = isPresetST ? false : (isPresetVWAP ? true : (isPresetVCP ? false : useVwapFilter))
 string effVwapAnchor    = isPresetVWAP ? "Day" : vwapAnchor
 string effVwapTrendType = isPresetVWAP ? "Follow Trend" : vwapTrendType
 string effMustInMiddle  = isPresetVWAP ? "In Middle" : mustInMiddle
 
-string effEntryType     = isPresetST ? "Supertrend Flip" : (isPresetVWAP ? "Breakdown" : entryType)
-string effSlType        = isPresetST ? "Supertrend" : (isPresetVWAP ? "Entry Candle" : slType)
+string effSidewayMethod = isPresetVCP ? "VCP" : sidewayMethod
+string effEntryType     = isPresetST ? "Supertrend Flip" : (isPresetVWAP ? "Breakdown" : (isPresetVCP ? "Break Sideway" : entryType))
+string effSlType        = isPresetST ? "Supertrend" : (isPresetVWAP ? "Entry Candle" : (isPresetVCP ? "Sideway Zone" : slType))
 string effTpType        = isPresetST ? "ATR" : (isPresetVWAP ? "VWAP" : tpType)
 string effTp1Mode       = isPresetST ? "Theo RRR / Tỷ lệ" : (isPresetVWAP ? "Theo RRR / Tỷ lệ" : tp1Mode)
 string effTp2Mode       = isPresetST ? "Theo RRR / Tỷ lệ" : (isPresetVWAP ? "Theo RRR / Tỷ lệ" : tp2Mode)
 float  effRrrTp1        = isPresetST ? 1.5 : (isPresetVWAP ? 1.0 : rrrTp1)
 float  effRrrTp2        = isPresetST ? 3.0 : (isPresetVWAP ? 2.0 : rrrTp2)
-string effMoveSlToBe    = isPresetST ? "TP 1" : (isPresetVWAP ? "TP 1" : moveSlToBe)
-string effClosePosMode  = isPresetST ? "Supertrend đảo ngược chiều" : (isPresetVWAP ? "Chạm VWAP" : closePosMode)
-bool   effFilterSideway = isPresetST ? false : (isPresetVWAP ? false : filterSideway)
+string effMoveSlToBe    = isPresetST ? "TP 1" : (isPresetVWAP ? "TP 1" : (isPresetVCP ? "TP 1" : moveSlToBe))
+string effClosePosMode  = isPresetST ? "Supertrend đảo ngược chiều" : (isPresetVWAP ? "Chạm VWAP" : (isPresetVCP ? "None" : closePosMode))
+bool   effFilterSideway = isPresetST ? false : (isPresetVWAP ? false : (isPresetVCP ? false : filterSideway))
 
 
 // ==============================================================================
@@ -195,6 +197,18 @@ if isSupertrendBuy
 if isSupertrendSell
     lastStUpVal   := nz(supertrendVal[1])
 
+// --- BIẾN TOÀN CỤC: TRẠNG THÁI THỊ TRƯỜNG (GLOBAL MARKET STATE) ---
+// - Tăng: Supertrend Up
+// - Giảm: Supertrend Down
+// - Tăng mạnh: Supertrend Up và Supertrend sóng tăng > Supertrend sóng giảm trước đó
+// - Giảm mạnh: Supertrend Down và Supertrend sóng giảm < Supertrend sóng tăng trước đó
+bool isStrongTrendUp   = (supertrendDir == 1) and (not na(lastStDownVal) and supertrendVal > lastStDownVal)
+bool isStrongTrendDown = (supertrendDir == -1) and (not na(lastStUpVal) and supertrendVal < lastStUpVal)
+
+string marketState = isStrongTrendUp   ? "Tăng mạnh" :
+                     supertrendDir == 1 ? "Tăng" :
+                     isStrongTrendDown ? "Giảm mạnh" : "Giảm"
+
 // --- Supertrend Cloud / Body Fill ---
 bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle", display = display.none)
 upTrend    = plot(supertrendDir == 1 ? supertrendVal : na, "Supertrend Uptrend", color = color.new(#00e676, 0), linewidth = 2, style = plot.style_linebr)
@@ -276,6 +290,19 @@ float bbBasis = ta.sma(close, 20)
 float bbDev   = 2.0 * ta.stdev(close, 20)
 float bbWidth = bbBasis != 0 ? ((bbBasis + bbDev) - (bbBasis - bbDev)) / bbBasis * 100.0 : 0.0
 bool  bbSqueeze = bbWidth < ta.sma(bbWidth, 50)
+
+// 4.3.1. Bollinger Bands 1.0 StDev (Chu kỳ Adaptive) phục vụ mô hình VCP
+int   bbVcpLen   = 26 // int(math.round(effectivePeriod))
+float bbVcpMa    = ta.sma(close, bbVcpLen)
+float bbVcpDev   = 1.0 * ta.stdev(close, bbVcpLen)
+float bbVcpUpper = bbVcpMa + bbVcpDev
+float bbVcpLower = bbVcpMa - bbVcpDev
+
+// Vẽ Bollinger Band 1.0 StDev trên biểu đồ khi chọn phương pháp VCP
+pBbUpper = plot(effSidewayMethod == "VCP" ? bbVcpUpper : na, "VCP BB Upper (1.0x)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
+pBbMa    = plot(effSidewayMethod == "VCP" ? bbVcpMa    : na, "VCP BB Basis (MA)",   color = color.new(#fbbf24, 20), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_solid)
+pBbLower = plot(effSidewayMethod == "VCP" ? bbVcpLower : na, "VCP BB Lower (1.0x)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
+// fill(pBbUpper, pBbLower, title = "VCP BB Background", color = effSidewayMethod == "VCP" ? color.new(#38bdf8, 92) : na)
 
 // 4.4. Cơ chế Nhận diện Sideway theo cấu trúc NARROW SIDEWAY (Price Action & FVG)
 
@@ -429,25 +456,182 @@ else if supertrendDir == -1
 
 bool isNarrowDownActive = inNarrowDown and (narrowDownBullCt + narrowDownBearCt >= 3) and (narrowDownBullCt >= 1 and narrowDownBearCt >= 1)
 
+// --- E. Theo dõi trạng thái VCP (Volatility Contraction Pattern) ---
+// 1. VCP Up trong sóng Tăng (Supertrend Up)
+var bool  inVcpZone           = false
+var int   vcpStartBar         = na
+var int   vcpCandleCount      = 0
+var int   vcpHighBelowUpperCt = 0
+var float vcpHigh             = na
+var float vcpLow              = na
+var bool  vcpTriggerLong      = false
+
+var bool  vcpBreakoutEnded    = false
+var int   vcpEndBar           = na
+var float vcpEndHigh          = na
+var float vcpEndLow           = na
+
+vcpTriggerLong   := false
+vcpBreakoutEnded := false
+
+if isSupertrendBuy or isSupertrendSell or supertrendDir != 1
+    inVcpZone           := false
+    vcpStartBar         := na
+    vcpCandleCount      := 0
+    vcpHighBelowUpperCt := 0
+    vcpHigh             := na
+    vcpLow              := na
+else if supertrendDir == 1
+    // Điều kiện VCP Up:
+    // - Open phải nằm trong Bollinger Band (bbVcpLower <= open <= bbVcpUpper)
+    // - Không có Low nào của nến < Lower Band của BB (low >= bbVcpLower)
+    // - Close >= bbVcpLower
+    if (open < bbVcpLower or open > bbVcpUpper) or (low < bbVcpLower) or (close < bbVcpLower)
+        // Vi phạm điều kiện: Open nằm ngoài BB hoặc Low phá vỡ Lower Band -> Reset vùng VCP Up
+        inVcpZone           := false
+        vcpStartBar         := na
+        vcpCandleCount      := 0
+        vcpHighBelowUpperCt := 0
+        vcpHigh             := na
+        vcpLow              := na
+    else
+        // Open nằm trong BB, Low >= bbVcpLower, Close >= bbVcpLower (thỏa mãn điều kiện)
+        // Điều kiện 3: Kết thúc vùng giá khi đóng cửa trên Upperband của Bollinger Band
+        if close > bbVcpUpper
+            if inVcpZone
+                // Tối thiểu 3 nến trước nến breakout và Điều kiện 2 (ít nhất 2 nến high < Upper band)
+                if (vcpCandleCount >= 3) and (vcpHighBelowUpperCt >= 2)
+                    vcpTriggerLong   := true
+                    vcpBreakoutEnded := true
+                    vcpEndBar        := bar_index
+                    vcpEndHigh       := vcpHigh
+                    vcpEndLow        := vcpLow
+                
+                // Kết thúc vùng VCP sau khi breakout
+                inVcpZone           := false
+                vcpStartBar         := na
+                vcpCandleCount      := 0
+                vcpHighBelowUpperCt := 0
+                vcpHigh             := na
+                vcpLow              := na
+        else
+            // Nến nằm trong khoảng [Lowerband, Upperband] (bbVcpLower <= close <= bbVcpUpper)
+            if not inVcpZone
+                // Bắt đầu vùng VCP mới
+                inVcpZone           := true
+                vcpStartBar         := bar_index
+                vcpCandleCount      := 1
+                vcpHighBelowUpperCt := (high < bbVcpUpper ? 1 : 0)
+                vcpHigh             := high
+                vcpLow              := low
+            else
+                // Tiếp tục tích lũy trong vùng VCP
+                vcpCandleCount += 1
+                if high < bbVcpUpper
+                    vcpHighBelowUpperCt += 1
+                vcpHigh := math.max(nz(vcpHigh, high), high)
+                vcpLow  := math.min(nz(vcpLow, low), low)
+
+bool isVcpUpActive = inVcpZone and (vcpCandleCount >= 3) and (vcpHighBelowUpperCt >= 2)
+
+// 2. VCP Down trong sóng Giảm (Supertrend Down)
+var bool  inVcpDownZone        = false
+var int   vcpStartBarDown      = na
+var int   vcpCandleCountDown   = 0
+var int   vcpLowAboveLowerCt   = 0
+var float vcpHighDown          = na
+var float vcpLowDown           = na
+var bool  vcpTriggerShort      = false
+
+var bool  vcpBreakoutEndedDown = false
+var int   vcpEndBarDown        = na
+var float vcpEndHighDown       = na
+var float vcpEndLowDown        = na
+
+vcpTriggerShort      := false
+vcpBreakoutEndedDown := false
+
+if isSupertrendBuy or isSupertrendSell or supertrendDir != -1
+    inVcpDownZone      := false
+    vcpStartBarDown    := na
+    vcpCandleCountDown := 0
+    vcpLowAboveLowerCt := 0
+    vcpHighDown        := na
+    vcpLowDown         := na
+else if supertrendDir == -1
+    // Điều kiện VCP Down:
+    // - Open phải nằm trong Bollinger Band (bbVcpLower <= open <= bbVcpUpper)
+    // - Không có High nào của nến > Upper Band của BB (high <= bbVcpUpper)
+    // - Close <= bbVcpUpper
+    if (open < bbVcpLower or open > bbVcpUpper) or (high > bbVcpUpper) or (close > bbVcpUpper)
+        // Vi phạm điều kiện: Open nằm ngoài BB hoặc High vượt Upper Band -> Reset vùng VCP Down
+        inVcpDownZone      := false
+        vcpStartBarDown    := na
+        vcpCandleCountDown := 0
+        vcpLowAboveLowerCt := 0
+        vcpHighDown        := na
+        vcpLowDown         := na
+    else
+        // Open nằm trong BB, High <= bbVcpUpper, Close <= bbVcpUpper (thỏa mãn điều kiện)
+        // Điều kiện 3: Kết thúc vùng giá khi đóng cửa dưới Lowerband của Bollinger Band
+        if close < bbVcpLower
+            if inVcpDownZone
+                // Tối thiểu 3 nến trước nến breakdown và Điều kiện 2 (ít nhất 2 nến low > Lower band)
+                if (vcpCandleCountDown >= 3) and (vcpLowAboveLowerCt >= 2)
+                    vcpTriggerShort      := true
+                    vcpBreakoutEndedDown := true
+                    vcpEndBarDown        := bar_index
+                    vcpEndHighDown       := vcpHighDown
+                    vcpEndLowDown        := vcpLowDown
+                
+                // Kết thúc vùng VCP Down sau khi breakdown
+                inVcpDownZone      := false
+                vcpStartBarDown    := na
+                vcpCandleCountDown := 0
+                vcpLowAboveLowerCt := 0
+                vcpHighDown        := na
+                vcpLowDown         := na
+        else
+            // Nến nằm trong khoảng [Lowerband, Upperband] (bbVcpLower <= close <= bbVcpUpper)
+            if not inVcpDownZone
+                // Bắt đầu vùng VCP Down mới
+                inVcpDownZone      := true
+                vcpStartBarDown    := bar_index
+                vcpCandleCountDown := 1
+                vcpLowAboveLowerCt := (low > bbVcpLower ? 1 : 0)
+                vcpHighDown        := high
+                vcpLowDown         := low
+            else
+                // Tiếp tục tích lũy trong vùng VCP Down
+                vcpCandleCountDown += 1
+                if low > bbVcpLower
+                    vcpLowAboveLowerCt += 1
+                vcpHighDown := math.max(nz(vcpHighDown, high), high)
+                vcpLowDown  := math.min(nz(vcpLowDown, low), low)
+
+bool isVcpDownActive = inVcpDownZone and (vcpCandleCountDown >= 3) and (vcpLowAboveLowerCt >= 2)
+
 // 4.5. Đánh giá điều kiện Sideway theo Phương pháp được chọn
 bool isSidewayRaw = false
 
-if sidewayMethod == "Narrow Sideway"
+if effSidewayMethod == "Narrow Sideway"
     isSidewayRaw := isNarrowUpActive or isNarrowDownActive
-else if sidewayMethod == "ADX Thấp"
+else if effSidewayMethod == "VCP"
+    isSidewayRaw := isVcpUpActive or isVcpDownActive
+else if effSidewayMethod == "ADX Thấp"
     isSidewayRaw := adxValue < adxThresh
-else if sidewayMethod == "Choppiness Index Cao"
+else if effSidewayMethod == "Choppiness Index Cao"
     isSidewayRaw := chopValue > chopThresh
-else if sidewayMethod == "Kaufman ER Thấp"
+else if effSidewayMethod == "Kaufman ER Thấp"
     isSidewayRaw := ker < erThresh
-else if sidewayMethod == "Biên độ nén BB Width"
+else if effSidewayMethod == "Biên độ nén BB Width"
     isSidewayRaw := bbSqueeze
 else // "Kết hợp (ADX + Kaufman ER + CHOP)"
     isSidewayRaw := (adxValue < adxThresh or chopValue > chopThresh) and (ker < erThresh or bbSqueeze)
 
 // Phân loại trạng thái:
-bool isSidewayUp   = detectSideway and (supertrendDir == 1) and (sidewayMethod == "Narrow Sideway" ? isNarrowUpActive : isSidewayRaw)
-bool isSidewayDown = detectSideway and (supertrendDir == -1) and (sidewayMethod == "Narrow Sideway" ? isNarrowDownActive : isSidewayRaw)
+bool isSidewayUp   = detectSideway and (supertrendDir == 1) and (effSidewayMethod == "Narrow Sideway" ? isNarrowUpActive : (effSidewayMethod == "VCP" ? isVcpUpActive : isSidewayRaw))
+bool isSidewayDown = detectSideway and (supertrendDir == -1) and (effSidewayMethod == "Narrow Sideway" ? isNarrowDownActive : (effSidewayMethod == "VCP" ? isVcpDownActive : isSidewayRaw))
 bool isTrendingUp  = (supertrendDir == 1) and not isSidewayUp
 bool isTrendingDown = (supertrendDir == -1) and not isSidewayDown
 
@@ -494,7 +678,7 @@ else if supertrendDir == 1 and not hadFirstPbUp
             pbStartBarUp := bar_index
             pbHighUp     := high
             pbLowUp      := low
-            if showSidewayBox
+            if showSidewayBox and allowLong
                 pbBoxUp := box.new(
                      left         = bar_index,
                      top          = high,
@@ -553,19 +737,19 @@ else if supertrendDir == -1 and not hadFirstPbDown
             pbStartBarDown := bar_index
             pbHighDown     := high
             pbLowDown      := low
-            if showSidewayBox
+            if showSidewayBox and allowShort
                 pbBoxDown := box.new(
                      left         = bar_index,
                      top          = high,
                      right        = bar_index,
                      bottom       = low,
-                     border_color = color.new(#a855f7, 0),
+                     border_color = color.new(#3b82f6, 0),
                      border_width = 1,
                      border_style = line.style_solid,
-                     bgcolor      = color.new(#a855f7, 88),
+                     bgcolor      = color.new(#3b82f6, 88),
                      text         = "First Pullback Down",
                      text_size    = size.tiny,
-                     text_color   = color.new(#7e22ce, 0),
+                     text_color   = color.new(#1d4ed8, 0),
                      text_valign  = text.align_top,
                      text_halign  = text.align_left
                 )
@@ -639,57 +823,101 @@ if isSupertrendBuy or isSupertrendSell
 
 // Trong chu kỳ Supertrend Tăng (supertrendDir == 1)
 if supertrendDir == 1
-    if isSidewayUp
-        float curHigh = sidewayMethod == "Narrow Sideway" ? nz(narrowHighUp, high) : high
-        float curLow  = sidewayMethod == "Narrow Sideway" ? nz(narrowLowUp, low) : low
-        
-        if not isSidewayUp[1]
+    if effSidewayMethod == "VCP"
+        if isSidewayUp
             hasPendingSidewayUp := true
             lastSidewayEndBarUp := na
-            currentSwHighUp     := curHigh
-            currentSwLowUp      := curLow
-        else
-            currentSwHighUp     := math.max(nz(currentSwHighUp, curHigh), curHigh)
-            currentSwLowUp      := math.min(nz(currentSwLowUp, curLow), curLow)
-            
-        lastSidewayHigh := currentSwHighUp
-        lastSidewayLow  := currentSwLowUp
-    else
-        // Vừa thoát khỏi vùng Sideway Up: ghi nhận nến kết thúc
-        if isSidewayUp[1] and hasPendingSidewayUp
+            currentSwHighUp     := nz(vcpHigh, high)
+            currentSwLowUp      := nz(vcpLow, low)
+            lastSidewayHigh     := currentSwHighUp
+            lastSidewayLow      := currentSwLowUp
+        else if vcpTriggerLong
+            hasPendingSidewayUp := true
             lastSidewayEndBarUp := bar_index
+            currentSwHighUp     := nz(vcpEndHigh, high)
+            currentSwLowUp      := nz(vcpEndLow, low)
+            lastSidewayHigh     := currentSwHighUp
+            lastSidewayLow      := currentSwLowUp
+        else
+            if isSidewayUp[1] and hasPendingSidewayUp and na(lastSidewayEndBarUp)
+                lastSidewayEndBarUp := bar_index
+            if not na(lastSidewayEndBarUp) and (bar_index - lastSidewayEndBarUp > 3)
+                hasPendingSidewayUp := false
+                lastSidewayEndBarUp := na
+    else
+        if isSidewayUp
+            float curHigh = effSidewayMethod == "Narrow Sideway" ? nz(narrowHighUp, high) : high
+            float curLow  = effSidewayMethod == "Narrow Sideway" ? nz(narrowLowUp, low) : low
             
-        // Nếu đã quá 3 nến kể từ khi kết thúc Sideway mà chưa phá vỡ -> Hủy trạng thái chờ Break
-        if not na(lastSidewayEndBarUp) and (bar_index - lastSidewayEndBarUp > 3)
-            hasPendingSidewayUp := false
-            lastSidewayEndBarUp := na
+            if not isSidewayUp[1]
+                hasPendingSidewayUp := true
+                lastSidewayEndBarUp := na
+                currentSwHighUp     := curHigh
+                currentSwLowUp      := curLow
+            else
+                currentSwHighUp     := math.max(nz(currentSwHighUp, curHigh), curHigh)
+                currentSwLowUp      := math.min(nz(currentSwLowUp, curLow), curLow)
+                
+            lastSidewayHigh := currentSwHighUp
+            lastSidewayLow  := currentSwLowUp
+        else
+            // Vừa thoát khỏi vùng Sideway Up: ghi nhận nến kết thúc
+            if isSidewayUp[1] and hasPendingSidewayUp
+                lastSidewayEndBarUp := bar_index
+                
+            // Nếu đã quá 3 nến kể từ khi kết thúc Sideway mà chưa phá vỡ -> Hủy trạng thái chờ Break
+            if not na(lastSidewayEndBarUp) and (bar_index - lastSidewayEndBarUp > 3)
+                hasPendingSidewayUp := false
+                lastSidewayEndBarUp := na
 
 // Trong chu kỳ Supertrend Giảm (supertrendDir == -1)
 if supertrendDir == -1
-    if isSidewayDown
-        float curHigh = sidewayMethod == "Narrow Sideway" ? nz(narrowHighDown, high) : high
-        float curLow  = sidewayMethod == "Narrow Sideway" ? nz(narrowLowDown, low) : low
-        
-        if not isSidewayDown[1]
+    if effSidewayMethod == "VCP"
+        if isSidewayDown
             hasPendingSidewayDown := true
             lastSidewayEndBarDown := na
-            currentSwHighDown     := curHigh
-            currentSwLowDown      := curLow
-        else
-            currentSwHighDown     := math.max(nz(currentSwHighDown, curHigh), curHigh)
-            currentSwLowDown      := math.min(nz(currentSwLowDown, curLow), curLow)
-            
-        lastSidewayHigh := currentSwHighDown
-        lastSidewayLow  := currentSwLowDown
-    else
-        // Vừa thoát khỏi vùng Sideway Down: ghi nhận nến kết thúc
-        if isSidewayDown[1] and hasPendingSidewayDown
+            currentSwHighDown     := nz(vcpHighDown, high)
+            currentSwLowDown      := nz(vcpLowDown, low)
+            lastSidewayHigh       := currentSwHighDown
+            lastSidewayLow        := currentSwLowDown
+        else if vcpTriggerShort
+            hasPendingSidewayDown := true
             lastSidewayEndBarDown := bar_index
+            currentSwHighDown     := nz(vcpEndHighDown, high)
+            currentSwLowDown      := nz(vcpEndLowDown, low)
+            lastSidewayHigh       := currentSwHighDown
+            lastSidewayLow        := currentSwLowDown
+        else
+            if isSidewayDown[1] and hasPendingSidewayDown and na(lastSidewayEndBarDown)
+                lastSidewayEndBarDown := bar_index
+            if not na(lastSidewayEndBarDown) and (bar_index - lastSidewayEndBarDown > 3)
+                hasPendingSidewayDown := false
+                lastSidewayEndBarDown := na
+    else
+        if isSidewayDown
+            float curHigh = effSidewayMethod == "Narrow Sideway" ? nz(narrowHighDown, high) : high
+            float curLow  = effSidewayMethod == "Narrow Sideway" ? nz(narrowLowDown, low) : low
             
-        // Nếu đã quá 3 nến kể từ khi kết thúc Sideway mà chưa phá vỡ -> Hủy trạng thái chờ Break
-        if not na(lastSidewayEndBarDown) and (bar_index - lastSidewayEndBarDown > 3)
-            hasPendingSidewayDown := false
-            lastSidewayEndBarDown := na
+            if not isSidewayDown[1]
+                hasPendingSidewayDown := true
+                lastSidewayEndBarDown := na
+                currentSwHighDown     := curHigh
+                currentSwLowDown      := curLow
+            else
+                currentSwHighDown     := math.max(nz(currentSwHighDown, curHigh), curHigh)
+                currentSwLowDown      := math.min(nz(currentSwLowDown, curLow), curLow)
+                
+            lastSidewayHigh := currentSwHighDown
+            lastSidewayLow  := currentSwLowDown
+        else
+            // Vừa thoát khỏi vùng Sideway Down: ghi nhận nến kết thúc
+            if isSidewayDown[1] and hasPendingSidewayDown
+                lastSidewayEndBarDown := bar_index
+                
+            // Nếu đã quá 3 nến kể từ khi kết thúc Sideway mà chưa phá vỡ -> Hủy trạng thái chờ Break
+            if not na(lastSidewayEndBarDown) and (bar_index - lastSidewayEndBarDown > 3)
+                hasPendingSidewayDown := false
+                lastSidewayEndBarDown := na
 
 // Biến tích lũy Thống kê (Counters)
 var int countTotalTrades = 0
@@ -704,8 +932,8 @@ bool shortSignal = false
 bool isWithin3BarsSwUp   = hasPendingSidewayUp and not isSidewayUp and not na(lastSidewayEndBarUp) and (bar_index - lastSidewayEndBarUp <= 3)
 bool isWithin3BarsSwDown = hasPendingSidewayDown and not isSidewayDown and not na(lastSidewayEndBarDown) and (bar_index - lastSidewayEndBarDown <= 3)
 
-bool isBreakSidewayLong  = (supertrendDir == 1) and isWithin3BarsSwUp and not na(currentSwHighUp) and (close > currentSwHighUp or ta.crossover(close, currentSwHighUp))
-bool isBreakSidewayShort = (supertrendDir == -1) and isWithin3BarsSwDown and not na(currentSwLowDown) and (close < currentSwLowDown or ta.crossunder(close, currentSwLowDown))
+bool isBreakSidewayLong  = (supertrendDir == 1) and ((effSidewayMethod == "VCP" and vcpTriggerLong) or (isWithin3BarsSwUp and not na(currentSwHighUp) and (close > currentSwHighUp or ta.crossover(close, currentSwHighUp))))
+bool isBreakSidewayShort = (supertrendDir == -1) and ((effSidewayMethod == "VCP" and vcpTriggerShort) or (isWithin3BarsSwDown and not na(currentSwLowDown) and (close < currentSwLowDown or ta.crossunder(close, currentSwLowDown))))
 bool isFirstPbLong       = (supertrendDir == 1) and pbLongTrigger
 bool isFirstPbShort      = (supertrendDir == -1) and pbShortTrigger
 
@@ -742,18 +970,18 @@ if effStTrendType == "Follow Trend"
 else if effStTrendType == "Counter Trend"
     stLongOk  := close < supertrendVal
     stShortOk := close > supertrendVal
-else if effStTrendType == "Sideway"
-    // Trạng thái Sideway của Supertrend:
-    // - Long khi đang ở sóng tăng và Supertrend sóng tăng < Supertrend sóng giảm trước đó
-    // - Short khi đang ở sóng giảm và Supertrend sóng giảm > Supertrend sóng tăng trước đó
-    stLongOk  := (close > supertrendVal) and not na(lastStDownVal) and (supertrendVal < lastStDownVal)
-    stShortOk := (close < supertrendVal) and not na(lastStUpVal) and (supertrendVal > lastStUpVal)
+else if effStTrendType == "Swing"
+    // Trạng thái Swing của Supertrend:
+    // - Long khi đang ở sóng tăng và Supertrend sóng tăng < Supertrend sóng giảm trước đó (Trạng thái "Tăng")
+    // - Short khi đang ở sóng giảm và Supertrend sóng giảm > Supertrend sóng tăng trước đó (Trạng thái "Giảm")
+    stLongOk  := (close > supertrendVal) and (marketState == "Tăng")
+    stShortOk := (close < supertrendVal) and (marketState == "Giảm")
 else if effStTrendType == "Strong Trend"
     // Trạng thái Strong Trend của Supertrend:
-    // - Long khi đang ở sóng tăng và Supertrend sóng tăng > Supertrend sóng giảm trước đó
-    // - Short khi đang ở sóng giảm và Supertrend sóng giảm < Supertrend sóng tăng trước đó
-    stLongOk  := (close > supertrendVal) and (na(lastStDownVal) or supertrendVal > lastStDownVal)
-    stShortOk := (close < supertrendVal) and (na(lastStUpVal) or supertrendVal < lastStUpVal)
+    // - Long khi đang ở sóng tăng và Supertrend sóng tăng > Supertrend sóng giảm trước đó (Trạng thái "Tăng mạnh")
+    // - Short khi đang ở sóng giảm và Supertrend sóng giảm < Supertrend sóng tăng trước đó (Trạng thái "Giảm mạnh")
+    stLongOk  := (close > supertrendVal) and (marketState == "Tăng mạnh")
+    stShortOk := (close < supertrendVal) and (marketState == "Giảm mạnh")
 
 // --- Đánh giá bộ lọc Xu hướng VWAP Anchor ---
 bool vwapLongOk        = true
@@ -817,7 +1045,7 @@ if longCondition
     float baseSl = supertrendVal
     if effSlType == "Sideway Zone"
         bool isPbLongEntry = (effEntryType == "First Pullback") or (effEntryType == "Pullback + Sideway" and isFirstPbLong)
-        float swLow = (isPbLongEntry and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (sidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : supertrendVal)))
+        float swLow = (isPbLongEntry and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (effSidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : (effSidewayMethod == "VCP" and not na(vcpLow) ? vcpLow : supertrendVal))))
         baseSl := swLow
     else if effSlType == "Entry Candle"
         baseSl := low
@@ -857,7 +1085,7 @@ if shortCondition
     float baseSl = supertrendVal
     if effSlType == "Sideway Zone"
         bool isPbShortEntry = (effEntryType == "First Pullback") or (effEntryType == "Pullback + Sideway" and isFirstPbShort)
-        float swHigh = (isPbShortEntry and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (sidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : supertrendVal)))
+        float swHigh = (isPbShortEntry and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (effSidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : (effSidewayMethod == "VCP" and not na(vcpHighDown) ? vcpHighDown : supertrendVal))))
         baseSl := swHigh
     else if effSlType == "Entry Candle"
         baseSl := high
@@ -899,7 +1127,7 @@ if effEntryType == "Breakout" and isJustEnteredLong
     // Tính Stop Loss theo effSlType
     float baseSl = supertrendVal
     if effSlType == "Sideway Zone"
-        float swLow = not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (sidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : supertrendVal))
+        float swLow = not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (effSidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : (effSidewayMethod == "VCP" and not na(vcpLow) ? vcpLow : supertrendVal)))
         baseSl := swLow
     else if effSlType == "Entry Candle"
         baseSl := low
@@ -933,7 +1161,7 @@ if effEntryType == "Breakout" and isJustEnteredShort
     // Tính Stop Loss theo effSlType
     float baseSl = supertrendVal
     if effSlType == "Sideway Zone"
-        float swHigh = not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (sidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : supertrendVal))
+        float swHigh = not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (effSidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : (effSidewayMethod == "VCP" and not na(vcpHighDown) ? vcpHighDown : supertrendVal)))
         baseSl := swHigh
     else if effSlType == "Entry Candle"
         baseSl := high
@@ -1127,24 +1355,24 @@ if strategy.position_size < 0
         countSL   += 1
 
     // Luôn luôn duy trì lệnh Exit liên tục cho các mục chọn Theo RRR hoặc bảo vệ Stoploss
-    float limTp1S = tp1Mode == "Theo RRR / Tỷ lệ" ? tp1Price : na
-    float limTp2S = tp2Mode == "Theo RRR / Tỷ lệ" ? tp2Price : na
+    float limTp1S = effTp1Mode == "Theo RRR / Tỷ lệ" ? tp1Price : na
+    float limTp2S = effTp2Mode == "Theo RRR / Tỷ lệ" ? tp2Price : na
     strategy.exit("TP1_S", from_entry = "Short", qty_percent = tp1QtyPct, limit = limTp1S, stop = slPrice, comment_profit = "TP1 Short", comment_loss = "SL Short")
     strategy.exit("TP2_S", from_entry = "Short", limit = limTp2S, stop = slPrice, comment_profit = "TP2 Short", comment_loss = "SL Short")
     
-    // Đóng vị thế còn lại theo tùy chọn closePosMode
+    // Đóng vị thế còn lại theo tùy chọn effClosePosMode
     bool shouldCloseShort = false
     string closeCommentS = ""
-    if closePosMode == "Breakdown2" and (close > math.max(high[1], high[2]))
+    if effClosePosMode == "Breakdown2" and (close > math.max(high[1], high[2]))
         shouldCloseShort := true
         closeCommentS   := "Đóng Short (Breakdown2)"
-    else if closePosMode == "Breakdown3" and (close > math.max(high[1], math.max(high[2], high[3])))
+    else if effClosePosMode == "Breakdown3" and (close > math.max(high[1], math.max(high[2], high[3])))
         shouldCloseShort := true
         closeCommentS   := "Đóng Short (Breakdown3)"
-    else if closePosMode == "Supertrend đảo ngược chiều" and isSupertrendBuy
+    else if effClosePosMode == "Supertrend đảo ngược chiều" and isSupertrendBuy
         shouldCloseShort := true
         closeCommentS   := "ST Đảo chiều Tăng"
-    else if closePosMode == "Chạm VWAP" and (high >= vwapValue)
+    else if effClosePosMode == "Chạm VWAP" and (high >= vwapValue)
         shouldCloseShort := true
         closeCommentS   := "Chạm VWAP"
 
@@ -1164,21 +1392,21 @@ if strategy.position_size == 0 and not (longCondition or shortCondition)
 var box sidewayBox      = na
 var int currentSideMode = 0 // 1: Sideway Up, -1: Sideway Down, 0: None
 
-bool isSidewayActive = isSidewayUp or isSidewayDown
-int activeSideMode   = isSidewayUp ? 1 : (isSidewayDown ? -1 : 0)
+bool isSidewayActive = (isSidewayUp and allowLong) or (isSidewayDown and allowShort)
+int activeSideMode   = (isSidewayUp and allowLong) ? 1 : ((isSidewayDown and allowShort) ? -1 : 0)
 
 if showSidewayBox and detectSideway
     // Bắt đầu một cụm Sideway mới hoặc chuyển đổi giữa Sideway Up <-> Down hoặc vừa reset theo FVG
     if isSidewayActive and (not isSidewayActive[1] or activeSideMode != currentSideMode[1] or na(sidewayBox))
         currentSideMode := activeSideMode
-        color bBorder    = activeSideMode == 1 ? color.new(#f59e0b, 20) : color.new(#ec4899, 20)
-        color bBg        = activeSideMode == 1 ? color.new(#f59e0b, 88) : color.new(#ec4899, 88)
-        string bText     = activeSideMode == 1 ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Up" : "Sideway Up") : (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Down" : "Sideway Down")
-        color tColor     = activeSideMode == 1 ? color.new(#d97706, 0) : color.new(#db2777, 0)
+        color bBorder    = color.new(#f59e0b, 20)
+        color bBg        = color.new(#f59e0b, 88)
+        string bText     = effSidewayMethod == "VCP" ? (activeSideMode == 1 ? "VCP Sideway Up" : "VCP Sideway Down") : (activeSideMode == 1 ? (effSidewayMethod == "Narrow Sideway" ? "Narrow Sideway Up" : "Sideway Up") : (effSidewayMethod == "Narrow Sideway" ? "Narrow Sideway Down" : "Sideway Down"))
+        color tColor     = color.new(#d97706, 0)
         
-        int startLeftBar = activeSideMode == 1 ? (not na(narrowStartBarUp) ? narrowStartBarUp : bar_index) : (not na(narrowStartBarDown) ? narrowStartBarDown : bar_index)
-        float topPrice   = activeSideMode == 1 ? (not na(narrowHighUp) ? narrowHighUp : high) : (not na(narrowHighDown) ? narrowHighDown : high)
-        float botPrice   = activeSideMode == 1 ? (not na(narrowLowUp) ? narrowLowUp : low) : (not na(narrowLowDown) ? narrowLowDown : low)
+        int startLeftBar = activeSideMode == 1 ? (effSidewayMethod == "VCP" and not na(vcpStartBar) ? vcpStartBar : (not na(narrowStartBarUp) ? narrowStartBarUp : bar_index)) : (effSidewayMethod == "VCP" and not na(vcpStartBarDown) ? vcpStartBarDown : (not na(narrowStartBarDown) ? narrowStartBarDown : bar_index))
+        float topPrice   = activeSideMode == 1 ? (effSidewayMethod == "VCP" and not na(vcpHigh) ? vcpHigh : (not na(narrowHighUp) ? narrowHighUp : high)) : (effSidewayMethod == "VCP" and not na(vcpHighDown) ? vcpHighDown : (not na(narrowHighDown) ? narrowHighDown : high))
+        float botPrice   = activeSideMode == 1 ? (effSidewayMethod == "VCP" and not na(vcpLow) ? vcpLow : (not na(narrowLowUp) ? narrowLowUp : low)) : (effSidewayMethod == "VCP" and not na(vcpLowDown) ? vcpLowDown : (not na(narrowLowDown) ? narrowLowDown : low))
         
         sidewayBox := box.new(
              left         = startLeftBar,
@@ -1197,8 +1425,8 @@ if showSidewayBox and detectSideway
         )
     // Đang trong chu kỳ Sideway: kéo dài đáy/đỉnh và mở rộng sang phải theo từng nến mới
     else if isSidewayActive and not na(sidewayBox)
-        float topPrice = activeSideMode == 1 ? (not na(narrowHighUp) ? narrowHighUp : high) : (not na(narrowHighDown) ? narrowHighDown : high)
-        float botPrice = activeSideMode == 1 ? (not na(narrowLowUp) ? narrowLowUp : low) : (not na(narrowLowDown) ? narrowLowDown : low)
+        float topPrice = activeSideMode == 1 ? (effSidewayMethod == "VCP" and not na(vcpHigh) ? vcpHigh : (not na(narrowHighUp) ? narrowHighUp : high)) : (effSidewayMethod == "VCP" and not na(vcpHighDown) ? vcpHighDown : (not na(narrowHighDown) ? narrowHighDown : high))
+        float botPrice = activeSideMode == 1 ? (effSidewayMethod == "VCP" and not na(vcpLow) ? vcpLow : (not na(narrowLowUp) ? narrowLowUp : low)) : (effSidewayMethod == "VCP" and not na(vcpLowDown) ? vcpLowDown : (not na(narrowLowDown) ? narrowLowDown : low))
         box.set_right(sidewayBox, bar_index)
         box.set_top(sidewayBox, topPrice)
         box.set_bottom(sidewayBox, botPrice)
@@ -1231,8 +1459,8 @@ if showTable and barstate.islast
                       tableSize == "Normal" ? size.normal :
                       tableSize == "Large" ? size.large : size.small
                       
-    // Khởi tạo bảng 2 cột x 14 dòng
-    dashTable := table.new(posTable, 2, 14, bgcolor = color.new(#111827, 10), border_width = 1, border_color = color.new(#374151, 0), frame_color = color.new(#4b5563, 0), frame_width = 1)
+    // Khởi tạo bảng 2 cột x 14 dòng với nền màu xám nhẹ
+    dashTable := table.new(posTable, 2, 14, bgcolor = color.new(#4b5563, 30), border_width = 1, border_color = color.new(#6b7280, 20), frame_color = color.new(#9ca3af, 20), frame_width = 1)
     
     // --- Header ---
     string headerRight = templateChoice != "None" ? "TEMPLATE: " + templateChoice : "GIÁ TRỊ THỐNG KÊ"
@@ -1242,7 +1470,7 @@ if showTable and barstate.islast
     // 1. Chế độ Supertrend & Thông số
     string modeStr = effIsAdaptive ? "Adaptive (Tự động)" : "Fixed (Cố định)"
     color  modeCol = effIsAdaptive ? color.new(#06b6d4, 0) : color.new(#9ca3af, 0)
-    string trendModeStr = effStTrendType == "Follow Trend" ? "Follow" : (effStTrendType == "Counter Trend" ? "Counter" : (effStTrendType == "Sideway" ? "ST Sideway" : "Strong Trend"))
+    string trendModeStr = effStTrendType == "Follow Trend" ? "Follow" : (effStTrendType == "Counter Trend" ? "Counter" : (effStTrendType == "Swing" ? "Swing" : "Strong Trend"))
     table.cell(dashTable, 0, 1, "Chế độ Supertrend", text_color = color.white, text_size = szTable)
     table.cell(dashTable, 1, 1, modeStr + " (" + trendModeStr + ") [P:" + str.tostring(effectivePeriod, "#") + " | F:" + str.tostring(effectiveFactor, "#.#") + "]", text_color = modeCol, text_size = szTable)
     
@@ -1252,13 +1480,13 @@ if showTable and barstate.islast
     table.cell(dashTable, 0, 2, "Kiểu Vào Lệnh / SL", text_color = color.white, text_size = szTable)
     table.cell(dashTable, 1, 2, dispEntryType + " | SL: " + dispSlType, text_color = color.new(#38bdf8, 0), text_size = szTable)
 
-    // 3. Trạng thái Thị trường hiện tại
-    string stateStr = isSidewayUp ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Up ⏸️ (Giá trên ST)" : "Sideway Up ⏸️ (Giá trên ST)") :
-                      isSidewayDown ? (sidewayMethod == "Narrow Sideway" ? "Narrow Sideway Down ⏸️ (Giá dưới ST)" : "Sideway Down ⏸️ (Giá dưới ST)") :
-                      isTrendingUp ? "Trending Up 🚀 (Tăng mạnh)" : "Trending Down 🔻 (Giảm mạnh)"
-    color  stateCol = isSidewayUp ? color.new(#f59e0b, 0) :
-                      isSidewayDown ? color.new(#ec4899, 0) :
-                      isTrendingUp ? color.new(#10b981, 0) : color.new(#ef4444, 0)
+    // 3. Trạng thái Thị trường hiện tại (Theo biến toàn cục marketState)
+    string stateStr = marketState == "Tăng mạnh" ? "Tăng mạnh 🚀" :
+                      marketState == "Tăng"      ? "Tăng 📈" :
+                      marketState == "Giảm mạnh" ? "Giảm mạnh 🔻" : "Giảm 📉"
+    color  stateCol = marketState == "Tăng mạnh" ? color.new(#10b981, 0) :
+                      marketState == "Tăng"      ? color.new(#34d399, 0) :
+                      marketState == "Giảm mạnh" ? color.new(#ef4444, 0) : color.new(#f87171, 0)
     table.cell(dashTable, 0, 3, "Trạng thái Thị trường", text_color = color.white, text_size = szTable)
     table.cell(dashTable, 1, 3, stateStr, text_color = stateCol, text_size = szTable)
     
