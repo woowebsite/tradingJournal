@@ -69,22 +69,22 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
   - **`Narrow Sideway` (Cấu trúc Price Action & FVG):**
     - **Narrow Sideway Up:** Bắt đầu khi đỉnh nến thấp hơn đáy cây nến cao nhất trước đó hoặc nằm dưới đáy FVG giảm trong xu hướng tăng; **yêu cầu chứa tối thiểu 3 nến** (trong đó có ít nhất 1 nến tăng và 1 nến giảm); kết thúc khi có nến đóng cửa cao hơn đỉnh 2 nến trước hoặc chạm vào FVG giảm. Nếu xuất hiện FVG giảm mới thì bắt đầu tính lại vùng Sideway theo FVG đó.
     - **Narrow Sideway Down:** Bắt đầu khi đáy nến cao hơn đỉnh cây nến thấp nhất trước đó hoặc nằm trên đỉnh FVG tăng trong xu hướng giảm; **yêu cầu chứa tối thiểu 3 nến** (trong đó có ít nhất 1 nến tăng và 1 nến giảm); kết thúc khi có nến đóng cửa thấp hơn đáy 2 nến trước hoặc chạm vào FVG tăng. Nếu xuất hiện FVG tăng mới thì bắt đầu tính lại vùng Sideway theo FVG đó.
-  - **`VCP` (Volatility Contraction Pattern theo Bollinger Band 1.0 StDev chu kỳ Adaptive):**
+  - **`VCP` (Volatility Contraction Pattern theo dải VMA ATR Bands `ubx` & `lbx`):**
     - **VCP Up (Sóng Tăng - Mở lệnh Long):**
-      - **1.** Toàn bộ nến trong mô hình VCP đều có giá mở cửa nằm trong Bollinger Band ($\text{Lower Band} \le Open \le \text{Upper Band}$).
-      - **2.** **Không có bất kỳ Low nào của nến nhỏ hơn Lower Band** ($Low \ge \text{Lower Band}$).
-      - **3.** Tất cả các nến đều có giá đóng cửa nằm trên Lower Band ($Close \ge \text{Lower Band}$).
-      - **4.** Vùng giá có ít nhất 2 nến có đỉnh nằm dưới Upper Band ($High < \text{Upper Band}$).
-      - **5.** Vùng giá kết thúc khi xuất hiện nến đóng cửa vượt lên trên dải Upper Band ($Close > \text{Upper Band}$).
+      - **1.** Toàn bộ nến trong mô hình VCP đều có giá mở cửa nằm trong dải Bands ($lband \le Open \le uband$).
+      - **2.** **Không có bất kỳ Low nào của nến nhỏ hơn Lower Band** ($Low \ge lband$).
+      - **3.** Tất cả các nến đều có giá đóng cửa nằm trên Lower Band ($Close \ge lband$).
+      - **4.** Vùng giá có ít nhất 2 nến có đỉnh nằm dưới Upper Band ($High < uband$).
+      - **5.** Vùng giá kết thúc khi xuất hiện nến đóng cửa vượt lên trên dải Upper Band ($Close > uband$).
       - **6.** Tối thiểu phải chứa từ 3 nến trở lên (không bao gồm nến Breakout khỏi Upper Band).
     - **VCP Down (Sóng Giảm - Mở lệnh Short):**
-      - **1.** Toàn bộ nến trong mô hình VCP Down đều có giá mở cửa nằm trong Bollinger Band ($\text{Lower Band} \le Open \le \text{Upper Band}$).
-      - **2.** **Không có bất kỳ High nào của nến lớn hơn Upper Band** ($High \le \text{Upper Band}$).
-      - **3.** Tất cả các nến đều có giá đóng cửa nằm dưới Upper Band ($Close \le \text{Upper Band}$).
-      - **4.** Vùng giá có ít nhất 2 nến có đáy nằm trên Lower Band ($Low > \text{Lower Band}$).
-      - **5.** Vùng giá kết thúc khi xuất hiện nến đóng cửa phá xuống dưới dải Lower Band ($Close < \text{Lower Band}$).
+      - **1.** Toàn bộ nến trong mô hình VCP Down đều có giá mở cửa nằm trong dải Bands ($lband \le Open \le uband$).
+      - **2.** **Không có bất kỳ High nào của nến lớn hơn Upper Band** ($High \le uband$).
+      - **3.** Tất cả các nến đều có giá đóng cửa nằm dưới Upper Band ($Close \le uband$).
+      - **4.** Vùng giá có ít nhất 2 nến có đáy nằm trên Lower Band ($Low > lband$).
+      - **5.** Vùng giá kết thúc khi xuất hiện nến đóng cửa phá xuống dưới dải Lower Band ($Close < lband$).
       - **6.** Tối thiểu phải chứa từ 3 nến trở lên (không bao gồm nến Breakdown khỏi Lower Band).
-    - **Trực quan:** Tự động vẽ dải Bollinger Band 1.0 StDev (Upper nét đứt, MA nét liền, Lower nét đứt) trên biểu đồ khi chọn chế độ này.
+    - **Trực quan:** Tự động tính toán đường **VMA** (Variable Moving Average với chu kỳ `vmaLen = 6`) kèm dải **ATR Bands** (`vmaMult = 1.5` $\times$ ATR) gồm **`ubx` (UpperBand)** và **`lbx` (LowerBand)** hiển thị trên biểu đồ khi chọn chế độ này. Hỗ trợ tùy chọn đổi màu đường VMA và tô màu nến theo chiều xu hướng.
   - *Kết hợp (ADX + Kaufman ER + Choppiness Index)*
   - *ADX Thấp* ($ADX < 20$)
   - *Choppiness Index Cao* ($CHOP > 60$)

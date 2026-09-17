@@ -50,7 +50,9 @@ showVwapBands   = input.bool(true, "Vẽ 3 dải Upper/Lower của VWAP", group 
 // --- Group 2: Nhận diện Sideway (Sideway Up & Sideway Down) ---
 grp_side        = "2. Nhận diện Trạng thái Sideway"
 detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
-sidewayMethod   = input.string("Narrow Sideway", "Sideway method", options = ["Narrow Sideway", "VCP", "Kết hợp (ADX + Kaufman ER + CHOP)", "ADX Thấp", "Choppiness Index Cao", "Kaufman ER Thấp", "Biên độ nén BB Width"], group = grp_side, tooltip = "Chọn phương pháp nhận diện vùng tích lũy / Sideway:\n- Narrow Sideway: Price Action nén biên độ & FVG.\n- VCP: Mẫu hình thu hẹp biến động (Volatility Contraction Pattern) theo Bollinger Band (1.0 StDev, chu kỳ Adaptive). VCP Up: toàn bộ Open nằm trong BB, không có Low < Lower Band, tối thiểu 2 nến High < Upper Band, kết thúc khi Close > Upper Band. VCP Down: toàn bộ Open nằm trong BB, không có High > Upper Band, tối thiểu 2 nến Low > Lower Band, kết thúc khi Close < Lower Band. Tối thiểu 3 nến trước khi Break.\n- Kết hợp (ADX + Kaufman ER + CHOP): Bộ lọc đa chỉ báo.")
+sidewayMethod   = input.string("Narrow Sideway", "Sideway method", options = ["Narrow Sideway", "VCP", "Kết hợp (ADX + Kaufman ER + CHOP)", "ADX Thấp", "Choppiness Index Cao", "Kaufman ER Thấp", "Biên độ nén BB Width"], group = grp_side, tooltip = "Chọn phương pháp nhận diện vùng tích lũy / Sideway:\n- Narrow Sideway: Price Action nén biên độ & FVG.\n- VCP: Mẫu hình thu hẹp biến động (Volatility Contraction Pattern) theo dải VMA ATR Bands (ubx & lbx). VCP Up: toàn bộ Open nằm trong dải Bands, không có Low < Lower Band, tối thiểu 2 nến High < Upper Band, kết thúc khi Close > Upper Band. VCP Down: toàn bộ Open nằm trong dải Bands, không có High > Upper Band, tối thiểu 2 nến Low > Lower Band, kết thúc khi Close < Lower Band. Tối thiểu 3 nến trước khi Break.\n- Kết hợp (ADX + Kaufman ER + CHOP): Bộ lọc đa chỉ báo.")
+vmaLen          = input.int(5, "VCP VMA Length", minval = 1, group = grp_side, tooltip = "Chu kỳ VMA (Variable Moving Average) phục vụ nhận diện VCP (Mặc định: 6)")
+vmaMult         = input.float(1, "VCP Bands Multiplier", minval = 0.1, step = 0.1, group = grp_side, tooltip = "Hệ số nhân ATR Bands cho VMA (Mặc định: 1.5)")
 adxThresh       = input.float(20.0, "Ngưỡng ADX (Dưới ngưỡng là Sideway)", minval = 5.0, maxval = 50.0, step = 1.0, group = grp_side, tooltip = "Chỉ số ADX dưới mức này báo hiệu lực xu hướng yếu / tích lũy (Mặc định: 20)")
 chopThresh      = input.float(60.0, "Ngưỡng Choppiness Index (Trên ngưỡng là Sideway)", minval = 30.0, maxval = 90.0, step = 1.0, group = grp_side, tooltip = "Chỉ số CHOP trên mức này báo hiệu thị trường giật cục / không có xu hướng (Mặc định: 60)")
 erThresh        = input.float(0.30, "Ngưỡng Kaufman ER (Dưới ngưỡng là Sideway)", minval = 0.05, maxval = 0.9, step = 0.05, group = grp_side, tooltip = "Hiệu suất di chuyển giá Kaufman ER dưới mức này thể hiện nhiều nến chồng chéo / nhiễu (Mặc định: 0.30)")
@@ -75,6 +77,7 @@ closePosMode   = input.string("Supertrend đảo ngược chiều", "Đóng vị
 grp_vis         = "4. Hiển thị & Đồ họa Biểu đồ"
 showSidewayBox  = input.bool(true, "Vẽ hình chữ nhật (Box) bao quanh nến Sideway", group = grp_vis, tooltip = "Vẽ khung chữ nhật động bao bọc toàn bộ cụm nến (đỉnh cao nhất - đáy thấp nhất) trong suốt giai đoạn Sideway Up/Down.")
 showTradeLevels = input.bool(true, "Vẽ các đường Entry, SL, TP1, TP2 trên biểu đồ", group = grp_vis)
+vmaShowTrend    = input.bool(false, "Show VMA Trend Direction", group = grp_vis, tooltip = "Đổi màu đường VMA theo xu hướng tăng (Green) / giảm (Red) / đi ngang (Blue)")
 
 // --- Group 5: Bảng Thống kê Dashboard ---
 grp_tbl         = "5. Bảng Thống kê Dashboard"
@@ -211,8 +214,8 @@ string marketState = isStrongTrendUp   ? "Tăng mạnh" :
 
 // --- Supertrend Cloud / Body Fill ---
 bodyMiddle = plot(barstate.isfirst ? na : (open + close) / 2, "Body Middle", display = display.none)
-upTrend    = plot(supertrendDir == 1 ? supertrendVal : na, "Supertrend Uptrend", color = color.new(#00e676, 0), linewidth = 2, style = plot.style_linebr)
-downTrend  = plot(supertrendDir == -1 ? supertrendVal : na, "Supertrend Downtrend", color = color.new(#ff1744, 0), linewidth = 2, style = plot.style_linebr)
+upTrend    = plot(supertrendDir == 1 ? supertrendVal : na, "Supertrend Uptrend", color = color.new(#00e676, 0), linewidth = 1, style = plot.style_linebr)
+downTrend  = plot(supertrendDir == -1 ? supertrendVal : na, "Supertrend Downtrend", color = color.new(#ff1744, 0), linewidth = 1, style = plot.style_linebr)
 
 fill(bodyMiddle, upTrend,   title = "Uptrend Background Cloud",   color = color.new(#00e676, 90), fillgaps = false)
 fill(bodyMiddle, downTrend, title = "Downtrend Background Cloud", color = color.new(#ff1744, 90), fillgaps = false)
@@ -291,18 +294,44 @@ float bbDev   = 2.0 * ta.stdev(close, 20)
 float bbWidth = bbBasis != 0 ? ((bbBasis + bbDev) - (bbBasis - bbDev)) / bbBasis * 100.0 : 0.0
 bool  bbSqueeze = bbWidth < ta.sma(bbWidth, 50)
 
-// 4.3.1. Bollinger Bands 1.0 StDev (Chu kỳ Adaptive) phục vụ mô hình VCP
-int   bbVcpLen   = 26 // int(math.round(effectivePeriod))
-float bbVcpMa    = ta.sma(close, bbVcpLen)
-float bbVcpDev   = 1.0 * ta.stdev(close, bbVcpLen)
-float bbVcpUpper = bbVcpMa + bbVcpDev
-float bbVcpLower = bbVcpMa - bbVcpDev
+// 4.3.1. Variable Moving Average (VMA) & ATR Bands (ubx, lbx) phục vụ mô hình VCP
+calc_vma(float src, int l) => 
+    float k = 1.0 / l
+    float pdm = math.max(src - nz(src[1], src), 0.0)
+    float mdm = math.max(nz(src[1], src) - src, 0.0)
+    var float pdmS = 0.0
+    pdmS := (1.0 - k) * nz(pdmS[1]) + k * pdm
+    var float mdmS = 0.0
+    mdmS := (1.0 - k) * nz(mdmS[1]) + k * mdm
+    float s = pdmS + mdmS
+    float pdi = s != 0.0 ? pdmS / s : 0.0
+    float mdi = s != 0.0 ? mdmS / s : 0.0
+    var float pdiS = 0.0
+    pdiS := (1.0 - k) * nz(pdiS[1]) + k * pdi
+    var float mdiS = 0.0
+    mdiS := (1.0 - k) * nz(mdiS[1]) + k * mdi
+    float d = math.abs(pdiS - mdiS)
+    float s1 = pdiS + mdiS
+    var float iS = 0.0
+    iS := (1.0 - k) * nz(iS[1]) + k * (s1 != 0.0 ? d / s1 : 0.0)
+    float hhv = ta.highest(iS, l) 
+    float llv = ta.lowest(iS, l) 
+    float d1 = hhv - llv
+    float vI = d1 != 0.0 ? (iS - llv) / d1 : 0.0
+    var float vma = 0.0
+    vma := (1.0 - k * vI) * nz(vma[1], src) + k * vI * src
+    vma
 
-// Vẽ Bollinger Band 1.0 StDev trên biểu đồ khi chọn phương pháp VCP
-pBbUpper = plot(effSidewayMethod == "VCP" ? bbVcpUpper : na, "VCP BB Upper (1.0x)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
-pBbMa    = plot(effSidewayMethod == "VCP" ? bbVcpMa    : na, "VCP BB Basis (MA)",   color = color.new(#fbbf24, 20), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_solid)
-pBbLower = plot(effSidewayMethod == "VCP" ? bbVcpLower : na, "VCP BB Lower (1.0x)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
-// fill(pBbUpper, pBbLower, title = "VCP BB Background", color = effSidewayMethod == "VCP" ? color.new(#38bdf8, 92) : na)
+float vma   = calc_vma(close, vmaLen)
+float o     = vmaMult * ta.atr(vmaLen)
+float uband = vma + o
+float lband = vma - o
+color vmaC  = (vma > nz(vma[1], vma)) ? color.green : (vma < nz(vma[1], vma)) ? color.red : (vma == nz(vma[1], vma)) ? color.blue : color.black
+
+// Vẽ VMA và VMA Bands (ubx, lbx) trên biểu đồ khi chọn phương pháp VCP
+pVma = plot(effSidewayMethod == "VCP" ? vma : na, "VCP VMA", color = vmaShowTrend ? vmaC : color.new(#fbbf24, 20), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_solid)
+ubx  = plot(effSidewayMethod == "VCP" ? uband : na, "VCP UpperBand (ubx)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
+lbx  = plot(effSidewayMethod == "VCP" ? lband : na, "VCP LowerBand (lbx)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
 
 // 4.4. Cơ chế Nhận diện Sideway theo cấu trúc NARROW SIDEWAY (Price Action & FVG)
 
@@ -483,11 +512,11 @@ if isSupertrendBuy or isSupertrendSell or supertrendDir != 1
     vcpLow              := na
 else if supertrendDir == 1
     // Điều kiện VCP Up:
-    // - Open phải nằm trong Bollinger Band (bbVcpLower <= open <= bbVcpUpper)
-    // - Không có Low nào của nến < Lower Band của BB (low >= bbVcpLower)
-    // - Close >= bbVcpLower
-    if (open < bbVcpLower or open > bbVcpUpper) or (low < bbVcpLower) or (close < bbVcpLower)
-        // Vi phạm điều kiện: Open nằm ngoài BB hoặc Low phá vỡ Lower Band -> Reset vùng VCP Up
+    // - Open phải nằm trong dải Bands (lband <= open <= uband)
+    // - Không có Low nào của nến < Lower Band (low >= lband)
+    // - Close >= lband
+    if (open < lband or open > uband) or (low < lband) or (close < lband)
+        // Vi phạm điều kiện: Open nằm ngoài Bands hoặc Low phá vỡ Lower Band -> Reset vùng VCP Up
         inVcpZone           := false
         vcpStartBar         := na
         vcpCandleCount      := 0
@@ -495,9 +524,9 @@ else if supertrendDir == 1
         vcpHigh             := na
         vcpLow              := na
     else
-        // Open nằm trong BB, Low >= bbVcpLower, Close >= bbVcpLower (thỏa mãn điều kiện)
-        // Điều kiện 3: Kết thúc vùng giá khi đóng cửa trên Upperband của Bollinger Band
-        if close > bbVcpUpper
+        // Open nằm trong Bands, Low >= lband, Close >= lband (thỏa mãn điều kiện)
+        // Điều kiện 3: Kết thúc vùng giá khi đóng cửa trên Upperband (uband / ubx)
+        if close > uband
             if inVcpZone
                 // Tối thiểu 3 nến trước nến breakout và Điều kiện 2 (ít nhất 2 nến high < Upper band)
                 if (vcpCandleCount >= 3) and (vcpHighBelowUpperCt >= 2)
@@ -515,19 +544,19 @@ else if supertrendDir == 1
                 vcpHigh             := na
                 vcpLow              := na
         else
-            // Nến nằm trong khoảng [Lowerband, Upperband] (bbVcpLower <= close <= bbVcpUpper)
+            // Nến nằm trong khoảng [Lowerband, Upperband] (lband <= close <= uband)
             if not inVcpZone
                 // Bắt đầu vùng VCP mới
                 inVcpZone           := true
                 vcpStartBar         := bar_index
                 vcpCandleCount      := 1
-                vcpHighBelowUpperCt := (high < bbVcpUpper ? 1 : 0)
+                vcpHighBelowUpperCt := (high < uband ? 1 : 0)
                 vcpHigh             := high
                 vcpLow              := low
             else
                 // Tiếp tục tích lũy trong vùng VCP
                 vcpCandleCount += 1
-                if high < bbVcpUpper
+                if high < uband
                     vcpHighBelowUpperCt += 1
                 vcpHigh := math.max(nz(vcpHigh, high), high)
                 vcpLow  := math.min(nz(vcpLow, low), low)
@@ -560,11 +589,11 @@ if isSupertrendBuy or isSupertrendSell or supertrendDir != -1
     vcpLowDown         := na
 else if supertrendDir == -1
     // Điều kiện VCP Down:
-    // - Open phải nằm trong Bollinger Band (bbVcpLower <= open <= bbVcpUpper)
-    // - Không có High nào của nến > Upper Band của BB (high <= bbVcpUpper)
-    // - Close <= bbVcpUpper
-    if (open < bbVcpLower or open > bbVcpUpper) or (high > bbVcpUpper) or (close > bbVcpUpper)
-        // Vi phạm điều kiện: Open nằm ngoài BB hoặc High vượt Upper Band -> Reset vùng VCP Down
+    // - Open phải nằm trong dải Bands (lband <= open <= uband)
+    // - Không có High nào của nến > Upper Band (high <= uband)
+    // - Close <= uband
+    if (open < lband or open > uband) or (high > uband) or (close > uband)
+        // Vi phạm điều kiện: Open nằm ngoài Bands hoặc High vượt Upper Band -> Reset vùng VCP Down
         inVcpDownZone      := false
         vcpStartBarDown    := na
         vcpCandleCountDown := 0
@@ -572,9 +601,9 @@ else if supertrendDir == -1
         vcpHighDown        := na
         vcpLowDown         := na
     else
-        // Open nằm trong BB, High <= bbVcpUpper, Close <= bbVcpUpper (thỏa mãn điều kiện)
-        // Điều kiện 3: Kết thúc vùng giá khi đóng cửa dưới Lowerband của Bollinger Band
-        if close < bbVcpLower
+        // Open nằm trong Bands, High <= uband, Close <= uband (thỏa mãn điều kiện)
+        // Điều kiện 3: Kết thúc vùng giá khi đóng cửa dưới Lowerband (lband / lbx)
+        if close < lband
             if inVcpDownZone
                 // Tối thiểu 3 nến trước nến breakdown và Điều kiện 2 (ít nhất 2 nến low > Lower band)
                 if (vcpCandleCountDown >= 3) and (vcpLowAboveLowerCt >= 2)
@@ -592,19 +621,19 @@ else if supertrendDir == -1
                 vcpHighDown        := na
                 vcpLowDown         := na
         else
-            // Nến nằm trong khoảng [Lowerband, Upperband] (bbVcpLower <= close <= bbVcpUpper)
+            // Nến nằm trong khoảng [Lowerband, Upperband] (lband <= close <= uband)
             if not inVcpDownZone
                 // Bắt đầu vùng VCP Down mới
                 inVcpDownZone      := true
                 vcpStartBarDown    := bar_index
                 vcpCandleCountDown := 1
-                vcpLowAboveLowerCt := (low > bbVcpLower ? 1 : 0)
+                vcpLowAboveLowerCt := (low > lband ? 1 : 0)
                 vcpHighDown        := high
                 vcpLowDown         := low
             else
                 // Tiếp tục tích lũy trong vùng VCP Down
                 vcpCandleCountDown += 1
-                if low > bbVcpLower
+                if low > lband
                     vcpLowAboveLowerCt += 1
                 vcpHighDown := math.max(nz(vcpHighDown, high), high)
                 vcpLowDown  := math.min(nz(vcpLowDown, low), low)
