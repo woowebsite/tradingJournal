@@ -1,0 +1,58 @@
+//@version=5
+indicator("Candle Spread Percentile Filter", shorttitle="Candle Spread Pct", overlay=false)
+
+// ==========================================
+// 1. THAM SỐ CẤU HÌNH (INPUTS)
+// ==========================================
+grp_params = "Cấu hình Chu kỳ & Ngưỡng Phân vị"
+length       = input.int(100, title="Chu kỳ lịch sử (Lookback)", minval=5, group=grp_params)
+p_low_val    = input.float(20.0, title="Ngưỡng Nén / Thấp (%)", minval=1.0, maxval=99.0, group=grp_params)
+p_mid_val    = input.float(50.0, title="Ngưỡng Trung vị (%)", minval=1.0, maxval=99.0, group=grp_params)
+p_high_val   = input.float(80.0, title="Ngưỡng Bùng nổ / Cao (%)", minval=1.0, maxval=99.0, group=grp_params)
+
+grp_display = "Hiển thị & Màu sắc"
+show_p20     = input.bool(true, title="Hiển thị đường Ngưỡng 20%", group=grp_display)
+show_p50     = input.bool(true, title="Hiển thị đường Ngưỡng 50%", group=grp_display)
+show_p80     = input.bool(true, title="Hiển thị đường Ngưỡng 80%", group=grp_display)
+paint_bars   = input.bool(false, title="Đổi màu nến trên biểu đồ chính", group=grp_display)
+
+col_p80      = input.color(#9c27b0, title="Spread Bùng nổ (>= 80%)", group=grp_display) // Tím đậm
+col_p50      = input.color(#5eff00, title="Spread Mở rộng (50% - 80%)", group=grp_display) // Xanh lá
+col_normal   = input.color(#ff9800, title="Spread Bình thường (20% - 50%)", group=grp_display) // Cam vàng
+col_p20      = input.color(#787b86, title="Spread Nén / Thu hẹp (<= 20%)", group=grp_display) // Xám
+
+// ==========================================
+// 2. TÍNH TOÁN SPREAD & PHÂN VỊ (CALCULATION)
+// ==========================================
+// Độ chênh lệch giá cao nhất và thấp nhất của nến
+c_range = high - low
+
+// Tính toán các ngưỡng spread tương ứng theo phân vị
+th_low  = ta.percentile_nearest_rank(c_range, length, p_low_val)
+th_mid  = ta.percentile_nearest_rank(c_range, length, p_mid_val)
+th_high = ta.percentile_nearest_rank(c_range, length, p_high_val)
+
+// Phân loại trạng thái spread của nến hiện tại
+is_extreme_high = c_range >= th_high
+is_above_median = c_range >= th_mid and not is_extreme_high
+is_extreme_low  = c_range <= th_low
+is_normal_range = not is_extreme_high and not is_above_median and not is_extreme_low
+
+// Xác định màu cột & nến theo mức spread
+bar_col = is_extreme_high ? col_p80 :
+          is_above_median ? col_p50 :
+          is_extreme_low  ? col_p20 : col_normal
+
+// ==========================================
+// 3. HIỂN THỊ (PLOTTING)
+// ==========================================
+// Vẽ các cột Spread (Histogram)
+plot(c_range, title="Current Spread", color=bar_col, style=plot.style_columns)
+
+// Vẽ các đường ngưỡng phân vị (Percentile Lines)
+plot(show_p80 ? th_high : na, title="80% Percentile (Expansion)", color=col_p80, linewidth=1, style=plot.style_line)
+plot(show_p50 ? th_mid : na,  title="50% Percentile (Median)",    color=color.white, linewidth=1, style=plot.style_line)
+plot(show_p20 ? th_low : na,  title="20% Percentile (Compression)", color=col_p20, linewidth=1, style=plot.style_line)
+
+// Đổi màu nến trên chart chính
+barcolor(paint_bars ? bar_col : na)
