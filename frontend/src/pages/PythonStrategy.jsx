@@ -35,6 +35,7 @@ import ActiveTradeBanner from '../components/python-strategy/ActiveTradeBanner';
 import OptimalConfigBanner from '../components/python-strategy/OptimalConfigBanner';
 import TradingChartSection from '../components/python-strategy/TradingChartSection';
 import TradesHistoryTable from '../components/python-strategy/TradesHistoryTable';
+import TradeHistoryAISection from '../components/python-strategy/TradeHistoryAISection';
 import SaveTemplateModal from '../components/python-strategy/SaveTemplateModal';
 import InsightHistoryModal from '../components/python-strategy/InsightHistoryModal';
 import OptimizationLeaderboardModal from '../components/python-strategy/OptimizationLeaderboardModal';
@@ -1083,7 +1084,17 @@ const PythonStrategy = () => {
                 />
             )}
 
-            {/* 11. Modal Lưu Strategy Template */}
+            {/* 11. AI Strategy & Trades History Analysis Box */}
+            <TradeHistoryAISection
+                scanResult={scanResult}
+                params={params}
+                selectedSymbol={selectedSymbol}
+                timeframe={timeframe}
+                profitFactor={profitFactor}
+                selectedStrategyFile={selectedStrategyFile}
+            />
+
+            {/* 12. Modal Lưu Strategy Template */}
             <SaveTemplateModal
                 isOpen={saveModalOpen}
                 onClose={() => setSaveModalOpen(false)}

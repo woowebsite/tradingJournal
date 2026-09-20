@@ -24,5 +24,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'POST',
+      path: '/python-strategies/ai/analyze',
+      handler: 'python-strategy.aiAnalyze',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

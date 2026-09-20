@@ -106,3 +106,30 @@ export const buildPythonScanParams = (tpl, symName, currentTf = 'D1', fallbackCt
     return buildStrategyScanPayload(stratFile, { ...fallbackCtx, ...cfg }, base);
 };
 
+/**
+ * Phân tích lịch sử lệnh giao dịch của chiến lược Python bằng AI
+ */
+export const analyzePythonStrategyWithAI = async ({
+    trades = [],
+    summary = {},
+    params = {},
+    prompt = '',
+    provider = 'z.ai',
+    model = '',
+}) => {
+    try {
+        const response = await api.post('/python-strategies/ai/analyze', {
+            trades,
+            summary,
+            params,
+            prompt,
+            provider,
+            model,
+        });
+        return response.data?.data || response.data || null;
+    } catch (error) {
+        console.error('Failed to analyze python strategy trades with AI:', error);
+        throw error;
+    }
+};
+

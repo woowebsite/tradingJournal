@@ -2,8 +2,210 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import axios from 'axios';
 
 const execFileAsync = promisify(execFile);
+
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const DEFAULT_GEMMA_MODEL = 'gemma4:e2b';
+
+const normalizeText = (value = '') => value.replace(/\s+/g, ' ').trim();
+
+const normalizeZaiBaseUrl = (input = '') => {
+  const trimmed = normalizeText(input).replace(/\/+$/, '');
+  if (!trimmed) return '';
+  return trimmed.replace(/\/chat\/completions$/i, '');
+};
+
+const normalizeAIProvider = (provider = '') => {
+  const normalized = normalizeText(provider).toLowerCase();
+  if (normalized === 'openai') return 'openai';
+  if (normalized === 'gemini') return 'gemini';
+  if (normalized === 'gemma' || normalized === 'ollama' || normalized === 'gemma4') return 'gemma';
+  return 'z.ai';
+};
+
+const normalizeGeminiModel = (value = '') => {
+  const normalized = normalizeText(value);
+  if (!normalized) return DEFAULT_GEMINI_MODEL;
+  const aliases: Record<string, string> = {
+    flash: DEFAULT_GEMINI_MODEL,
+    'flash-lite': DEFAULT_GEMINI_MODEL,
+    'gemini-flash-lite': DEFAULT_GEMINI_MODEL,
+    'gemini-3.1-flash-lite': DEFAULT_GEMINI_MODEL,
+    'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
+    'gemini-2.5-flash': 'gemini-2.5-flash',
+    'gemini-1.5-flash': 'gemini-1.5-flash',
+    'gemini-1.5-pro': 'gemini-1.5-pro',
+  };
+  return aliases[normalized.toLowerCase()] || normalized;
+};
+
+const normalizeGemmaModel = (value = '') => {
+  const normalized = normalizeText(value);
+  if (!normalized) return DEFAULT_GEMMA_MODEL;
+  const aliases: Record<string, string> = {
+    gemma4: DEFAULT_GEMMA_MODEL,
+    'gemma4:latest': DEFAULT_GEMMA_MODEL,
+  };
+  return aliases[normalized.toLowerCase()] || normalized;
+};
+
+const resolveAIProviderConfig = (provider: string, requestedModel = '') => {
+  if (provider === 'openai') {
+    return {
+      provider: 'openai',
+      endpoint: normalizeZaiBaseUrl(String(process.env.OPEN_AI_API || 'https://api.openai.com/v1').trim()),
+      apiKey: String(process.env.OPEN_AI_KEY || '').trim(),
+      model: requestedModel || String(process.env.OPEN_AI_MODEL || 'gpt-4o-mini').trim(),
+      missingApiMessage: 'Missing server env OPEN_AI_API.',
+      missingKeyMessage: 'Missing server env OPEN_AI_KEY.',
+      requiresKey: true,
+    };
+  }
+
+  if (provider === 'gemini') {
+    const envModel = normalizeGeminiModel(String(process.env.GEMINI_MODEL || ''));
+    return {
+      provider: 'gemini',
+      endpoint: normalizeZaiBaseUrl(String(process.env.GEMINI_API || 'https://generativelanguage.googleapis.com/v1beta').trim()),
+      apiKey: String(process.env.GEMINI_API_KEY || '').trim(),
+      model: normalizeGeminiModel(requestedModel || envModel),
+      missingApiMessage: 'Missing server env GEMINI_API.',
+      missingKeyMessage: 'Missing server env GEMINI_API_KEY.',
+      requiresKey: true,
+    };
+  }
+
+  if (provider === 'gemma') {
+    const envModel = normalizeGemmaModel(String(process.env.GEMMA_MODEL || ''));
+    const endpoint = normalizeZaiBaseUrl(
+      String(process.env.GEMMA_API || 'http://localhost:11434/api/generate').trim(),
+    ) || 'http://localhost:11434/api/generate';
+    return {
+      provider: 'gemma',
+      endpoint,
+      apiKey: '',
+      model: normalizeGemmaModel(requestedModel || envModel),
+      missingApiMessage: 'Missing server env GEMMA_API.',
+      missingKeyMessage: '',
+      requiresKey: false,
+    };
+  }
+
+  return {
+    provider: 'z.ai',
+    endpoint: normalizeZaiBaseUrl(String(process.env.ZAI_API || process.env.ZAI || process.env.ZAI_BASE_URL || '').trim()),
+    apiKey: String(process.env.ZAI_API_KEY || '').trim(),
+    model: requestedModel || String(process.env.ZAI_MODEL || 'glm-4.5').trim(),
+    missingApiMessage: 'Missing server env ZAI_API.',
+    missingKeyMessage: 'Missing server env ZAI_API_KEY.',
+    requiresKey: true,
+  };
+};
+
+const buildTradeAnalysisPrompt = (
+  userPrompt: string,
+  summary: Record<string, any> = {},
+  params: Record<string, any> = {},
+  trades: Array<Record<string, any>> = []
+) => {
+  const summaryLines = [
+    `Ticker / Symbol: ${summary.ticker || summary.symbol || 'N/A'}`,
+    `Timeframe: ${summary.timeframe || 'D1'}`,
+    `Strategy File: ${summary.strategyFile || 'N/A'}`,
+    `Total Trades: ${summary.totalTrades ?? trades.length}`,
+    `Closed Trades: ${summary.closedTrades ?? trades.filter((t: any) => t.status === 'Closed').length}`,
+    `Win Trades: ${summary.winTrades ?? trades.filter((t: any) => (t.pnl_percent || 0) > 0).length}`,
+    `Loss Trades: ${summary.lossTrades ?? trades.filter((t: any) => (t.pnl_percent || 0) < 0).length}`,
+    `Win Rate: ${summary.winRate !== undefined ? summary.winRate : 'N/A'}%`,
+    `Profit Factor: ${summary.profitFactor !== undefined ? summary.profitFactor : 'N/A'}`,
+    `Total PnL: ${summary.totalPnlPercent !== undefined ? summary.totalPnlPercent : 'N/A'}%`,
+    `Avg PnL per Trade: ${summary.avgPnlPercent !== undefined ? summary.avgPnlPercent : 'N/A'}%`,
+    `Gross Profit: ${summary.grossProfit !== undefined ? summary.grossProfit : 'N/A'}%`,
+    `Gross Loss: ${summary.grossLoss !== undefined ? summary.grossLoss : 'N/A'}%`,
+  ];
+
+  const paramEntries = Object.entries(params || {})
+    .filter(([_, v]) => v !== undefined && v !== null && typeof v !== 'object')
+    .map(([k, v]) => `  - ${k}: ${v}`);
+
+  const maxTradesInPrompt = 250;
+  const tradesToInclude = trades.slice(0, maxTradesInPrompt);
+  const tradeRows = tradesToInclude.map((t, idx) => {
+    const num = idx + 1;
+    const type = t.type || (t.is_long ? 'LONG' : (t.is_short ? 'SHORT' : 'N/A'));
+    const entryDate = t.entry_date || t.entry_time || '-';
+    const entryPrice = t.entry_price !== undefined ? Number(t.entry_price).toFixed(2) : '-';
+    const exitDate = t.exit_date || t.exit_time || '-';
+    const exitPrice = t.exit_price !== undefined ? Number(t.exit_price).toFixed(2) : '-';
+    const pnl = t.pnl_percent !== undefined ? `${Number(t.pnl_percent).toFixed(2)}%` : '-';
+    const reason = t.reason || t.exit_reason || t.status || '-';
+    const bars = t.bars_held !== undefined ? `${t.bars_held} bars` : (t.hold_bars !== undefined ? `${t.hold_bars} bars` : '');
+    return `${num}. [${type}] Vào: ${entryDate} @ ${entryPrice} | Ra: ${exitDate} @ ${exitPrice} | PnL: ${pnl} | Lý do: ${reason} ${bars ? `| Giữ: ${bars}` : ''}`;
+  });
+
+  const tradesText = tradeRows.length > 0
+    ? tradeRows.join('\n') + (trades.length > maxTradesInPrompt ? `\n... và ${trades.length - maxTradesInPrompt} lệnh khác` : '')
+    : 'Không có dữ liệu lệnh giao dịch.';
+
+  return `${userPrompt}
+
+=== TỔNG QUAN HIỆU SUẤT BACKTEST ===
+${summaryLines.join('\n')}
+
+=== THÔNG SỐ CHIẾN LƯỢC (PARAMETERS) ===
+${paramEntries.length > 0 ? paramEntries.join('\n') : 'Mặc định'}
+
+=== DANH SÁCH LỊCH SỬ LỆNH GIAO DỊCH (${trades.length} LỆNH) ===
+${tradesText}`;
+};
+
+const SYSTEM_INSTRUCTION = 'Bạn là một chuyên gia phân tích định lượng (Quantitative Trading & Risk Management) hàng đầu. Hãy phân tích chuyên sâu lịch sử lệnh giao dịch của chiến lược, chỉ ra điểm mạnh, điểm yếu, các chuỗi thua lỗ, phân tích Win/Loss và đưa ra các giải pháp cụ thể để tối ưu hóa chiến lược bằng Tiếng Việt.';
+
+const buildOpenAICompatiblePayload = (model: string, fullPrompt: string) => ({
+  model,
+  messages: [
+    {
+      role: 'system',
+      content: SYSTEM_INSTRUCTION,
+    },
+    {
+      role: 'user',
+      content: fullPrompt,
+    },
+  ],
+  temperature: 0.2,
+});
+
+const buildGeminiPayload = (fullPrompt: string) => ({
+  contents: [
+    {
+      role: 'user',
+      parts: [
+        {
+          text: [
+            SYSTEM_INSTRUCTION,
+            fullPrompt,
+          ].join('\n\n'),
+        },
+      ],
+    },
+  ],
+  generationConfig: {
+    temperature: 0.2,
+  },
+});
+
+const buildGemmaPayload = (model: string, fullPrompt: string) => ({
+  model,
+  prompt: fullPrompt,
+  system: SYSTEM_INSTRUCTION,
+  stream: false,
+  options: {
+    temperature: 0.2,
+  },
+});
 
 const toBool = (val: any, defaultVal: boolean): boolean => {
   if (val === undefined || val === null) return defaultVal;
@@ -498,5 +700,89 @@ export default {
       return ctx.badRequest(`Optimization failed: ${errDetail}`);
     }
   },
+
+  async aiAnalyze(ctx) {
+    try {
+      const body = ctx.request.body || {};
+      const prompt = normalizeText(String(body.prompt || 'Hãy phân tích lịch sử lệnh giao dịch và hiệu suất của chiến lược trên.'));
+      const trades = Array.isArray(body.trades) ? body.trades : [];
+      const summary = body.summary && typeof body.summary === 'object' ? body.summary : {};
+      const params = body.params && typeof body.params === 'object' ? body.params : {};
+      const rawProvider = normalizeAIProvider(String(body.provider || 'z.ai'));
+      const providerConfig = resolveAIProviderConfig(rawProvider, normalizeText(String(body.model || '')));
+      const { endpoint, apiKey, model, provider } = providerConfig;
+
+      if (!trades.length) {
+        return ctx.badRequest('Không tìm thấy danh sách lệnh giao dịch để phân tích. Vui lòng quét chiến lược (Scan) trước.');
+      }
+
+      if (providerConfig.requiresKey && !apiKey) {
+        return ctx.internalServerError(providerConfig.missingKeyMessage);
+      }
+
+      if (!endpoint) {
+        return ctx.internalServerError(providerConfig.missingApiMessage);
+      }
+
+      const fullPrompt = buildTradeAnalysisPrompt(prompt, summary, params, trades);
+      const isGemini = provider === 'gemini';
+      const isGemma = provider === 'gemma';
+
+      const response = await axios.post(
+        isGemini
+          ? `${endpoint}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+          : isGemma
+            ? endpoint
+            : `${endpoint}/chat/completions`,
+        isGemini
+          ? buildGeminiPayload(fullPrompt)
+          : isGemma
+            ? buildGemmaPayload(model, fullPrompt)
+            : buildOpenAICompatiblePayload(model, fullPrompt),
+        {
+          timeout: 90000,
+          headers: isGemini
+            ? {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            }
+            : isGemma
+              ? {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+              }
+              : {
+                Authorization: `Bearer ${apiKey}`,
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+              },
+          validateStatus: () => true,
+        },
+      );
+
+      if (response.status < 200 || response.status >= 300) {
+        strapi.log.error(`${provider} strategy AI analysis failed: HTTP ${response.status}`, response.data);
+        return ctx.badRequest(
+          response.data?.error?.message ||
+          response.data?.error ||
+          response.data?.message ||
+          `${provider} analysis failed with HTTP ${response.status}.`,
+        );
+      }
+
+      return ctx.send({
+        data: {
+          provider,
+          model,
+          tradeCount: trades.length,
+          analysis: response.data,
+        },
+      });
+    } catch (error: any) {
+      console.error('Python Strategy AI Analysis Error:', error);
+      return ctx.internalServerError(`AI analysis failed: ${error?.response?.data?.error?.message || error?.message || error}`);
+    }
+  },
 };
+
 
