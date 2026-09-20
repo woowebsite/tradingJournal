@@ -60,6 +60,19 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
   - Cho phép **Long** khi đang trong sóng tăng và $Supertrend_{\text{Tăng}} > Supertrend_{\text{Giảm trước đó}}$.
   - Cho phép **Short** khi đang trong sóng giảm và $Supertrend_{\text{Giảm}} < Supertrend_{\text{Tăng trước đó}}$.
 
+### 1.2. Bộ Lọc Xu Hướng Anchored VWAP (Filter by VWAP)
+- **`Follow Trend`**: Long khi $Close > VWAP$, Short khi $Close < VWAP$.
+- **`Counter Trend`**: Long khi $Close < VWAP$, Short khi $Close > VWAP$.
+- **`mustInMiddle`**: Lọc vị trí vào lệnh nằm trong hoặc ngoài dải Upper 1 / Lower 1 của VWAP.
+
+### 1.3. Bộ Lọc Phân Vị Biên Độ Nến (1.3 Spread Filter)
+Lọc tín hiệu Entry theo phân vị biên độ nến ($Spread = High - Low$) so với lịch sử $N$ nến trước đó (mặc định 100 nến):
+- **`None`**: Không áp dụng bộ lọc biên độ nến.
+- **`Spread Bùng nổ >= 80%`**: Chỉ cho phép vào lệnh khi cây nến đạt biên độ lớn hơn hoặc bằng phân vị 80% ($Spread \ge P_{80}$). Phù hợp với chiến thuật Breakout / Momentum bùng nổ.
+- **`Spread Mở rộng 50-80%`**: Chỉ vào lệnh khi biên độ nến nằm trong khoảng phân vị từ 50% đến 80% ($P_{50} \le Spread < P_{80}$).
+- **`Spread Bình thường 20-50%`**: Chỉ vào lệnh khi biên độ nến dao động ở mức thông thường ($P_{20} \le Spread < P_{50}$).
+- **`Spread nén <= 20%`**: Chỉ vào lệnh khi biên độ nến bị nén chặt ($Spread \le P_{20}$), phù hợp cho chiến thuật săn nén tích lũy trước sóng lớn.
+
 ---
 
 ### 2. Phát Hiện Trạng Thái Sideway Ngay Khi Giá Nằm Trên / Dưới Supertrend
@@ -139,6 +152,7 @@ Dropdown `Template` ở group **Common** cho phép chọn nhanh các bộ tham s
     - Mức giá chốt lời cập nhật động theo từng nến chạy theo các dải biên của VWAP.
 - **Phương thức Chốt lời TP1 / TP2 (`tp1Mode`, `tp2Mode`):**
   - **`Theo RRR / Tỷ lệ`:** Chốt lời theo mức giá TP cố định/động theo hệ số $rrrTp1$ / $rrrTp2$ và kiểu $tpType$.
+  - **`Next (n) Candle`:** Thoát lệnh sau $n$ cây nến kể từ nến vào lệnh Entry ($n = rrrTp1$ hoặc $rrrTp2$). Ví dụ: nếu đặt $rrrTp1 = 1$, lệnh sẽ tự động chốt lời tại cây nến tiếp theo ngay sau nến Entry (vào hôm nay, chốt ngày mai).
   - **`Breakout2` (Chỉ chốt khi đang có lời & cách Entry $\ge 3$ nến):** Long chốt khi $Close > \max(High[1], High[2])$, $Close > Entry$ và nến TP cách nến Entry tối thiểu 3 nến ($bar\_index - entryBarIdx \ge 3$); Short chốt khi $Close < \min(Low[1], Low[2])$, $Close < Entry$ và $bar\_index - entryBarIdx \ge 3$.
   - **`Breakout3` (Chỉ chốt khi đang có lời & cách Entry $\ge 3$ nến):** Long chốt khi $Close > \max(High[1], High[2], High[3])$, $Close > Entry$ và nến TP cách nến Entry tối thiểu 3 nến ($bar\_index - entryBarIdx \ge 3$); Short chốt khi $Close < \min(Low[1], Low[2], Low[3])$, $Close < Entry$ và $bar\_index - entryBarIdx \ge 3$.
   - **`FVG` (Chỉ chốt khi đang có lời & nến [2] sau Entry):** Long chốt khi xuất hiện khoảng trống tăng ($Low > High[2]$), $Close > Entry$ và nến số 2 ($High[2]$) phải xuất hiện sau nến vào lệnh ($bar\_index - 2 > entryBarIdx$); Short chốt khi xuất hiện khoảng trống giảm ($High < Low[2]$), $Close < Entry$ và nến số 2 ($Low[2]$) phải xuất hiện sau nến vào lệnh.

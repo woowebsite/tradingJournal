@@ -47,6 +47,11 @@ mustInMiddle    = input.string("None", "Điều kiện vùng giữa VWAP (mustIn
 showVwapLine    = input.bool(true, "Vẽ đường Anchored VWAP trên biểu đồ", group = grp_vwap)
 showVwapBands   = input.bool(true, "Vẽ 3 dải Upper/Lower của VWAP", group = grp_vwap, tooltip = "Vẽ 3 dải Upper và 3 dải Lower tính theo độ lệch chuẩn StDev của VWAP (Dải 1 cố định tỷ lệ 1.0, Dải 2 dùng TP1, Dải 3 dùng TP2).")
 
+// --- Group 1.3: Bộ lọc Candle Spread ---
+grp_spread       = "1.3 Spread filter"
+spreadFilterType = input.string("None", "Spread filter", options = ["None", "Spread Bùng nổ >= 80%", "Spread Mở rộng 50-80%", "Spread Bình thường 20-50%", "Spread nén <= 20%"], group = grp_spread, tooltip = "Chọn điều kiện lọc Entry theo phân vị biên độ nến (Spread = High - Low) trong 100 nến trước:\n- None: Không lọc\n- Spread Bùng nổ >= 80%: Chỉ vào lệnh khi Spread >= P80\n- Spread Mở rộng 50-80%: Chỉ vào lệnh khi Spread nằm trong khoảng 50% - 80%\n- Spread Bình thường 20-50%: Chỉ vào lệnh khi Spread nằm trong khoảng 20% - 50%\n- Spread nén <= 20%: Chỉ vào lệnh khi Spread <= P20")
+spreadLookback   = input.int(100, "Spread Lookback", minval = 5, group = grp_spread, tooltip = "Chu kỳ số nến tính phân vị Spread (Mặc định: 100)")
+
 // --- Group 2: Nhận diện Sideway (Sideway Up & Sideway Down) ---
 grp_side        = "2. Nhận diện Trạng thái Sideway"
 detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
@@ -65,12 +70,12 @@ filterSideway   = input.bool(false, "Không mở vị thế mới nếu đang Si
 entryType       = input.string("Breakout", "Kiểu vào lệnh (Entry Type)", options = ["Supertrend Flip", "Break Sideway", "First Pullback", "Pullback + Sideway", "Breakout", "Breakdown"], group = grp_trade, tooltip = "Supertrend Flip: Vào lệnh ngay khi Supertrend đảo chiều xu hướng.\nBreak Sideway: Vào lệnh khi giá phá vỡ đỉnh (Long) hoặc đáy (Short) của bất kỳ vùng Sideway nào khi chưa có lệnh.\nFirst Pullback: Vào lệnh sau khi kết thúc vùng First Pullback đầu tiên của sóng Supertrend mà giá vẫn duy trì xu hướng.\nPullback + Sideway: Cho phép vào lệnh khi xảy ra Pullback hoặc Sideway. Sau khi lệnh Pullback chốt lời, vẫn tiếp tục vào thêm lệnh nếu xuất hiện Break Sideway.\nBreakout: Vào lệnh Long khi phá vỡ High nến trước và nằm trên Supertrend tăng; Short khi phá vỡ Low nến trước và nằm dưới Supertrend giảm.\nBreakdown: Vào lệnh Long khi giá đóng nến đỏ phá Low nến trước (close < open và close < low[1]); Short khi giá đóng nến xanh phá High nến trước (close > open và close > high[1]).")
 slType          = input.string("Supertrend", "Kiểu Stop Loss (Stoploss Type)", options = ["Supertrend", "Sideway Zone", "Entry Candle", "Previous Candle"], group = grp_trade, tooltip = "Supertrend: Đặt SL theo đường Supertrend tại thời điểm vào lệnh.\nSideway Zone: Đặt SL dưới đáy vùng Sideway (Long) hoặc trên đỉnh vùng Sideway (Short).\nEntry Candle: Đặt SL tại Low của nến Entry (Long) hoặc High của nến Entry (Short).\nPrevious Candle: Đặt SL tại Low của nến trước đó (Long) hoặc High của nến trước đó (Short).")
 tpType          = input.string("Percent", "Kiểu tính khoảng cách TP theo RRR (RRR Distance Type)", options = ["ATR", "ATR (HTF)", "Percent", "Spread", "VWAP"], group = grp_trade, tooltip = "Sử dụng khi TP1/TP2 chọn chế độ 'Theo RRR / Tỷ lệ' (By RRR):\n- ATR: Khoảng cách = Hệ số nhân x ATR.\n- ATR (HTF): Khoảng cách = Hệ số nhân x ATR(6) HTF.\n- Percent: Khoảng cách = Hệ số nhân x Risk ban đầu (Entry - SL).\n- Spread: Khoảng cách = Số tick x Bước giá tối thiểu (syminfo.mintick).\n- VWAP: Chốt lời theo dải Upper 2/3 (Long) hoặc Lower 2/3 (Short) của VWAP.")
-tp1Mode         = input.string("Theo RRR / Tỷ lệ", "Phương thức Take Profit 1 (TP1)", options = ["Theo RRR / Tỷ lệ", "Breakout2", "Breakout3", "FVG"], group = grp_trade, tooltip = "Theo RRR / Tỷ lệ: Chốt lời theo giá trị rrrTp1 và kiểu tpType.\nBreakout2: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 2 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời (close > entryPrice cho Long, close < entryPrice cho Short).\nBreakout3: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 3 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nFVG: Chốt lời khi xuất hiện FVG (nến [2] xảy ra sau nến Entry) và đang có lời.")
-rrrTp1          = input.float(2.0, "Hệ số / Tỷ lệ cho TP1 (Khi chọn Theo RRR)", minval = 0.0001, step = 0.01, group = grp_trade, tooltip = "Khoảng cách TP1 = Entry ± rrrTp1 * (Risk, ATR, ATR HTF, syminfo.mintick hoặc VWAP StDev) (Mặc định: 2.0)")
+tp1Mode         = input.string("Theo RRR / Tỷ lệ", "Phương thức Take Profit 1 (TP1)", options = ["Theo RRR / Tỷ lệ", "Next (n) Candle", "Breakout2", "Breakout3", "FVG"], group = grp_trade, tooltip = "Theo RRR / Tỷ lệ: Chốt lời theo giá trị rrrTp1 và kiểu tpType.\nNext (n) Candle: Thoát lệnh sau n nến kể từ nến Entry (với n = rrrTp1, ví dụ rrrTp1 = 1 là thoát tại nến kế tiếp sau nến Entry).\nBreakout2: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 2 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời (close > entryPrice cho Long, close < entryPrice cho Short).\nBreakout3: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 3 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nFVG: Chốt lời khi xuất hiện FVG (nến [2] xảy ra sau nến Entry) và đang có lời.")
+rrrTp1          = input.float(2.0, "Input for TP1", minval = 0.0001, step = 0.01, group = grp_trade, tooltip = "Khi chọn Theo RRR: Khoảng cách TP1 = Entry ± rrrTp1 * (Risk, ATR, ATR HTF, syminfo.mintick hoặc VWAP StDev).\nKhi chọn Next (n) Candle: Số cây nến nắm giữ trước khi chốt lời TP1 (Mặc định: 2.0)")
 tp1QtyPct       = input.float(50.0, "% Khối lượng chốt lời tại TP1", minval = 1.0, maxval = 100.0, step = 5.0, group = grp_trade, tooltip = "Tỷ lệ phần trăm vị thế sẽ chốt lời khi chạm TP1 (Mặc định: 50%)")
-tp2Mode         = input.string("Theo RRR / Tỷ lệ", "Phương thức Take Profit 2 (TP2)", options = ["Theo RRR / Tỷ lệ", "Breakout2", "Breakout3", "FVG"], group = grp_trade, tooltip = "Theo RRR / Tỷ lệ: Chốt lời theo giá trị rrrTp2 và kiểu tpType.\nBreakout2: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 2 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nBreakout3: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 3 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nFVG: Chốt lời khi xuất hiện FVG (nến [2] xảy ra sau nến Entry) và đang có lời.")
-rrrTp2          = input.float(4.0, "Hệ số / Tỷ lệ cho TP2 (Khi chọn Theo RRR)", minval = 0.0001, step = 0.01, group = grp_trade, tooltip = "Khoảng cách TP2 = Entry ± rrrTp2 * (Risk, ATR, ATR HTF, syminfo.mintick hoặc VWAP StDev) (Mặc định: 4.0)")
-moveSlToBe      = input.string("TP 1", "Dời SL về Hòa vốn (Break-Even)", options = ["RRR = 1", "TP 1", "TP 2", "Không (None)"], group = grp_trade, tooltip = "Tự động dời Stoploss về giá Entry khi giá đạt các mốc sau:\n- RRR = 1: Khi giá đi được 1R (bằng khoảng cách Risk ban đầu).\n- TP 1: Khi giá chạm mức chốt lời TP1.\n- TP 2: Khi giá chạm mức chốt lời TP2.\n- Không (None): Giữ nguyên Stoploss ban đầu.")
+tp2Mode         = input.string("Theo RRR / Tỷ lệ", "Phương thức Take Profit 2 (TP2)", options = ["Theo RRR / Tỷ lệ", "Next (n) Candle", "Breakout2", "Breakout3", "FVG"], group = grp_trade, tooltip = "Theo RRR / Tỷ lệ: Chốt lời theo giá trị rrrTp2 và kiểu tpType.\nNext (n) Candle: Thoát lệnh sau n nến kể từ nến Entry (với n = rrrTp2).\nBreakout2: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 2 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nBreakout3: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 3 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nFVG: Chốt lời khi xuất hiện FVG (nến [2] xảy ra sau nến Entry) và đang có lời.")
+rrrTp2          = input.float(4.0, "Input for TP2", minval = 0.0001, step = 0.01, group = grp_trade, tooltip = "Khi chọn Theo RRR: Khoảng cách TP2 = Entry ± rrrTp2 * (Risk, ATR, ATR HTF, syminfo.mintick hoặc VWAP StDev).\nKhi chọn Next (n) Candle: Số cây nến nắm giữ trước khi chốt lời TP2 (Mặc định: 4.0)")
+moveSlToBe      = input.string("TP 1", "Dời SL về Hòa vốn (Break-Even)", options = ["RRR = 1", "TP 1", "TP 2", "None"], group = grp_trade, tooltip = "Tự động dời Stoploss về giá Entry khi giá đạt các mốc sau:\n- RRR = 1: Khi giá đi được 1R (bằng khoảng cách Risk ban đầu).\n- TP 1: Khi giá chạm mức chốt lời TP1.\n- TP 2: Khi giá chạm mức chốt lời TP2.\n- None: Giữ nguyên Stoploss ban đầu.")
 closePosMode   = input.string("Supertrend đảo ngược chiều", "Đóng vị thế còn lại (Close Position When)", options = ["Breakdown2", "Breakdown3", "Supertrend đảo ngược chiều", "Chạm VWAP", "None"], group = grp_trade, tooltip = "Điều kiện đóng toàn bộ vị thế còn lại:\n- Breakdown2: Đóng khi giá đảo chiều Breakdown qua 2 nến trước nó (Long: close < min(low[1], low[2]), Short: close > max(high[1], high[2])).\n- Breakdown3: Đóng khi giá đảo chiều Breakdown qua 3 nến trước nó (Long: close < min(low[1], low[2], low[3]), Short: close > max(high[1], high[2], high[3])).\n- Supertrend đảo ngược chiều: Đóng khi Supertrend đổi hướng ngược vị thế.\n- Chạm VWAP: Đóng khi giá chạm lại đường Anchored VWAP (Long: low <= vwapValue, Short: high >= vwapValue).\n- None: Không chủ động đóng theo các điều kiện trên.")
 
 // --- Group 4: Hiển thị & Đồ họa ---
@@ -87,19 +92,21 @@ tableSize       = input.string("Small", "Cỡ chữ Dashboard", options = ["Tiny
 
 
 // ==============================================================================
-// 1.3. CƠ CHẾ NẠP CẤU HÌNH THEO TEMPLATE (PRESET OVERRIDES)
+// 1.4. CƠ CHẾ NẠP CẤU HÌNH THEO TEMPLATE (PRESET OVERRIDES)
 // ==============================================================================
 bool isPresetST   = templateChoice == "Scalp using Supertrend"
 bool isPresetVWAP = templateChoice == "Scalp using VWAP"
 bool isPresetVCP  = templateChoice == "VCP"
 
 // Các biến hiệu dụng (Effective Parameters)
-bool   effIsAdaptive    = isPresetST ? true : (isPresetVWAP ? false : isAdaptive)
-string effStTrendType   = isPresetST ? "Follow Trend" : (isPresetVWAP ? "Follow Trend" : (isPresetVCP ? "Follow Trend" : stTrendType))
-bool   effUseVwapFilter = isPresetST ? false : (isPresetVWAP ? true : (isPresetVCP ? false : useVwapFilter))
-string effVwapAnchor    = isPresetVWAP ? "Day" : vwapAnchor
-string effVwapTrendType = isPresetVWAP ? "Follow Trend" : vwapTrendType
-string effMustInMiddle  = isPresetVWAP ? "In Middle" : mustInMiddle
+bool   effIsAdaptive        = isPresetST ? true : (isPresetVWAP ? false : isAdaptive)
+string effStTrendType       = isPresetST ? "Follow Trend" : (isPresetVWAP ? "Follow Trend" : (isPresetVCP ? "Follow Trend" : stTrendType))
+bool   effUseVwapFilter     = isPresetST ? false : (isPresetVWAP ? true : (isPresetVCP ? false : useVwapFilter))
+string effVwapAnchor        = isPresetVWAP ? "Day" : vwapAnchor
+string effVwapTrendType     = isPresetVWAP ? "Follow Trend" : vwapTrendType
+string effMustInMiddle      = isPresetVWAP ? "In Middle" : mustInMiddle
+string effSpreadFilterType  = spreadFilterType
+int    effSpreadLookback    = spreadLookback
 
 string effSidewayMethod = isPresetVCP ? "VCP" : sidewayMethod
 string effEntryType     = isPresetST ? "Supertrend Flip" : (isPresetVWAP ? "Breakdown" : (isPresetVCP ? "Break Sideway" : entryType))
@@ -1039,9 +1046,30 @@ if effUseVwapFilter
         vwapMiddleHlLong  := (high > vwapUpper1) or (high < vwapLower1)
         vwapMiddleHlShort := (low > vwapUpper1) or (low < vwapLower1)
 
+// --- Đánh giá bộ lọc Candle Spread ---
+float c_spread     = high - low
+float sp_th_low    = ta.percentile_nearest_rank(c_spread, effSpreadLookback, 20.0)
+float sp_th_mid    = ta.percentile_nearest_rank(c_spread, effSpreadLookback, 50.0)
+float sp_th_high   = ta.percentile_nearest_rank(c_spread, effSpreadLookback, 80.0)
+
+bool isSpreadExtremeHigh = c_spread >= sp_th_high
+bool isSpreadAboveMedian = (c_spread >= sp_th_mid) and not isSpreadExtremeHigh
+bool isSpreadNormalRange = (c_spread >= sp_th_low) and (c_spread < sp_th_mid)
+bool isSpreadExtremeLow  = c_spread <= sp_th_low
+
+bool spreadPass = true
+if effSpreadFilterType == "Spread Bùng nổ >= 80%"
+    spreadPass := isSpreadExtremeHigh
+else if effSpreadFilterType == "Spread Mở rộng 50-80%"
+    spreadPass := isSpreadAboveMedian
+else if effSpreadFilterType == "Spread Bình thường 20-50%"
+    spreadPass := isSpreadNormalRange
+else if effSpreadFilterType == "Spread nén <= 20%"
+    spreadPass := isSpreadExtremeLow
+
 // 1. Điều kiện vào lệnh thông thường (Market On Close)
-bool longCondition  = (effEntryType != "Breakout") and allowLong and longSignal and stLongOk and vwapLongOk and vwapMiddleLong and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0)
-bool shortCondition = (effEntryType != "Breakout") and allowShort and shortSignal and stShortOk and vwapShortOk and vwapMiddleShort and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+bool longCondition  = (effEntryType != "Breakout") and allowLong and longSignal and stLongOk and vwapLongOk and vwapMiddleLong and spreadPass and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+bool shortCondition = (effEntryType != "Breakout") and allowShort and shortSignal and stShortOk and vwapShortOk and vwapMiddleShort and spreadPass and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0)
 
 if longCondition
     hasPendingSidewayUp := false
@@ -1053,8 +1081,8 @@ if shortCondition
 
 // 2. Đặt lệnh chờ Stop cho chế độ Breakout (Buy Stop trên High nến trước 1 tick / Sell Stop dưới Low nến trước 1 tick)
 if effEntryType == "Breakout" and strategy.position_size == 0
-    bool setupBreakHLLong  = allowLong and stLongOk and vwapLongOk and vwapMiddleHlLong and (not effFilterSideway or not isSidewayRaw)
-    bool setupBreakHLShort = allowShort and stShortOk and vwapShortOk and vwapMiddleHlShort and (not effFilterSideway or not isSidewayRaw)
+    bool setupBreakHLLong  = allowLong and stLongOk and vwapLongOk and vwapMiddleHlLong and spreadPass and (not effFilterSideway or not isSidewayRaw)
+    bool setupBreakHLShort = allowShort and stShortOk and vwapShortOk and vwapMiddleHlShort and spreadPass and (not effFilterSideway or not isSidewayRaw)
     
     if setupBreakHLLong
         strategy.entry("Long", strategy.long, stop = high + syminfo.mintick, comment = "Long (Breakout)")
@@ -1251,7 +1279,9 @@ if strategy.position_size > 0
     bool hitTp1ConditionLong = false
     bool isLongInProfit = not na(entryPrice) and (close > entryPrice)
     if not tp1Reached
-        if effTp1Mode == "Breakout2"
+        if effTp1Mode == "Next (n) Candle"
+            hitTp1ConditionLong := not na(entryBarIdx) and (bar_index - entryBarIdx >= math.max(1, int(math.round(effRrrTp1))))
+        else if effTp1Mode == "Breakout2"
             hitTp1ConditionLong := condBo2Long and isLongInProfit
         else if effTp1Mode == "Breakout3"
             hitTp1ConditionLong := condBo3Long and isLongInProfit
@@ -1265,14 +1295,16 @@ if strategy.position_size > 0
         countTP1   += 1
         if effMoveSlToBe == "TP 1"
             slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP1
-        // Nếu dùng kiểu Price Action (Breakout2/Breakout3/FVG), đóng % khối lượng TP1 theo giá Market
+        // Nếu dùng kiểu Price Action / Next (n) Candle, đóng % khối lượng TP1 theo giá Market
         if effTp1Mode != "Theo RRR / Tỷ lệ"
             strategy.close("Long", qty_percent = tp1QtyPct, comment = "TP1 Long (" + effTp1Mode + ")")
             
     // Kiểm tra chạm TP2
     bool hitTp2ConditionLong = false
     if not tp2Reached
-        if effTp2Mode == "Breakout2"
+        if effTp2Mode == "Next (n) Candle"
+            hitTp2ConditionLong := not na(entryBarIdx) and (bar_index - entryBarIdx >= math.max(1, int(math.round(effRrrTp2))))
+        else if effTp2Mode == "Breakout2"
             hitTp2ConditionLong := condBo2Long and isLongInProfit
         else if effTp2Mode == "Breakout3"
             hitTp2ConditionLong := condBo3Long and isLongInProfit
@@ -1286,7 +1318,7 @@ if strategy.position_size > 0
         countTP2   += 1
         if effMoveSlToBe == "TP 2"
             slPrice := math.max(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP2
-        // Nếu dùng kiểu Price Action (Breakout2/Breakout3/FVG), đóng toàn bộ khối lượng còn lại của TP2
+        // Nếu dùng kiểu Price Action / Next (n) Candle, đóng toàn bộ khối lượng còn lại của TP2
         if effTp2Mode != "Theo RRR / Tỷ lệ"
             strategy.close("Long", comment = "TP2 Long (" + effTp2Mode + ")")
         
@@ -1339,7 +1371,9 @@ if strategy.position_size < 0
     bool hitTp1ConditionShort = false
     bool isShortInProfit = not na(entryPrice) and (close < entryPrice)
     if not tp1Reached
-        if effTp1Mode == "Breakout2"
+        if effTp1Mode == "Next (n) Candle"
+            hitTp1ConditionShort := not na(entryBarIdx) and (bar_index - entryBarIdx >= math.max(1, int(math.round(effRrrTp1))))
+        else if effTp1Mode == "Breakout2"
             hitTp1ConditionShort := condBo2Short and isShortInProfit
         else if effTp1Mode == "Breakout3"
             hitTp1ConditionShort := condBo3Short and isShortInProfit
@@ -1353,14 +1387,16 @@ if strategy.position_size < 0
         countTP1   += 1
         if effMoveSlToBe == "TP 1"
             slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP1
-        // Nếu dùng kiểu Price Action (Breakout2/Breakout3/FVG), đóng % khối lượng TP1 theo giá Market
+        // Nếu dùng kiểu Price Action / Next (n) Candle, đóng % khối lượng TP1 theo giá Market
         if effTp1Mode != "Theo RRR / Tỷ lệ"
             strategy.close("Short", qty_percent = tp1QtyPct, comment = "TP1 Short (" + effTp1Mode + ")")
             
     // Kiểm tra chạm TP2
     bool hitTp2ConditionShort = false
     if not tp2Reached
-        if effTp2Mode == "Breakout2"
+        if effTp2Mode == "Next (n) Candle"
+            hitTp2ConditionShort := not na(entryBarIdx) and (bar_index - entryBarIdx >= math.max(1, int(math.round(effRrrTp2))))
+        else if effTp2Mode == "Breakout2"
             hitTp2ConditionShort := condBo2Short and isShortInProfit
         else if effTp2Mode == "Breakout3"
             hitTp2ConditionShort := condBo3Short and isShortInProfit
@@ -1374,7 +1410,7 @@ if strategy.position_size < 0
         countTP2   += 1
         if effMoveSlToBe == "TP 2"
             slPrice := math.min(slPrice, entryPrice) // Dời SL về Hòa vốn khi đạt TP2
-        // Nếu dùng kiểu Price Action (Breakout2/Breakout3/FVG), đóng toàn bộ khối lượng còn lại của TP2
+        // Nếu dùng kiểu Price Action / Next (n) Candle, đóng toàn bộ khối lượng còn lại của TP2
         if effTp2Mode != "Theo RRR / Tỷ lệ"
             strategy.close("Short", comment = "TP2 Short (" + effTp2Mode + ")")
         
