@@ -52,6 +52,18 @@ grp_spread       = "1.3 Spread filter"
 spreadFilterType = input.string("None", "Spread filter", options = ["None", "Spread Bùng nổ >= 80%", "Spread Mở rộng 50-80%", "Spread Bình thường 20-50%", "Spread nén <= 20%"], group = grp_spread, tooltip = "Chọn điều kiện lọc Entry theo phân vị biên độ nến (Spread = High - Low) trong 100 nến trước:\n- None: Không lọc\n- Spread Bùng nổ >= 80%: Chỉ vào lệnh khi Spread >= P80\n- Spread Mở rộng 50-80%: Chỉ vào lệnh khi Spread nằm trong khoảng 50% - 80%\n- Spread Bình thường 20-50%: Chỉ vào lệnh khi Spread nằm trong khoảng 20% - 50%\n- Spread nén <= 20%: Chỉ vào lệnh khi Spread <= P20")
 spreadLookback   = input.int(100, "Spread Lookback", minval = 5, group = grp_spread, tooltip = "Chu kỳ số nến tính phân vị Spread (Mặc định: 100)")
 
+// --- Group 1.4: Kiểm định Walk-Forward Analysis (WFA) ---
+grp_wfa          = "1.4. Kiểm định Walk-Forward Analysis (WFA)"
+enableWfa        = input.bool(false, "Bật Walk-Forward Analysis (WFA)", group = grp_wfa, tooltip = "Bật tính năng chia chu kỳ kiểm định Walk-Forward (In-Sample / Out-of-Sample) theo khung thời gian đã chọn.")
+wfaTf            = input.string("D1", "Chu kỳ WFA (Timeframe Cycle)", options = ["M5", "M15", "M30", "H1", "H4", "D1", "W1", "M1 (Tháng)"], group = grp_wfa, tooltip = "Chọn khung thời gian cho mỗi chu kỳ WFA:\n- Ví dụ: Chart M1 và chọn D1 thì mỗi chu kỳ là 1 ngày.\n- Chọn W1 thì mỗi chu kỳ là 1 tuần.\n- Chọn H1 thì mỗi chu kỳ là 1 giờ.\n- Chọn M1 (Tháng) thì mỗi chu kỳ là 1 tháng.")
+wfaCycleOffset   = input.int(0, "Dịch chuyển chu kỳ WFA (Cycle Shift / Offset)", minval = -500, maxval = 500, step = 1, group = grp_wfa, tooltip = "Dịch chuyển vùng kiểm định WFA sang chu kỳ tiếp theo (+1, +2, ...) hoặc chu kỳ trước (-1, -2, ...):\n- Với D1: +1 sẽ chuyển vùng WFA sang ngày tiếp theo.\n- Với W1: +1 sẽ chuyển vùng WFA sang tuần tiếp theo.")
+wfaScope         = input.string("Tất cả các chu kỳ", "Phạm vi kiểm định (WFA Scope)", options = ["Tất cả các chu kỳ", "Chỉ 1 chu kỳ mục tiêu (Single Cycle)", "Từ chu kỳ mục tiêu trở đi (From Cycle N)"], group = grp_wfa, tooltip = "Tất cả các chu kỳ: Áp dụng WFA liên tục trên toàn bộ lịch sử biểu đồ.\nChỉ 1 chu kỳ mục tiêu: Chỉ kiểm định duy nhất 1 chu kỳ (ví dụ chỉ 1 ngày hoặc 1 tuần cụ thể).\nTừ chu kỳ mục tiêu trở đi: Bắt đầu kiểm định từ chu kỳ được chọn đến hiện tại.")
+wfaTargetCycle   = input.int(1, "Số thứ tự chu kỳ mục tiêu (Target Cycle #)", minval = 1, maxval = 9999, step = 1, group = grp_wfa, tooltip = "Chọn số thứ tự chu kỳ (Cycle Index) để kiểm định khi chọn phạm vi Single Cycle hoặc From Cycle N.")
+wfaMode          = input.string("Chỉ kiểm định Out-of-Sample (OOS)", "Chế độ kiểm định (WFA Mode)", options = ["Chỉ kiểm định Out-of-Sample (OOS)", "Chỉ kiểm định In-Sample (IS)", "Toàn bộ chu kỳ (Cả IS & OOS)", "Chu kỳ xen kẽ (Xen kẽ 1 chu kỳ IS, 1 chu kỳ OOS)"], group = grp_wfa, tooltip = "Chọn chế độ thực hiện lệnh trong chu kỳ WFA:\n- Chỉ kiểm định Out-of-Sample (OOS): Chỉ mở lệnh trong phần Out-of-Sample (Mặc định 30% cuối mỗi chu kỳ) để kiểm tra độ tin cậy của chiến lược.\n- Chỉ kiểm định In-Sample (IS): Chỉ mở lệnh trong phần In-Sample (70% đầu mỗi chu kỳ).\n- Toàn bộ chu kỳ (Cả IS & OOS): Mở lệnh trên toàn bộ chu kỳ và vẽ Box phân vùng để theo dõi.\n- Chu kỳ xen kẽ: Chu kỳ lẻ là IS, Chu kỳ chẵn là OOS.")
+wfaOosPercent    = input.int(30, "Tỷ lệ Out-of-Sample (% OOS trong mỗi chu kỳ)", minval = 5, maxval = 95, step = 5, group = grp_wfa, tooltip = "Tỷ lệ phần trăm thời gian của mỗi chu kỳ dành cho Out-of-Sample (Mặc định: 30% OOS, 70% In-Sample).")
+wfaShowBoxes     = input.bool(true, "Vẽ Box trực quan vùng WFA (OOS)", group = grp_wfa, tooltip = "Vẽ khung chữ nhật bao quanh vùng kiểm định Out-of-Sample (OOS) của từng chu kỳ.")
+wfaShowBg        = input.bool(false, "Tô màu nền vùng Out-of-Sample (OOS Background)", group = grp_wfa, tooltip = "Tô màu nền tím nhẹ tại các nến thuộc vùng kiểm định Out-of-Sample.")
+
 // --- Group 2: Nhận diện Sideway (Sideway Up & Sideway Down) ---
 grp_side        = "2. Nhận diện Trạng thái Sideway"
 detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
@@ -887,6 +899,86 @@ plotshape(effEntryType == "VMA Reversal" and allowShort and isVmaShortSignalBar,
 
 
 // ==============================================================================
+// 4.8. TÍNH TOÁN CHU KỲ WALK-FORWARD ANALYSIS (WFA ENGINE)
+// ==============================================================================
+
+// Ánh xạ chu kỳ WFA sang chuỗi timeframe tương ứng của Pine Script
+string wfaTfString = wfaTf == "M5" ? "5" :
+                     wfaTf == "M15" ? "15" :
+                     wfaTf == "M30" ? "30" :
+                     wfaTf == "H1" ? "60" :
+                     wfaTf == "H4" ? "240" :
+                     wfaTf == "D1" ? "D" :
+                     wfaTf == "W1" ? "W" : "M"
+
+int wfaTimeOpen  = time(wfaTfString)
+int wfaTimeClose = time_close(wfaTfString)
+
+bool isNewWfaCycle = ta.change(wfaTimeOpen) != 0
+
+var int wfaCycleIndex = 0
+if isNewWfaCycle
+    wfaCycleIndex += 1
+
+// Tính số thứ tự chu kỳ hiệu dụng có tính đến dịch chuyển Offset
+int effCycleIndex          = wfaCycleIndex + wfaCycleOffset
+int targetCycleWithOffset  = wfaTargetCycle + wfaCycleOffset
+
+// Xác định chu kỳ hiện tại có nằm trong phạm vi kiểm định (Scope) hay không
+bool isCycleInScope = true
+if wfaScope == "Chỉ 1 chu kỳ mục tiêu (Single Cycle)"
+    isCycleInScope := (wfaCycleIndex == targetCycleWithOffset)
+else if wfaScope == "Từ chu kỳ mục tiêu trở đi (From Cycle N)"
+    isCycleInScope := (wfaCycleIndex >= targetCycleWithOffset)
+else
+    isCycleInScope := true
+
+// Tính thời lượng chuẩn của 1 chu kỳ để tính tiến độ
+float fallbackDuration = wfaTf == "M5" ? 300000.0 :
+                         wfaTf == "M15" ? 900000.0 :
+                         wfaTf == "M30" ? 1800000.0 :
+                         wfaTf == "H1" ? 3600000.0 :
+                         wfaTf == "H4" ? 14400000.0 :
+                         wfaTf == "D1" ? 86400000.0 :
+                         wfaTf == "W1" ? 604800000.0 : 2592000000.0
+
+float wfaCycleDuration = (not na(wfaTimeClose) and not na(wfaTimeOpen) and wfaTimeClose > wfaTimeOpen) ? float(wfaTimeClose - wfaTimeOpen) : fallbackDuration
+float wfaCycleElapsed  = not na(wfaTimeOpen) ? float(time - wfaTimeOpen) : 0.0
+float wfaCycleProgress = math.min(1.0, math.max(0.0, wfaCycleDuration > 0 ? wfaCycleElapsed / wfaCycleDuration : 0.0))
+
+// Tỷ lệ phân bổ In-Sample vs Out-of-Sample
+float wfaIsRatio = (100.0 - float(wfaOosPercent)) / 100.0
+
+bool isWfaOosTime = wfaCycleProgress >= wfaIsRatio
+bool isWfaIsTime  = not isWfaOosTime
+
+bool isWfaOosAlternating = (effCycleIndex % 2 == 0)
+bool isWfaIsAlternating  = (effCycleIndex % 2 == 1)
+
+bool isOosActive = false
+bool isIsActive  = false
+
+if wfaMode == "Chỉ kiểm định Out-of-Sample (OOS)" or wfaMode == "Chỉ kiểm định In-Sample (IS)" or wfaMode == "Toàn bộ chu kỳ (Cả IS & OOS)"
+    isOosActive := isWfaOosTime and isCycleInScope
+    isIsActive  := isWfaIsTime and isCycleInScope
+else if wfaMode == "Chu kỳ xen kẽ (Xen kẽ 1 chu kỳ IS, 1 chu kỳ OOS)"
+    isOosActive := isWfaOosAlternating and isCycleInScope
+    isIsActive  := isWfaIsAlternating and isCycleInScope
+
+// Quyết định quyền được mở vị thế mới theo cài đặt WFA
+bool wfaTradeAllowed = true
+if enableWfa
+    if wfaMode == "Chỉ kiểm định Out-of-Sample (OOS)"
+        wfaTradeAllowed := isOosActive
+    else if wfaMode == "Chỉ kiểm định In-Sample (IS)"
+        wfaTradeAllowed := isIsActive
+    else if wfaMode == "Chu kỳ xen kẽ (Xen kẽ 1 chu kỳ IS, 1 chu kỳ OOS)"
+        wfaTradeAllowed := isOosActive
+    else if wfaMode == "Toàn bộ chu kỳ (Cả IS & OOS)"
+        wfaTradeAllowed := isCycleInScope
+
+
+// ==============================================================================
 // 5. QUẢN LÝ LỆNH, RRR VÀ THỐNG KÊ (STRATEGY & STATISTICS ENGINE)
 // ==============================================================================
 
@@ -1147,8 +1239,8 @@ else if effSpreadFilterType == "Spread nén <= 20%"
     spreadPass := isSpreadExtremeLow
 
 // 1. Điều kiện vào lệnh thông thường (Market On Close)
-bool longCondition  = (effEntryType != "Breakout") and allowLong and longSignal and stLongOk and vwapLongOk and vwapMiddleLong and spreadPass and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0)
-bool shortCondition = (effEntryType != "Breakout") and allowShort and shortSignal and stShortOk and vwapShortOk and vwapMiddleShort and spreadPass and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0)
+bool longCondition  = (effEntryType != "Breakout") and allowLong and longSignal and stLongOk and vwapLongOk and vwapMiddleLong and spreadPass and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0) and wfaTradeAllowed
+bool shortCondition = (effEntryType != "Breakout") and allowShort and shortSignal and stShortOk and vwapShortOk and vwapMiddleShort and spreadPass and (not effFilterSideway or not isSidewayRaw) and (strategy.position_size == 0) and wfaTradeAllowed
 
 if longCondition
     hasPendingSidewayUp := false
@@ -1161,7 +1253,7 @@ if shortCondition
     hasPendingVmaShort    := false
 
 // 2. Đặt lệnh chờ Stop cho chế độ Breakout (Buy Stop trên High nến trước 1 tick / Sell Stop dưới Low nến trước 1 tick)
-if effEntryType == "Breakout" and strategy.position_size == 0
+if effEntryType == "Breakout" and strategy.position_size == 0 and wfaTradeAllowed
     bool setupBreakHLLong  = allowLong and stLongOk and vwapLongOk and vwapMiddleHlLong and spreadPass and (not effFilterSideway or not isSidewayRaw)
     bool setupBreakHLShort = allowShort and stShortOk and vwapShortOk and vwapMiddleHlShort and spreadPass and (not effFilterSideway or not isSidewayRaw)
     
@@ -1174,6 +1266,9 @@ if effEntryType == "Breakout" and strategy.position_size == 0
         strategy.entry("Short", strategy.short, stop = low - syminfo.mintick, comment = "Short (Breakout)")
     else
         strategy.cancel("Short")
+else if effEntryType == "Breakout" and strategy.position_size == 0 and not wfaTradeAllowed
+    strategy.cancel("Long")
+    strategy.cancel("Short")
 
 // --- XỬ LÝ LỆNH LONG MỚI (MARKET ORDER CHO ST FLIP / BREAK SIDEWAY / FIRST PULLBACK / PULLBACK + SIDEWAY) ---
 if longCondition
@@ -1589,6 +1684,40 @@ plot(showTradeLevels and isTradeActive ? slPrice : na, "Mức Stoploss (SL)", co
 plot(showTradeLevels and isTradeActive and (effTp1Mode == "Theo RRR / Tỷ lệ") ? tp1Price : na, "Mức Take Profit 1 (TP1)", color = color.new(#22c55e, 0), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dashed)
 plot(showTradeLevels and isTradeActive and (effTp2Mode == "Theo RRR / Tỷ lệ") ? tp2Price : na, "Mức Take Profit 2 (TP2)", color = color.new(#10b981, 0), linewidth = 1, style = plot.style_linebr, linestyle = plot.linestyle_dashed)
 
+// 6.3. Vẽ Box và Tô màu nền cho Vùng Kiểm định Walk-Forward Analysis (WFA)
+var box  wfaOosBox     = na
+var bool prevOosActive = false
+
+if enableWfa and wfaShowBoxes
+    bool isOosStart = isOosActive and not prevOosActive
+    if isOosStart
+        string boxTitle = "WFA OOS #" + str.tostring(wfaCycleIndex) + " (" + wfaTf + " - " + str.tostring(wfaOosPercent) + "%)"
+        wfaOosBox := box.new(
+             left         = bar_index,
+             top          = high,
+             right        = bar_index,
+             bottom       = low,
+             border_color = color.new(#a855f7, 30),
+             border_width = 1,
+             border_style = line.style_dashed,
+             bgcolor      = color.new(#a855f7, 92),
+             text         = boxTitle,
+             text_size    = size.tiny,
+             text_color   = color.new(#c084fc, 0),
+             text_valign  = text.align_bottom,
+             text_halign  = text.align_right
+        )
+    else if isOosActive and not na(wfaOosBox)
+        box.set_right(wfaOosBox, bar_index)
+        box.set_top(wfaOosBox, math.max(box.get_top(wfaOosBox), high))
+        box.set_bottom(wfaOosBox, math.min(box.get_bottom(wfaOosBox), low))
+    else if not isOosActive
+        wfaOosBox := na
+
+prevOosActive := isOosActive
+
+bgcolor(enableWfa and wfaShowBg and isOosActive ? color.new(#a855f7, 92) : na, title = "WFA OOS Background Highlight")
+
 
 // ==============================================================================
 // 7. BẢNG THỐNG KÊ DASHBOARD (STATISTICS TABLE)
@@ -1605,8 +1734,8 @@ if showTable and barstate.islast
                       tableSize == "Normal" ? size.normal :
                       tableSize == "Large" ? size.large : size.small
                       
-    // Khởi tạo bảng 2 cột x 14 dòng với nền màu xám nhẹ
-    dashTable := table.new(posTable, 2, 14, bgcolor = color.new(#4b5563, 30), border_width = 1, border_color = color.new(#6b7280, 20), frame_color = color.new(#9ca3af, 20), frame_width = 1)
+    // Khởi tạo bảng 2 cột x 15 dòng với nền màu xám nhẹ
+    dashTable := table.new(posTable, 2, 15, bgcolor = color.new(#4b5563, 30), border_width = 1, border_color = color.new(#6b7280, 20), frame_color = color.new(#9ca3af, 20), frame_width = 1)
     
     // --- Header ---
     string headerRight = templateChoice != "None" ? "TEMPLATE: " + templateChoice : "GIÁ TRỊ THỐNG KÊ"
@@ -1650,6 +1779,12 @@ if showTable and barstate.islast
     color  posCol = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
     table.cell(dashTable, 0, 6, "Vị thế hiện tại", text_color = color.white, text_size = szTable)
     table.cell(dashTable, 1, 6, posStr, bgcolor = posCol, text_color = color.white, text_size = szTable)
+
+    // 6. Walk-Forward Analysis (WFA)
+    string wfaStatusStr = enableWfa ? (wfaTf + " | " + (isOosActive ? "Đang OOS 🔬" : "Đang IS 📚") + " (#" + str.tostring(wfaCycleIndex) + ")") : "TẮT (Full Sample)"
+    color  wfaStatusCol = enableWfa ? (isOosActive ? color.new(#a855f7, 0) : color.new(#38bdf8, 0)) : color.new(#9ca3af, 0)
+    table.cell(dashTable, 0, 7, "Walk-Forward (WFA)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 7, wfaStatusStr, text_color = wfaStatusCol, text_size = szTable)
     
     // --- Tính toán thống kê chính xác từ strategy.closedtrades theo từng lượt vào lệnh (Unique Trade Entry) ---
     int calcCountTP1 = 0
@@ -1704,34 +1839,34 @@ if showTable and barstate.islast
     float tp1Rate = dispTotalTrades > 0 ? (float(calcCountTP1) / float(totalTradesRef)) * 100.0 : 0.0
     float tp2Rate = dispTotalTrades > 0 ? (float(calcCountTP2) / float(totalTradesRef)) * 100.0 : 0.0
 
-    // 6. Tổng số lệnh đã vào
-    table.cell(dashTable, 0, 7, "Tổng số lệnh đã mở", text_color = color.white, text_size = szTable)
-    table.cell(dashTable, 1, 7, str.tostring(dispTotalTrades), text_color = color.white, text_size = szTable)
+    // 7. Tổng số lệnh đã vào
+    table.cell(dashTable, 0, 8, "Tổng số lệnh đã mở", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 8, str.tostring(dispTotalTrades), text_color = color.white, text_size = szTable)
     
-    // 7. Thống kê Số lần Stop Loss
-    table.cell(dashTable, 0, 8, "🛑 Số lần Stoploss (SL)", text_color = color.new(#fca5a5, 0), text_size = szTable)
-    table.cell(dashTable, 1, 8, str.tostring(calcCountSL) + " (" + str.tostring(slRate, "#.#") + "%)", text_color = color.new(#ef4444, 0), text_size = szTable)
+    // 8. Thống kê Số lần Stop Loss
+    table.cell(dashTable, 0, 9, "🛑 Số lần Stoploss (SL)", text_color = color.new(#fca5a5, 0), text_size = szTable)
+    table.cell(dashTable, 1, 9, str.tostring(calcCountSL) + " (" + str.tostring(slRate, "#.#") + "%)", text_color = color.new(#ef4444, 0), text_size = szTable)
     
-    // 8. Thống kê Số lần chạm TP1
+    // 9. Thống kê Số lần chạm TP1
     string lblTp1 = effTp1Mode == "Theo RRR / Tỷ lệ" ? "🎯 Số lần Chạm TP1 (RRR)" : "🎯 Số lần Chạm TP1 (" + effTp1Mode + ")"
-    table.cell(dashTable, 0, 9, lblTp1, text_color = color.new(#86efac, 0), text_size = szTable)
-    table.cell(dashTable, 1, 9, str.tostring(calcCountTP1) + " (" + str.tostring(tp1Rate, "#.#") + "%)", text_color = color.new(#22c55e, 0), text_size = szTable)
+    table.cell(dashTable, 0, 10, lblTp1, text_color = color.new(#86efac, 0), text_size = szTable)
+    table.cell(dashTable, 1, 10, str.tostring(calcCountTP1) + " (" + str.tostring(tp1Rate, "#.#") + "%)", text_color = color.new(#22c55e, 0), text_size = szTable)
     
-    // 9. Thống kê Số lần chạm TP2
+    // 10. Thống kê Số lần chạm TP2
     string lblTp2 = effTp2Mode == "Theo RRR / Tỷ lệ" ? "🏆 Số lần Chạm TP2 (RRR)" : "🏆 Số lần Chạm TP2 (" + effTp2Mode + ")"
-    table.cell(dashTable, 0, 10, lblTp2, text_color = color.new(#6ee7b7, 0), text_size = szTable)
-    table.cell(dashTable, 1, 10, str.tostring(calcCountTP2) + " (" + str.tostring(tp2Rate, "#.#") + "%)", text_color = color.new(#10b981, 0), text_size = szTable)
+    table.cell(dashTable, 0, 11, lblTp2, text_color = color.new(#6ee7b7, 0), text_size = szTable)
+    table.cell(dashTable, 1, 11, str.tostring(calcCountTP2) + " (" + str.tostring(tp2Rate, "#.#") + "%)", text_color = color.new(#10b981, 0), text_size = szTable)
     
-    // 10. Tỷ lệ Winrate tổng thể trên sàn Backtest
+    // 11. Tỷ lệ Winrate tổng thể trên sàn Backtest
     float winRate = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100.0 : 0.0
-    table.cell(dashTable, 0, 11, "Tỷ lệ thắng (Win Rate)", text_color = color.white, text_size = szTable)
-    table.cell(dashTable, 1, 11, str.tostring(winRate, "#.#") + "% (" + str.tostring(strategy.wintrades) + "/" + str.tostring(strategy.closedtrades) + ")", text_color = winRate >= 50 ? color.green : color.orange, text_size = szTable)
+    table.cell(dashTable, 0, 12, "Tỷ lệ thắng (Win Rate)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 12, str.tostring(winRate, "#.#") + "% (" + str.tostring(strategy.wintrades) + "/" + str.tostring(strategy.closedtrades) + ")", text_color = winRate >= 50 ? color.green : color.orange, text_size = szTable)
     
-    // 11. Lợi nhuận ròng (Net Profit)
+    // 12. Lợi nhuận ròng (Net Profit)
     color pnlCol = strategy.netprofit >= 0 ? color.green : color.red
-    table.cell(dashTable, 0, 12, "Lợi nhuận ròng (USD)", text_color = color.white, text_size = szTable)
-    table.cell(dashTable, 1, 12, str.tostring(strategy.netprofit, "#.##") + " USD", text_color = pnlCol, text_size = szTable)
+    table.cell(dashTable, 0, 13, "Lợi nhuận ròng (USD)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 13, str.tostring(strategy.netprofit, "#.##") + " USD", text_color = pnlCol, text_size = szTable)
     
-    // 12. Max Drawdown
-    table.cell(dashTable, 0, 13, "Sụt giảm tối đa (Max DD)", text_color = color.white, text_size = szTable)
-    table.cell(dashTable, 1, 13, str.tostring(strategy.max_drawdown, "#.##") + " USD (" + str.tostring(strategy.max_drawdown_percent, "#.#") + "%)", text_color = color.new(#f87171, 0), text_size = szTable)
+    // 13. Max Drawdown
+    table.cell(dashTable, 0, 14, "Sụt giảm tối đa (Max DD)", text_color = color.white, text_size = szTable)
+    table.cell(dashTable, 1, 14, str.tostring(strategy.max_drawdown, "#.##") + " USD (" + str.tostring(strategy.max_drawdown_percent, "#.#") + "%)", text_color = color.new(#f87171, 0), text_size = szTable)
