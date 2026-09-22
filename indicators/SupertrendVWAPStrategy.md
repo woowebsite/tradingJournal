@@ -119,10 +119,17 @@ Lọc tín hiệu Entry theo phân vị biên độ nến ($Spread = High - Low$
   - **`Pullback + Sideway` (Kết hợp Pullback và Break Sideway):**
     - **Cơ chế hoạt động:** Cho phép chiến lược vào lệnh khi xuất hiện tín hiệu **First Pullback** HOẶC **Break Sideway** (trong vòng 3 nến).
     - **Liên hoàn vị thế (Chaining trades):** Sau khi lệnh First Pullback đã chốt lời hoàn tất (trạng thái tài khoản trở về `Flat`), nếu trong cùng con sóng Supertrend đó tiếp tục hình thành vùng tích lũy Sideway mới và giá phá vỡ vùng này trong vòng 3 nến, hệ thống sẽ **tự động mở tiếp lệnh theo Break Sideway**.
-  - **`Breakout` (Lệnh chờ Stop phá đỉnh/đáy nến trước 1 tick):**
-    - **Cơ chế:** Đặt lệnh chờ **Buy Stop** trên đỉnh nến trước 1 tick hoặc **Sell Stop** dưới đáy nến trước 1 tick; lệnh sẽ khớp ngay lập tức khi giá trong nến tiếp theo phá vỡ mức giá này mà **không cần chờ nến đóng cửa** và tránh hiện tượng khớp tức thì khi $Close = Low$ hoặc $Close = High$.
-    - **Lệnh Long (Buy Stop):** Khi thị trường đang trong xu hướng tăng, đặt lệnh chờ Buy Stop tại `stop = High + syminfo.mintick`. Khớp lệnh ngay khi giá vượt qua đỉnh nến trước.
-    - **Lệnh Short (Sell Stop):** Khi thị trường đang trong xu hướng giảm, đặt lệnh chờ Sell Stop tại `stop = Low - syminfo.mintick`. Khớp lệnh ngay khi giá phá thủng đáy nến trước.
+  - **`Breakdown`:**
+    - **Lệnh Long:** Vào lệnh khi nến đỏ đóng cửa phá vỡ giá thấp nhất của nến trước ($Close < Open$ và $Close < Low[1]$).
+    - **Lệnh Short:** Vào lệnh khi nến xanh đóng cửa vượt giá cao nhất của nến trước ($Close > Open$ và $Close > High[1]$).
+  - **`VMA Reversal` (Đảo chiều theo dải VMA ATR Bands):**
+    - **Lệnh Long:**
+      - **Signal Bar Long:** Nến đảo chiều cắt ngược qua VMA có $Open < VMA$ và $Close > VMA$, đồng thời trong chu kỳ $N$ nến trước đó ($N = vmaLen$) bắt buộc phải có ít nhất 1 nến có đáy nhúng xuống dưới dải Lower Band ($Low < lband$).
+      - **Entry Bar Long:** Cây nến tiếp theo đóng cửa vượt qua giá đỉnh của cây Signal Bar ($Close > High_{\text{Signal Bar}}$).
+    - **Lệnh Short:**
+      - **Signal Bar Short:** Nến đảo chiều cắt ngược xuống dưới VMA có $Open > VMA$ và $Close < VMA$, đồng thời trong chu kỳ $N$ nến trước đó ($N = vmaLen$) bắt buộc phải có ít nhất 1 nến có đỉnh vượt lên trên dải Upper Band ($High > uband$).
+      - **Entry Bar Short:** Cây nến tiếp theo đóng cửa phá thủng giá đáy của cây Signal Bar ($Close < Low_{\text{Signal Bar}}$).
+    - **Trực quan:** Hiển thị tự động đường **VMA** kèm 2 dải **Upper Band (ubx)** / **Lower Band (lbx)** và đánh dấu biểu tượng **Signal** ngay tại các cây nến Signal Bar.
 - **Tùy chọn Kiểu Stop Loss (`slType`):**
   - **`Supertrend`:** Đặt Stop Loss tại đường Supertrend tại thời điểm nến vào lệnh.
   - **`Sideway Zone`:** Đặt Stop Loss dưới đáy vùng Sideway / Pullback đối với lệnh Long, và trên đỉnh vùng Sideway / Pullback đối với lệnh Short.

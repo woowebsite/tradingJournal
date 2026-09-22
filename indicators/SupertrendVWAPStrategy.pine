@@ -56,8 +56,8 @@ spreadLookback   = input.int(100, "Spread Lookback", minval = 5, group = grp_spr
 grp_side        = "2. Nhận diện Trạng thái Sideway"
 detectSideway   = input.bool(true, "Bật tính năng phát hiện Sideway", group = grp_side, tooltip = "Phát hiện thị trường đi ngang ngay cả khi giá vẫn nằm trên Supertrend (Sideway Up) hoặc dưới Supertrend (Sideway Down).")
 sidewayMethod   = input.string("Narrow Sideway", "Sideway method", options = ["Narrow Sideway", "VCP", "Kết hợp (ADX + Kaufman ER + CHOP)", "ADX Thấp", "Choppiness Index Cao", "Kaufman ER Thấp", "Biên độ nén BB Width"], group = grp_side, tooltip = "Chọn phương pháp nhận diện vùng tích lũy / Sideway:\n- Narrow Sideway: Price Action nén biên độ & FVG.\n- VCP: Mẫu hình thu hẹp biến động (Volatility Contraction Pattern) theo dải VMA ATR Bands (ubx & lbx). VCP Up: toàn bộ Open nằm trong dải Bands, không có Low < Lower Band, tối thiểu 2 nến High < Upper Band, kết thúc khi Close > Upper Band. VCP Down: toàn bộ Open nằm trong dải Bands, không có High > Upper Band, tối thiểu 2 nến Low > Lower Band, kết thúc khi Close < Lower Band. Tối thiểu 3 nến trước khi Break.\n- Kết hợp (ADX + Kaufman ER + CHOP): Bộ lọc đa chỉ báo.")
-vmaLen          = input.int(5, "VCP VMA Length", minval = 1, group = grp_side, tooltip = "Chu kỳ VMA (Variable Moving Average) phục vụ nhận diện VCP (Mặc định: 6)")
-vmaMult         = input.float(1, "VCP Bands Multiplier", minval = 0.1, step = 0.1, group = grp_side, tooltip = "Hệ số nhân ATR Bands cho VMA (Mặc định: 1.5)")
+vmaLen          = input.int(5, "VMA Length (VCP / Reversal)", minval = 1, group = grp_side, tooltip = "Chu kỳ VMA (Variable Moving Average) phục vụ nhận diện VCP và VMA Reversal (Mặc định: 5)")
+vmaMult         = input.float(1, "VMA Bands Multiplier", minval = 0.1, step = 0.1, group = grp_side, tooltip = "Hệ số nhân ATR Bands cho VMA (Mặc định: 1.0)")
 adxThresh       = input.float(20.0, "Ngưỡng ADX (Dưới ngưỡng là Sideway)", minval = 5.0, maxval = 50.0, step = 1.0, group = grp_side, tooltip = "Chỉ số ADX dưới mức này báo hiệu lực xu hướng yếu / tích lũy (Mặc định: 20)")
 chopThresh      = input.float(60.0, "Ngưỡng Choppiness Index (Trên ngưỡng là Sideway)", minval = 30.0, maxval = 90.0, step = 1.0, group = grp_side, tooltip = "Chỉ số CHOP trên mức này báo hiệu thị trường giật cục / không có xu hướng (Mặc định: 60)")
 erThresh        = input.float(0.30, "Ngưỡng Kaufman ER (Dưới ngưỡng là Sideway)", minval = 0.05, maxval = 0.9, step = 0.05, group = grp_side, tooltip = "Hiệu suất di chuyển giá Kaufman ER dưới mức này thể hiện nhiều nến chồng chéo / nhiễu (Mặc định: 0.30)")
@@ -67,7 +67,7 @@ grp_trade       = "3. Quản lý Vào lệnh & Thoát lệnh RRR"
 allowLong       = input.bool(true, "Cho phép lệnh Long (Mua)", group = grp_trade)
 allowShort      = input.bool(true, "Cho phép lệnh Short (Bán)", group = grp_trade)
 filterSideway   = input.bool(false, "Không mở vị thế mới nếu đang Sideway", group = grp_trade, tooltip = "Nếu bật, khi có tín hiệu vào lệnh nhưng thị trường đang nằm trong vùng Sideway sẽ bỏ qua.")
-entryType       = input.string("Breakout", "Kiểu vào lệnh (Entry Type)", options = ["Supertrend Flip", "Break Sideway", "First Pullback", "Pullback + Sideway", "Breakout", "Breakdown"], group = grp_trade, tooltip = "Supertrend Flip: Vào lệnh ngay khi Supertrend đảo chiều xu hướng.\nBreak Sideway: Vào lệnh khi giá phá vỡ đỉnh (Long) hoặc đáy (Short) của bất kỳ vùng Sideway nào khi chưa có lệnh.\nFirst Pullback: Vào lệnh sau khi kết thúc vùng First Pullback đầu tiên của sóng Supertrend mà giá vẫn duy trì xu hướng.\nPullback + Sideway: Cho phép vào lệnh khi xảy ra Pullback hoặc Sideway. Sau khi lệnh Pullback chốt lời, vẫn tiếp tục vào thêm lệnh nếu xuất hiện Break Sideway.\nBreakout: Vào lệnh Long khi phá vỡ High nến trước và nằm trên Supertrend tăng; Short khi phá vỡ Low nến trước và nằm dưới Supertrend giảm.\nBreakdown: Vào lệnh Long khi giá đóng nến đỏ phá Low nến trước (close < open và close < low[1]); Short khi giá đóng nến xanh phá High nến trước (close > open và close > high[1]).")
+entryType       = input.string("Breakout", "Kiểu vào lệnh (Entry Type)", options = ["Supertrend Flip", "Break Sideway", "First Pullback", "Pullback + Sideway", "Breakout", "Breakdown", "VMA Reversal"], group = grp_trade, tooltip = "Supertrend Flip: Vào lệnh ngay khi Supertrend đảo chiều xu hướng.\nBreak Sideway: Vào lệnh khi giá phá vỡ đỉnh (Long) hoặc đáy (Short) của bất kỳ vùng Sideway nào khi chưa có lệnh.\nFirst Pullback: Vào lệnh sau khi kết thúc vùng First Pullback đầu tiên của sóng Supertrend mà giá vẫn duy trì xu hướng.\nPullback + Sideway: Cho phép vào lệnh khi xảy ra Pullback hoặc Sideway. Sau khi lệnh Pullback chốt lời, vẫn tiếp tục vào thêm lệnh nếu xuất hiện Break Sideway.\nBreakout: Vào lệnh Long khi phá vỡ High nến trước và nằm trên Supertrend tăng; Short khi phá vỡ Low nến trước và nằm dưới Supertrend giảm.\nBreakdown: Vào lệnh Long khi giá đóng nến đỏ phá Low nến trước (close < open và close < low[1]); Short khi giá đóng nến xanh phá High nến trước (close > open và close > high[1]).\nVMA Reversal: Long khi xuất hiện Signal Bar (Open < VMA và Close > VMA, trong vmaLen nến trước có Low < lband) và Entry Bar khi Close > High Signal Bar; Short khi xuất hiện Signal Bar (Open > VMA và Close < VMA, trong vmaLen nến trước có High > uband) và Entry Bar khi Close < Low Signal Bar.")
 slType          = input.string("Supertrend", "Kiểu Stop Loss (Stoploss Type)", options = ["Supertrend", "Sideway Zone", "Entry Candle", "Previous Candle"], group = grp_trade, tooltip = "Supertrend: Đặt SL theo đường Supertrend tại thời điểm vào lệnh.\nSideway Zone: Đặt SL dưới đáy vùng Sideway (Long) hoặc trên đỉnh vùng Sideway (Short).\nEntry Candle: Đặt SL tại Low của nến Entry (Long) hoặc High của nến Entry (Short).\nPrevious Candle: Đặt SL tại Low của nến trước đó (Long) hoặc High của nến trước đó (Short).")
 tpType          = input.string("Percent", "Kiểu tính khoảng cách TP theo RRR (RRR Distance Type)", options = ["ATR", "ATR (HTF)", "Percent", "Spread", "VWAP"], group = grp_trade, tooltip = "Sử dụng khi TP1/TP2 chọn chế độ 'Theo RRR / Tỷ lệ' (By RRR):\n- ATR: Khoảng cách = Hệ số nhân x ATR.\n- ATR (HTF): Khoảng cách = Hệ số nhân x ATR(6) HTF.\n- Percent: Khoảng cách = Hệ số nhân x Risk ban đầu (Entry - SL).\n- Spread: Khoảng cách = Số tick x Bước giá tối thiểu (syminfo.mintick).\n- VWAP: Chốt lời theo dải Upper 2/3 (Long) hoặc Lower 2/3 (Short) của VWAP.")
 tp1Mode         = input.string("Theo RRR / Tỷ lệ", "Phương thức Take Profit 1 (TP1)", options = ["Theo RRR / Tỷ lệ", "Next (n) Candle", "Breakout2", "Breakout3", "FVG"], group = grp_trade, tooltip = "Theo RRR / Tỷ lệ: Chốt lời theo giá trị rrrTp1 và kiểu tpType.\nNext (n) Candle: Thoát lệnh sau n nến kể từ nến Entry (với n = rrrTp1, ví dụ rrrTp1 = 1 là thoát tại nến kế tiếp sau nến Entry).\nBreakout2: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 2 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời (close > entryPrice cho Long, close < entryPrice cho Short).\nBreakout3: Chốt lời khi giá đóng cửa cao hơn (Long) / thấp hơn (Short) 3 nến trước đó, cách nến Entry tối thiểu 3 nến và đang có lời.\nFVG: Chốt lời khi xuất hiện FVG (nến [2] xảy ra sau nến Entry) và đang có lời.")
@@ -335,10 +335,10 @@ float uband = vma + o
 float lband = vma - o
 color vmaC  = (vma > nz(vma[1], vma)) ? color.green : (vma < nz(vma[1], vma)) ? color.red : (vma == nz(vma[1], vma)) ? color.blue : color.black
 
-// Vẽ VMA và VMA Bands (ubx, lbx) trên biểu đồ khi chọn phương pháp VCP
-pVma = plot(effSidewayMethod == "VCP" ? vma : na, "VCP VMA", color = vmaShowTrend ? vmaC : color.new(#fbbf24, 20), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_solid)
-ubx  = plot(effSidewayMethod == "VCP" ? uband : na, "VCP UpperBand (ubx)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
-lbx  = plot(effSidewayMethod == "VCP" ? lband : na, "VCP LowerBand (lbx)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
+// Vẽ VMA và VMA Bands (ubx, lbx) trên biểu đồ khi chọn phương pháp VCP hoặc Entry Type là VMA Reversal
+pVma = plot(effSidewayMethod == "VCP" or effEntryType == "VMA Reversal" ? vma : na, "VMA", color = vmaShowTrend ? vmaC : color.new(#fbbf24, 20), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_solid)
+ubx  = plot(effSidewayMethod == "VCP" or effEntryType == "VMA Reversal" ? uband : na, "VMA UpperBand (ubx)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
+lbx  = plot(effSidewayMethod == "VCP" or effEntryType == "VMA Reversal" ? lband : na, "VMA LowerBand (lbx)", color = color.new(#38bdf8, 30), linewidth = 1, style = plot.style_line, linestyle = plot.linestyle_dotted)
 
 // 4.4. Cơ chế Nhận diện Sideway theo cấu trúc NARROW SIDEWAY (Price Action & FVG)
 
@@ -811,6 +811,80 @@ else if supertrendDir == -1 and not hadFirstPbDown
     if not inFirstPbDown and (barsSinceRevDown >= atrWindowDown)
         hadFirstPbDown := true
 
+// 4.7. THEO DÕI TÍN HIỆU VMA REVERSAL
+// --- A. Nhận diện Signal Bar ---
+// Signal Bar Long: Open < VMA và Close > VMA, trong vmaLen nến trước đó có ít nhất 1 nến có Low < lband
+bool hadLowBelowLband = false
+for i = 1 to vmaLen
+    if low[i] < lband[i]
+        hadLowBelowLband := true
+        break
+
+bool isVmaLongSignalBar = (supertrendDir == 1) and (open < vma) and (close > vma) and hadLowBelowLband
+
+// Signal Bar Short: Supertrend đang Giảm (-1), Open > VMA và Close < VMA, trong vmaLen nến trước đó có ít nhất 1 nến có High > uband
+bool hadHighAboveUband = false
+for i = 1 to vmaLen
+    if high[i] > uband[i]
+        hadHighAboveUband := true
+        break
+
+bool isVmaShortSignalBar = (supertrendDir == -1) and (open > vma) and (close < vma) and hadHighAboveUband
+
+// --- B. Theo dõi trạng thái chờ Entry Bar ---
+var bool  hasPendingVmaLong   = false
+var float vmaLongSignalHigh   = na
+var float vmaLongSignalLow    = na
+var int   vmaLongSignalBar    = na
+
+var bool  hasPendingVmaShort  = false
+var float vmaShortSignalHigh  = na
+var float vmaShortSignalLow   = na
+var int   vmaShortSignalBar   = na
+
+// Cập nhật khi có Signal Bar mới
+if isVmaLongSignalBar
+    hasPendingVmaLong  := true
+    vmaLongSignalHigh  := high
+    vmaLongSignalLow   := low
+    vmaLongSignalBar   := bar_index
+
+if isVmaShortSignalBar
+    hasPendingVmaShort := true
+    vmaShortSignalHigh := high
+    vmaShortSignalLow  := low
+    vmaShortSignalBar  := bar_index
+
+// Điều kiện kích hoạt Entry Bar
+bool isVmaReversalLong  = false
+bool isVmaReversalShort = false
+
+// - Long Entry: Khi nến hiện tại có close > High của Signal Bar (sau nến Signal Bar)
+if hasPendingVmaLong and not na(vmaLongSignalBar) and bar_index > vmaLongSignalBar
+    if close > vmaLongSignalHigh
+        isVmaReversalLong := true
+        hasPendingVmaLong := false
+    else if (close < vmaLongSignalLow) or (bar_index - vmaLongSignalBar > vmaLen)
+        hasPendingVmaLong := false
+
+// - Short Entry: Khi nến hiện tại có close < Low của Signal Bar (sau nến Signal Bar)
+if hasPendingVmaShort and not na(vmaShortSignalBar) and bar_index > vmaShortSignalBar
+    if close < vmaShortSignalLow
+        isVmaReversalShort := true
+        hasPendingVmaShort := false
+    else if (close > vmaShortSignalHigh) or (bar_index - vmaShortSignalBar > vmaLen)
+        hasPendingVmaShort := false
+
+// Reset trạng thái chờ khi Supertrend đảo chiều
+if isSupertrendBuy
+    hasPendingVmaShort := false
+if isSupertrendSell
+    hasPendingVmaLong  := false
+
+// Vẽ biểu tượng Signal Bar cho VMA Reversal (Chỉ hiển thị khi thuận chiều Supertrend và bật allowLong / allowShort)
+plotshape(effEntryType == "VMA Reversal" and allowLong and isVmaLongSignalBar, title = "VMA Long Signal Bar", style = shape.triangleup, location = location.belowbar, color = color.new(#10b981, 20), size = size.tiny, text = "Signal", textcolor = color.new(#10b981, 0))
+plotshape(effEntryType == "VMA Reversal" and allowShort and isVmaShortSignalBar, title = "VMA Short Signal Bar", style = shape.triangledown, location = location.abovebar, color = color.new(#ef4444, 20), size = size.tiny, text = "Signal", textcolor = color.new(#ef4444, 0))
+
 
 // ==============================================================================
 // 5. QUẢN LÝ LỆNH, RRR VÀ THỐNG KÊ (STRATEGY & STATISTICS ENGINE)
@@ -995,6 +1069,11 @@ else if effEntryType == "Breakdown"
     longSignal  := (close < open) and (close < low[1])
     // Short: Nến xanh đóng cửa phá High nến trước
     shortSignal := (close > open) and (close > high[1])
+else if effEntryType == "VMA Reversal"
+    // Long: Signal Bar đảo chiều VMA + Entry Bar Close > High Signal Bar
+    longSignal  := isVmaReversalLong
+    // Short: Signal Bar đảo chiều VMA + Entry Bar Close < Low Signal Bar
+    shortSignal := isVmaReversalShort
 
 // --- Đánh giá bộ lọc Xu hướng Supertrend ---
 bool stLongOk  = true
@@ -1074,10 +1153,12 @@ bool shortCondition = (effEntryType != "Breakout") and allowShort and shortSigna
 if longCondition
     hasPendingSidewayUp := false
     lastSidewayEndBarUp := na
+    hasPendingVmaLong   := false
 
 if shortCondition
     hasPendingSidewayDown := false
     lastSidewayEndBarDown := na
+    hasPendingVmaShort    := false
 
 // 2. Đặt lệnh chờ Stop cho chế độ Breakout (Buy Stop trên High nến trước 1 tick / Sell Stop dưới Low nến trước 1 tick)
 if effEntryType == "Breakout" and strategy.position_size == 0
@@ -1102,7 +1183,7 @@ if longCondition
     float baseSl = supertrendVal
     if effSlType == "Sideway Zone"
         bool isPbLongEntry = (effEntryType == "First Pullback") or (effEntryType == "Pullback + Sideway" and isFirstPbLong)
-        float swLow = (isPbLongEntry and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (effSidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : (effSidewayMethod == "VCP" and not na(vcpLow) ? vcpLow : supertrendVal))))
+        float swLow = (isPbLongEntry and not na(pbLowUp)) ? pbLowUp : (not na(currentSwLowUp) ? currentSwLowUp : (not na(lastSidewayLow) ? lastSidewayLow : (effSidewayMethod == "Narrow Sideway" and not na(narrowLowUp) ? narrowLowUp : (effSidewayMethod == "VCP" and not na(vcpLow) ? vcpLow : (effEntryType == "VMA Reversal" and not na(vmaLongSignalLow) ? vmaLongSignalLow : supertrendVal)))))
         baseSl := swLow
     else if effSlType == "Entry Candle"
         baseSl := low
@@ -1131,7 +1212,7 @@ if longCondition
     slReached    := false
     
     countTotalTrades += 1
-    string entryComment = effEntryType == "Supertrend Flip" ? "Long (ST Flip)" : (effEntryType == "Break Sideway" ? "Long (Break Sideway)" : (effEntryType == "First Pullback" ? "Long (First Pullback)" : (effEntryType == "Pullback + Sideway" ? (isFirstPbLong ? "Long (First PB)" : "Long (Break SW)") : (effEntryType == "Breakout" ? "Long (Breakout)" : "Long (Breakdown)"))))
+    string entryComment = effEntryType == "Supertrend Flip" ? "Long (ST Flip)" : (effEntryType == "Break Sideway" ? "Long (Break Sideway)" : (effEntryType == "First Pullback" ? "Long (First Pullback)" : (effEntryType == "Pullback + Sideway" ? (isFirstPbLong ? "Long (First PB)" : "Long (Break SW)") : (effEntryType == "Breakout" ? "Long (Breakout)" : (effEntryType == "Breakdown" ? "Long (Breakdown)" : "Long (VMA Reversal)")))))
     strategy.entry("Long", strategy.long, comment = entryComment)
 
 // --- XỬ LÝ LỆNH SHORT MỚI (MARKET ORDER CHO ST FLIP / BREAK SIDEWAY / FIRST PULLBACK / PULLBACK + SIDEWAY) ---
@@ -1142,7 +1223,7 @@ if shortCondition
     float baseSl = supertrendVal
     if effSlType == "Sideway Zone"
         bool isPbShortEntry = (effEntryType == "First Pullback") or (effEntryType == "Pullback + Sideway" and isFirstPbShort)
-        float swHigh = (isPbShortEntry and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (effSidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : (effSidewayMethod == "VCP" and not na(vcpHighDown) ? vcpHighDown : supertrendVal))))
+        float swHigh = (isPbShortEntry and not na(pbHighDown)) ? pbHighDown : (not na(currentSwHighDown) ? currentSwHighDown : (not na(lastSidewayHigh) ? lastSidewayHigh : (effSidewayMethod == "Narrow Sideway" and not na(narrowHighDown) ? narrowHighDown : (effSidewayMethod == "VCP" and not na(vcpHighDown) ? vcpHighDown : (effEntryType == "VMA Reversal" and not na(vmaShortSignalHigh) ? vmaShortSignalHigh : supertrendVal)))))
         baseSl := swHigh
     else if effSlType == "Entry Candle"
         baseSl := high
@@ -1171,7 +1252,7 @@ if shortCondition
     slReached    := false
     
     countTotalTrades += 1
-    string entryComment = effEntryType == "Supertrend Flip" ? "Short (ST Flip)" : (effEntryType == "Break Sideway" ? "Short (Break Sideway)" : (effEntryType == "First Pullback" ? "Short (First Pullback)" : (effEntryType == "Pullback + Sideway" ? (isFirstPbShort ? "Short (First PB)" : "Short (Break SW)") : (effEntryType == "Breakout" ? "Short (Breakout)" : "Short (Breakdown)"))))
+    string entryComment = effEntryType == "Supertrend Flip" ? "Short (ST Flip)" : (effEntryType == "Break Sideway" ? "Short (Break Sideway)" : (effEntryType == "First Pullback" ? "Short (First Pullback)" : (effEntryType == "Pullback + Sideway" ? (isFirstPbShort ? "Short (First PB)" : "Short (Break SW)") : (effEntryType == "Breakout" ? "Short (Breakout)" : (effEntryType == "Breakdown" ? "Short (Breakdown)" : "Short (VMA Reversal)")))))
     strategy.entry("Short", strategy.short, comment = entryComment)
 
 // --- XỬ LÝ KHỞI TẠO THÔNG SỐ KHI LỆNH BREAKout KHỚP LỆNH CHỜ (BUY STOP / SELL STOP) ---
@@ -1540,7 +1621,7 @@ if showTable and barstate.islast
     table.cell(dashTable, 1, 1, modeStr + " (" + trendModeStr + ") [P:" + str.tostring(effectivePeriod, "#") + " | F:" + str.tostring(effectiveFactor, "#.#") + "]", text_color = modeCol, text_size = szTable)
     
     // 2. Kiểu Vào lệnh & Kiểu Stoploss
-    string dispEntryType = effEntryType == "Supertrend Flip" ? "ST Flip" : (effEntryType == "Break Sideway" ? "Break Sideway" : (effEntryType == "First Pullback" ? "First Pullback" : (effEntryType == "Pullback + Sideway" ? "PB + Sideway" : (effEntryType == "Breakout" ? "Breakout" : "Breakdown"))))
+    string dispEntryType = effEntryType == "Supertrend Flip" ? "ST Flip" : (effEntryType == "Break Sideway" ? "Break Sideway" : (effEntryType == "First Pullback" ? "First Pullback" : (effEntryType == "Pullback + Sideway" ? "PB + Sideway" : (effEntryType == "Breakout" ? "Breakout" : (effEntryType == "Breakdown" ? "Breakdown" : "VMA Reversal")))))
     string dispSlType    = effSlType == "Supertrend" ? "ST" : (effSlType == "Sideway Zone" ? "Sideway" : (effSlType == "Entry Candle" ? "Entry Candle" : "Prev Candle"))
     table.cell(dashTable, 0, 2, "Kiểu Vào Lệnh / SL", text_color = color.white, text_size = szTable)
     table.cell(dashTable, 1, 2, dispEntryType + " | SL: " + dispSlType, text_color = color.new(#38bdf8, 0), text_size = szTable)
