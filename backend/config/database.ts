@@ -47,6 +47,26 @@ export default ({ env }) => {
         filename: path.join(__dirname, '..', '..', env('DATABASE_FILENAME', '.tmp/data.db')),
       },
       useNullAsDefault: true,
+      pool: {
+        min: 1,
+        max: 10,
+        idleTimeoutMillis: 30000,
+        afterCreate: (conn: any, cb: any) => {
+          try {
+            if (typeof conn.pragma === 'function') {
+              conn.pragma('journal_mode = WAL');
+              conn.pragma('synchronous = NORMAL');
+              conn.pragma('cache_size = -64000');
+              conn.pragma('temp_store = MEMORY');
+            } else if (typeof conn.exec === 'function') {
+              conn.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -64000; PRAGMA temp_store = MEMORY;');
+            }
+          } catch (err) {
+            // Fallback gracefully
+          }
+          cb(null, conn);
+        },
+      },
     },
   };
 

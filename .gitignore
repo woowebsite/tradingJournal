@@ -11,4 +11,5 @@ coverage
 frontend/.env*
 frontend/tcbs-cookie.json
 backend/.env*
+backend/.env.*
 
