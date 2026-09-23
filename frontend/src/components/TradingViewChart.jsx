@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import dayjs from 'dayjs';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { calculateSMA, drawMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
@@ -26,6 +27,7 @@ const TradingViewChart = ({
     showVWAP = false,
     showSupertrend = true,
     timeframe = 'D1',
+    wfaHighlightZone = null,
     onLoadMore = null,
     isLoadingMore = false,
     hasMore = true,
@@ -33,10 +35,12 @@ const TradingViewChart = ({
 }) => {
     const chartContainerRef = useRef(null);
     const volumeContainerRef = useRef(null);
+    const chartRef = useRef(null);
     const candlestickSeriesRef = useRef(null);
     const volumeSeriesRef = useRef(null);
     const previousVisibleLogicalRangeRef = useRef(null);
     const [hoverTooltip, setHoverTooltip] = useState(null);
+    const [wfaBoxCoords, setWfaBoxCoords] = useState(null);
 
     const onLoadMoreRef = useRef(onLoadMore);
     onLoadMoreRef.current = onLoadMore;
@@ -347,6 +351,7 @@ const TradingViewChart = ({
             width: chartContainerRef.current.clientWidth,
             height: chartContainerRef.current.clientHeight,
         });
+        chartRef.current = chart;
 
         // Hide time axis for the top chart
         chart.applyOptions({
@@ -508,6 +513,7 @@ const TradingViewChart = ({
             if (timeRange) {
                 timeScale2.setVisibleLogicalRange(timeRange);
                 previousVisibleLogicalRangeRef.current = timeRange;
+                computeWfaCoords();
 
                 // Infinite historical scroll: when user scrolls near the leftmost boundary
                 if (timeRange.from <= 12 && typeof onLoadMoreRef.current === 'function' && !isLoadingMoreRef.current && hasMoreRef.current !== false) {
@@ -524,6 +530,7 @@ const TradingViewChart = ({
             if (timeRange) {
                 timeScale1.setVisibleLogicalRange(timeRange);
                 previousVisibleLogicalRangeRef.current = timeRange;
+                computeWfaCoords();
             }
         });
 
@@ -553,8 +560,39 @@ const TradingViewChart = ({
         prevSymbolRef.current = symbol;
         prevTimeframeRef.current = timeframe;
 
-        const focusKey = focusDate ? getTimeKey({ date: focusDate, time: focusDate }) : null;
-        const focusIndex = focusKey ? candleData.findIndex(candle => candle.time === focusKey) : -1;
+        let focusIndex = -1;
+        if (focusDate) {
+            const matchedTime = findMatchingCandleTime({ date: focusDate, time: focusDate }, sortedData);
+            if (matchedTime !== null && matchedTime !== undefined) {
+                focusIndex = candleData.findIndex(candle => candle.time === matchedTime);
+            }
+            if (focusIndex < 0 && sortedData.length > 0) {
+                const targetMs = typeof focusDate === 'number'
+                    ? (focusDate > 1e11 ? focusDate : focusDate * 1000)
+                    : new Date(String(focusDate)).getTime();
+                if (!isNaN(targetMs)) {
+                    let minDiff = Infinity;
+                    let closestIdx = -1;
+                    sortedData.forEach((candle, idx) => {
+                        let candleMs = 0;
+                        if (typeof candle._timeKey === 'number') {
+                            candleMs = candle._timeKey * 1000;
+                        } else {
+                            candleMs = new Date(String(candle._timeKey)).getTime();
+                        }
+                        if (!isNaN(candleMs)) {
+                            const diff = Math.abs(candleMs - targetMs);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                closestIdx = idx;
+                            }
+                        }
+                    });
+                    focusIndex = closestIdx;
+                }
+            }
+        }
+
         if (focusIndex >= 0) {
             const prevRange = previousVisibleLogicalRangeRef.current;
             // Preserve the user's current zoom level (number of visible bars), default to 80 bars
@@ -568,6 +606,11 @@ const TradingViewChart = ({
             };
             timeScale1.setVisibleLogicalRange(visibleRange);
             timeScale2.setVisibleLogicalRange(visibleRange);
+            previousVisibleLogicalRangeRef.current = visibleRange;
+        } else if (candleData.length > 0 && !previousVisibleLogicalRangeRef.current) {
+            // Default on initial load: scroll to the rightmost/latest candles
+            timeScale1.scrollToRealTime();
+            timeScale2.scrollToRealTime();
         }
 
         // Sync Crosshairs & Tooltip
@@ -707,6 +750,170 @@ const TradingViewChart = ({
         }
     }, [liveCandle, isIntraday, getTimeKey]);
 
+    // Recompute pixel coordinates for the WFA Validation Zone Box
+    const computeWfaCoords = useCallback(() => {
+        if (!wfaHighlightZone || !chartRef.current || !data || data.length === 0) {
+            setWfaBoxCoords(null);
+            return;
+        }
+        const timeScale = chartRef.current.timeScale();
+        if (!timeScale) return;
+
+        const startTs = typeof wfaHighlightZone.startTime === 'number'
+            ? wfaHighlightZone.startTime
+            : new Date(wfaHighlightZone.startTime).getTime();
+        const splitTs = typeof wfaHighlightZone.splitTime === 'number'
+            ? wfaHighlightZone.splitTime
+            : new Date(wfaHighlightZone.splitTime).getTime();
+        const endTs = typeof wfaHighlightZone.endTime === 'number'
+            ? wfaHighlightZone.endTime
+            : new Date(wfaHighlightZone.endTime).getTime();
+
+        const findNearestCandleKey = (targetMs) => {
+            if (!targetMs || isNaN(targetMs) || data.length === 0) return null;
+            let closestKey = null;
+            let minDiff = Infinity;
+            for (let i = 0; i < data.length; i++) {
+                const item = data[i];
+                const key = getTimeKey(item);
+                if (key === undefined || key === null || key === '') continue;
+                let candleMs = 0;
+                if (typeof key === 'number') {
+                    candleMs = key * 1000;
+                } else {
+                    candleMs = new Date(String(key)).getTime();
+                }
+                if (isNaN(candleMs)) continue;
+                const diff = Math.abs(candleMs - targetMs);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestKey = key;
+                }
+            }
+            return closestKey;
+        };
+
+        let startKey = null;
+        let splitKey = null;
+        let endKey = null;
+
+        // If D1 or specific dateKey is defined, match against all candles belonging to this calendar date
+        let targetDateStr = wfaHighlightZone.dateKey || '';
+        if (!targetDateStr && wfaHighlightZone.wfaTf === 'D1' && wfaHighlightZone.startTime) {
+            try {
+                targetDateStr = new Date(wfaHighlightZone.startTime).toISOString().substring(0, 10);
+            } catch (e) {
+                targetDateStr = dayjs(wfaHighlightZone.startTime).format('YYYY-MM-DD');
+            }
+        }
+
+        let periodCandles = [];
+        if (targetDateStr) {
+            periodCandles = data.filter(item => {
+                const key = getTimeKey(item);
+                if (typeof key === 'number') {
+                    try {
+                        const cDateStr = new Date(key * 1000).toISOString().substring(0, 10);
+                        return cDateStr === targetDateStr;
+                    } catch (e) {
+                        return false;
+                    }
+                }
+                const rawDate = item.date || item.datetime || item.time;
+                if (typeof rawDate === 'string') {
+                    return rawDate.includes(targetDateStr);
+                }
+                if (typeof key === 'string') {
+                    return key.startsWith(targetDateStr);
+                }
+                return false;
+            });
+        } else if (startTs && endTs) {
+            periodCandles = data.filter(item => {
+                const key = getTimeKey(item);
+                let cMs = 0;
+                if (typeof key === 'number') {
+                    cMs = key * 1000;
+                } else {
+                    cMs = new Date(String(key)).getTime();
+                }
+                return !isNaN(cMs) && cMs >= startTs && cMs <= endTs;
+            });
+        }
+
+        if (periodCandles.length > 0) {
+            startKey = getTimeKey(periodCandles[0]);
+            endKey = getTimeKey(periodCandles[periodCandles.length - 1]);
+
+            // Find candle closest to splitTs in this period's candle sequence
+            let minDiff = Infinity;
+            periodCandles.forEach(c => {
+                const key = getTimeKey(c);
+                let cMs = 0;
+                if (typeof key === 'number') {
+                    cMs = key * 1000;
+                } else {
+                    cMs = new Date(String(key)).getTime();
+                }
+                if (!isNaN(cMs)) {
+                    const diff = Math.abs(cMs - splitTs);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        splitKey = key;
+                    }
+                }
+            });
+            if (!splitKey) {
+                const midIdx = Math.floor(periodCandles.length * 0.7);
+                splitKey = getTimeKey(periodCandles[Math.min(midIdx, periodCandles.length - 1)]);
+            }
+        } else {
+            // General fallback: closest candle matching by timestamp
+            startKey = findNearestCandleKey(startTs);
+            splitKey = findNearestCandleKey(splitTs);
+            endKey = findNearestCandleKey(endTs);
+        }
+
+        const xStart = startKey ? timeScale.timeToCoordinate(startKey) : null;
+        const xSplit = splitKey ? timeScale.timeToCoordinate(splitKey) : null;
+        const xEnd = endKey ? timeScale.timeToCoordinate(endKey) : null;
+
+        if (xStart !== null || xSplit !== null || xEnd !== null) {
+            let validStart = xStart !== null ? xStart : -5000;
+            let validEnd = xEnd !== null ? (xEnd + 8) : (validStart + 300);
+            let validSplit = xSplit !== null ? xSplit : (validStart + Math.round((validEnd - validStart) * 0.7));
+
+            if (wfaHighlightZone.wfaMode === 'Chu kỳ xen kẽ (Xen kẽ 1 chu kỳ IS, 1 chu kỳ OOS)') {
+                if (wfaHighlightZone.isAlternatingOos) {
+                    validSplit = validStart;
+                } else {
+                    validSplit = validEnd;
+                }
+            }
+
+            setWfaBoxCoords({
+                xStart: validStart,
+                xSplit: validSplit,
+                xEnd: validEnd,
+                cycleIndex: wfaHighlightZone.cycleIndex,
+                effCycleIndex: wfaHighlightZone.effCycleIndex,
+                formattedLabel: wfaHighlightZone.formattedLabel || wfaHighlightZone.formattedStart,
+                wfePercent: wfaHighlightZone.wfePercent,
+                wfaTf: wfaHighlightZone.wfaTf,
+                wfaMode: wfaHighlightZone.wfaMode
+            });
+        } else {
+            setWfaBoxCoords(null);
+        }
+    }, [wfaHighlightZone, data, getTimeKey]);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            computeWfaCoords();
+        }, 50);
+        return () => clearTimeout(timer);
+    }, [wfaHighlightZone, data, computeWfaCoords]);
+
     return (
         <div className="flex flex-col w-full h-full relative border-t-0">
             {isLoadingMore && (
@@ -840,10 +1047,80 @@ const TradingViewChart = ({
             )}
 
             <div
-                ref={chartContainerRef}
-                className="w-full flex-grow relative"
+                className="w-full flex-grow relative overflow-hidden"
                 style={{ flexBasis: '70%', flexShrink: 0 }}
-            />
+            >
+                <div ref={chartContainerRef} className="w-full h-full relative" />
+
+                {/* WFA Validation Zone Box Overlay */}
+                {wfaBoxCoords && (
+                    <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
+                        <svg className="w-full h-full">
+                            <defs>
+                                <linearGradient id="wfaIsGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.14" />
+                                    <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.03" />
+                                </linearGradient>
+                                <linearGradient id="wfaOosGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" stopColor="#a855f7" stopOpacity="0.22" />
+                                    <stop offset="100%" stopColor="#a855f7" stopOpacity="0.05" />
+                                </linearGradient>
+                            </defs>
+
+                            {/* 1. In-Sample (IS) Shaded Box */}
+                            {wfaBoxCoords.xSplit > wfaBoxCoords.xStart && (
+                                <rect
+                                    x={Math.min(wfaBoxCoords.xStart, wfaBoxCoords.xSplit)}
+                                    y={8}
+                                    width={Math.max(2, Math.abs(wfaBoxCoords.xSplit - wfaBoxCoords.xStart))}
+                                    height="88%"
+                                    fill="url(#wfaIsGrad)"
+                                    stroke="rgba(59, 130, 246, 0.5)"
+                                    strokeWidth="1.5"
+                                    strokeDasharray="4 3"
+                                    rx="6"
+                                />
+                            )}
+
+                            {/* 2. Out-of-Sample (OOS) Validation Box (Vùng kiểm định) */}
+                            {wfaBoxCoords.xEnd > wfaBoxCoords.xSplit && (
+                                <rect
+                                    x={Math.min(wfaBoxCoords.xSplit, wfaBoxCoords.xEnd)}
+                                    y={8}
+                                    width={Math.max(2, Math.abs(wfaBoxCoords.xEnd - wfaBoxCoords.xSplit))}
+                                    height="88%"
+                                    fill="url(#wfaOosGrad)"
+                                    stroke="rgba(168, 85, 247, 0.85)"
+                                    strokeWidth="2"
+                                    strokeDasharray="6 3"
+                                    rx="6"
+                                />
+                            )}
+                        </svg>
+
+                        {/* Top Labels */}
+                        {wfaBoxCoords.xStart >= -150 && wfaBoxCoords.xStart <= (chartContainerRef.current?.clientWidth || 1000) && (
+                            <div
+                                className="absolute top-2.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-gray-900/90 border border-blue-500/50 text-[10px] font-mono font-bold text-blue-300 shadow-lg backdrop-blur-sm pointer-events-auto transition-all"
+                                style={{ left: `${Math.max(8, wfaBoxCoords.xStart + 6)}px` }}
+                            >
+                                <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
+                                <span>WFA #{wfaBoxCoords.cycleIndex} ({wfaBoxCoords.formattedLabel})</span>
+                            </div>
+                        )}
+
+                        {wfaBoxCoords.xSplit >= -150 && wfaBoxCoords.xSplit <= (chartContainerRef.current?.clientWidth || 1000) && (
+                            <div
+                                className="absolute top-2.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-purple-950/90 border border-purple-500/70 text-[10px] font-mono font-bold text-purple-200 shadow-lg backdrop-blur-sm pointer-events-auto transition-all"
+                                style={{ left: `${Math.max(8, wfaBoxCoords.xSplit + 6)}px` }}
+                            >
+                                <span className="h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+                                <span>VÙNG KIỂM ĐỊNH OOS</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
 
             <div className="w-full h-px bg-gray-700" />
 

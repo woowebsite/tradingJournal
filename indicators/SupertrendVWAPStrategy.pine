@@ -977,6 +977,31 @@ if enableWfa
     else if wfaMode == "Toàn bộ chu kỳ (Cả IS & OOS)"
         wfaTradeAllowed := isCycleInScope
 
+// --- 4.8. Vẽ Hộp Vùng Kiểm Định WFA (WFA In-Sample & Out-Of-Sample Validation Boxes) ---
+var box wfaIsBox  = na
+var box wfaOosBox = na
+
+if enableWfa and isCycleInScope
+    float boxTop    = ta.highest(high, 20)
+    float boxBottom = ta.lowest(low, 20)
+
+    if isNewWfaCycle
+        if not na(wfaIsBox)
+            box.delete(wfaIsBox)
+        if not na(wfaOosBox)
+            box.delete(wfaOosBox)
+
+        int isEndTime = int(float(wfaTimeOpen) + wfaCycleDuration * wfaIsRatio)
+        wfaIsBox := box.new(left = wfaTimeOpen, top = boxTop, right = isEndTime, bottom = boxBottom, xloc = xloc.bar_time, border_color = color.new(#3b82f6, 40), bgcolor = color.new(#3b82f6, 92), border_style = line.style_dotted, text = "WFA IS #" + str.tostring(wfaCycleIndex), text_size = size.tiny, text_color = color.new(#93c5fd, 30))
+        wfaOosBox := box.new(left = isEndTime, top = boxTop, right = wfaTimeClose, bottom = boxBottom, xloc = xloc.bar_time, border_color = color.new(#a855f7, 20), bgcolor = color.new(#a855f7, 85), border_style = line.style_dashed, text = "WFA OOS #" + str.tostring(wfaCycleIndex), text_size = size.tiny, text_color = color.new(#d8b4fe, 10))
+    else
+        if not na(wfaIsBox)
+            box.set_top(wfaIsBox, math.max(box.get_top(wfaIsBox), high))
+            box.set_bottom(wfaIsBox, math.min(box.get_bottom(wfaIsBox), low))
+        if not na(wfaOosBox)
+            box.set_top(wfaOosBox, math.max(box.get_top(wfaOosBox), high))
+            box.set_bottom(wfaOosBox, math.min(box.get_bottom(wfaOosBox), low))
+
 
 // ==============================================================================
 // 5. QUẢN LÝ LỆNH, RRR VÀ THỐNG KÊ (STRATEGY & STATISTICS ENGINE)

@@ -13,7 +13,9 @@ import {
     TrendingUp,
     BarChart2,
     Layers,
-    Sliders
+    Sliders,
+    ChevronDown,
+    ChevronUp
 } from 'lucide-react';
 import { analyzePythonStrategyWithAI } from '../../services/pythonStrategy';
 
@@ -229,6 +231,7 @@ const TradeHistoryAISection = ({
     profitFactor,
     selectedStrategyFile,
 }) => {
+    const [isCollapsed, setIsCollapsed] = useState(true);
     const [provider, setProvider] = useState('z.ai');
     const [model, setModel] = useState('glm-4.5');
     const [prompt, setPrompt] = useState(PROMPT_PRESETS[0].prompt);
@@ -357,8 +360,11 @@ const TradeHistoryAISection = ({
     return (
         <div className="rounded-xl border border-gray-700 bg-gray-800/95 shadow-md overflow-hidden">
             {/* Section Header */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-gray-700/80 px-5 py-4 bg-gray-800/60">
-                <div className="flex items-center gap-3">
+            <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-5 py-4 bg-gray-800/60 ${!isCollapsed ? 'border-b border-gray-700/80' : ''}`}>
+                <div 
+                    className="flex items-center gap-3 cursor-pointer select-none"
+                    onClick={() => setIsCollapsed(!isCollapsed)}
+                >
                     <div className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-sm">
                         <BrainCircuit size={20} />
                     </div>
@@ -368,6 +374,11 @@ const TradeHistoryAISection = ({
                             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 uppercase tracking-wider">
                                 <Sparkles size={11} /> AI Insights
                             </span>
+                            {trades.length > 0 && isCollapsed && (
+                                <span className="hidden sm:inline-flex items-center gap-1 rounded border border-gray-700 bg-gray-900/60 px-2 py-0.5 text-[11px] font-mono text-gray-400">
+                                    {trades.length} lệnh
+                                </span>
+                            )}
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
                             Phân tích chuyên sâu danh sách Lịch sử Lệnh Giao Dịch, hiệu suất Win/Loss, Whipsaw và đề xuất tối ưu thông số
@@ -378,18 +389,39 @@ const TradeHistoryAISection = ({
                 <div className="flex items-center gap-2">
                     <button
                         type="button"
-                        onClick={handleAnalyze}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (isCollapsed) setIsCollapsed(false);
+                            handleAnalyze();
+                        }}
                         disabled={analyzing || trades.length === 0}
                         className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                         {analyzing ? 'Đang phân tích...' : 'Phân tích với AI'}
                     </button>
+
+                    {/* Elegant Icon-only Collapse Toggle Button */}
+                    <button
+                        type="button"
+                        onClick={() => setIsCollapsed(!isCollapsed)}
+                        className="h-8 w-8 rounded-lg bg-gray-900/80 border border-gray-700/80 text-gray-400 hover:text-white hover:border-emerald-500/50 hover:bg-emerald-950/20 transition-all duration-200 flex items-center justify-center cursor-pointer shadow-sm group"
+                        title={isCollapsed ? "Mở rộng" : "Thu gọn"}
+                        aria-label={isCollapsed ? "Mở rộng" : "Thu gọn"}
+                    >
+                        <ChevronDown
+                            size={16}
+                            className={`transition-transform duration-300 ease-out ${
+                                isCollapsed ? 'rotate-0 text-gray-400 group-hover:text-emerald-300' : 'rotate-180 text-emerald-400'
+                            }`}
+                        />
+                    </button>
                 </div>
             </div>
 
-            {/* Main Content Grid: Left = AI Settings, Right = Prompt & Result */}
-            <div className="grid grid-cols-1 gap-0 xl:grid-cols-[360px_minmax(0,1fr)]">
+            {!isCollapsed && (
+                /* Main Content Grid: Left = AI Settings, Right = Prompt & Result */
+                <div className="grid grid-cols-1 gap-0 xl:grid-cols-[360px_minmax(0,1fr)]">
                 {/* 1. Left Column: AI Settings Box (Giống AI Settings của /news-ai) */}
                 <div className="space-y-4 border-b border-gray-700/80 p-5 xl:border-b-0 xl:border-r bg-gray-850/40">
                     <div>
@@ -632,6 +664,7 @@ const TradeHistoryAISection = ({
                     </div>
                 </div>
             </div>
+            )}
         </div>
     );
 };

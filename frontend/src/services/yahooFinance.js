@@ -181,7 +181,9 @@ export const getYahooFinanceHistory = async (symbol, resolution = 'D1', countBac
 
     for (const sym of candidateSymbols) {
         try {
-            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${interval}&range=${range}&includePrePost=${includePrePost}`;
+            const isDev = import.meta.env?.DEV !== false;
+            const baseUrl = isDev ? '/api-yahoo' : 'https://query1.finance.yahoo.com';
+            const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(sym)}?interval=${interval}&range=${range}&includePrePost=${includePrePost}`;
             const res = await fetch(url);
             if (res.ok) {
                 const json = await res.json();

@@ -10,6 +10,7 @@ import { getPythonStrategies, scanPythonStrategy, optimizePythonStrategy } from 
 import { getStrategyTemplates, createStrategyTemplate, updateStrategyTemplate, deleteStrategyTemplate, assignDefaultStrategyTemplate } from '../services/strategyTemplate';
 import { getSymbolInsights, getSymbolInsightsBySymbol } from '../services/symbolInsight';
 import DeflatedSharpeRatioCard from '../components/DeflatedSharpeRatioCard';
+import WalkForwardAnalysisCard from '../components/WalkForwardAnalysisCard';
 import { formatNumber } from '../utils/formatNumber';
 import { buildPythonChartSignals } from '../utils/chartSignals';
 import { subscribeBinanceKlineWS } from '../services/binance';
@@ -81,6 +82,7 @@ const PythonStrategy = () => {
     const [errorMessage, setErrorMessage] = useState('');
     const [activeTab, setActiveTab] = useState('all');
     const [focusDate, setFocusDate] = useState(null);
+    const [wfaHighlightZone, setWfaHighlightZone] = useState(null);
 
     // 4b. Realtime Kline & Price States
     const [liveCandle, setLiveCandle] = useState(null);
@@ -486,6 +488,7 @@ const PythonStrategy = () => {
 
         setScanning(true);
         setErrorMessage('');
+        setFocusDate(null);
         const reqCountback = customCountback || countback || 1000;
         try {
             const basePayload = {
@@ -1056,6 +1059,7 @@ const PythonStrategy = () => {
                 currentStrategy={currentStrategy}
                 params={params}
                 focusDate={focusDate}
+                wfaHighlightZone={wfaHighlightZone}
                 onLoadMore={handleLoadMore}
                 loadingMore={loadingMore}
                 hasMore={hasMore}
@@ -1081,6 +1085,17 @@ const PythonStrategy = () => {
                     trades={scanResult.trades}
                     timeframe={timeframe}
                     defaultTrials={bestInfo ? 1440 : 1}
+                />
+            )}
+
+            {/* 10.1. Walk-Forward Analysis (WFA) Card */}
+            {scanResult?.trades && scanResult.trades.length > 0 && (
+                <WalkForwardAnalysisCard
+                    trades={scanResult.trades}
+                    timeframe={timeframe}
+                    onFocusDate={setFocusDate}
+                    onViewTrade={handleViewTrade}
+                    onWfaZoneChange={setWfaHighlightZone}
                 />
             )}
 

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
     Clock,
@@ -8,7 +8,8 @@ import {
     XCircle,
     AlertTriangle,
     Eye,
-    ExternalLink
+    ExternalLink,
+    ChevronDown
 } from 'lucide-react';
 import { formatNumber } from '../../utils/formatNumber';
 import dayjs from 'dayjs';
@@ -21,6 +22,8 @@ const TradesHistoryTable = ({
     onViewTrade,
     ticker
 }) => {
+    const [isCollapsed, setIsCollapsed] = useState(true);
+
     const filteredTrades = useMemo(() => {
         if (!trades || trades.length === 0) return [];
         if (activeTab === 'all') return [...trades].reverse();
@@ -32,57 +35,80 @@ const TradesHistoryTable = ({
 
     return (
         <div className="bg-gray-800 rounded-2xl border border-gray-700/80 overflow-hidden shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-gray-700/80 gap-3">
-                <div className="flex items-center gap-2">
+            <div className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 ${!isCollapsed ? 'border-b border-gray-700/80' : ''}`}>
+                <div 
+                    className="flex items-center gap-2 cursor-pointer select-none"
+                    onClick={() => setIsCollapsed(!isCollapsed)}
+                >
                     <Clock size={18} className="text-purple-400" />
                     <h3 className="text-base font-bold text-gray-100">
                         Lịch sử Lệnh Giao Dịch (1 Lệnh 1 Lúc) ({filteredTrades.length})
                     </h3>
                 </div>
 
-                <div className="flex items-center bg-gray-900 p-1 rounded-xl border border-gray-700 text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center bg-gray-900 p-1 rounded-xl border border-gray-700 text-xs">
+                        <button
+                            onClick={() => onTabChange('all')}
+                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                                activeTab === 'all' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                        >
+                            Tất cả ({trades.length})
+                        </button>
+                        <button
+                            onClick={() => onTabChange('Open')}
+                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                                activeTab === 'Open' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                        >
+                            Đang mở ({trades.filter(t => t.status === 'Open').length})
+                        </button>
+                        <button
+                            onClick={() => onTabChange('Closed')}
+                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                                activeTab === 'Closed' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                        >
+                            Đã đóng ({trades.filter(t => t.status === 'Closed').length})
+                        </button>
+                        <button
+                            onClick={() => onTabChange('Long')}
+                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                                activeTab === 'Long' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                        >
+                            Long ({trades.filter(t => t.type === 'Long').length})
+                        </button>
+                        <button
+                            onClick={() => onTabChange('Short')}
+                            className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                                activeTab === 'Short' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
+                            }`}
+                        >
+                            Short ({trades.filter(t => t.type === 'Short').length})
+                        </button>
+                    </div>
+
+                    {/* Elegant Icon-only Collapse Toggle Button */}
                     <button
-                        onClick={() => onTabChange('all')}
-                        className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
-                            activeTab === 'all' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                        }`}
+                        type="button"
+                        onClick={() => setIsCollapsed(!isCollapsed)}
+                        className="h-8 w-8 rounded-lg bg-gray-900/80 border border-gray-700/80 text-gray-400 hover:text-white hover:border-purple-500/50 hover:bg-purple-950/20 transition-all duration-200 flex items-center justify-center cursor-pointer shadow-sm group"
+                        title={isCollapsed ? "Mở rộng" : "Thu gọn"}
+                        aria-label={isCollapsed ? "Mở rộng" : "Thu gọn"}
                     >
-                        Tất cả ({trades.length})
-                    </button>
-                    <button
-                        onClick={() => onTabChange('Open')}
-                        className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
-                            activeTab === 'Open' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                        }`}
-                    >
-                        Đang mở ({trades.filter(t => t.status === 'Open').length})
-                    </button>
-                    <button
-                        onClick={() => onTabChange('Closed')}
-                        className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
-                            activeTab === 'Closed' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                        }`}
-                    >
-                        Đã đóng ({trades.filter(t => t.status === 'Closed').length})
-                    </button>
-                    <button
-                        onClick={() => onTabChange('Long')}
-                        className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
-                            activeTab === 'Long' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                        }`}
-                    >
-                        Long ({trades.filter(t => t.type === 'Long').length})
-                    </button>
-                    <button
-                        onClick={() => onTabChange('Short')}
-                        className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
-                            activeTab === 'Short' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'
-                        }`}
-                    >
-                        Short ({trades.filter(t => t.type === 'Short').length})
+                        <ChevronDown
+                            size={16}
+                            className={`transition-transform duration-300 ease-out ${
+                                isCollapsed ? 'rotate-0 text-gray-400 group-hover:text-purple-300' : 'rotate-180 text-purple-400'
+                            }`}
+                        />
                     </button>
                 </div>
             </div>
+
+            {!isCollapsed && (
 
             <div className="overflow-x-auto max-h-96 custom-scrollbar">
                 <table className="w-full text-left border-collapse text-sm">
@@ -200,6 +226,7 @@ const TradesHistoryTable = ({
                     </tbody>
                 </table>
             </div>
+            )}
         </div>
     );
 };

@@ -1239,9 +1239,11 @@ def scan_symbol_json(
 
     candles_list = []
     for i in range(len(chart_df)):
+        d_str = str(dates[i])
+        time_str = d_str[11:19] if "T" in d_str else d_str[:10]
         candles_list.append({
-            "date": str(dates[i]),
-            "time": str(dates[i])[:10],
+            "date": d_str,
+            "time": time_str,
             "open": float(opens[i]),
             "high": float(highs[i]),
             "low": float(lows[i]),

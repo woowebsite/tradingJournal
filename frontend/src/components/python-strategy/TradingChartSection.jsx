@@ -13,6 +13,7 @@ const TradingChartSection = ({
     currentStrategy,
     params,
     focusDate,
+    wfaHighlightZone = null,
     onLoadMore,
     loadingMore,
     hasMore,
@@ -95,6 +96,7 @@ const TradingChartSection = ({
                         signals={chartSignals}
                         timeframe={timeframe}
                         focusDate={focusDate}
+                        wfaHighlightZone={wfaHighlightZone}
                         onLoadMore={onLoadMore}
                         isLoadingMore={loadingMore}
                         hasMore={hasMore}
