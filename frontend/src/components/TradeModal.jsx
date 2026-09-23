@@ -349,12 +349,17 @@ const TradeModal = ({ isOpen, onClose, onSubmit, onDelete, initialData }) => {
                           marketName.includes('FUTURES') ||
                           marketName.includes('DERIVATIVE');
 
+        const isLong = formData.type === 'Long';
         const binanceOrderResult = await executeBinanceOrder({
           symbol: symbolName,
           side: closeSignal.toUpperCase(), // SELL for Long, BUY for Short
           type: 'MARKET',
           quantity: openVol,
-          isFutures
+          price: parseFloat(currentPrice),
+          isFutures,
+          isClose: true,
+          positionSide: isLong ? 'LONG' : 'SHORT',
+          reduceOnly: true
         });
 
         if (binanceOrderResult && (binanceOrderResult.orderId !== undefined || binanceOrderResult.id !== undefined)) {

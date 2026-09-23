@@ -38,7 +38,7 @@ const TradingViewChart = ({
     const chartRef = useRef(null);
     const candlestickSeriesRef = useRef(null);
     const volumeSeriesRef = useRef(null);
-    const previousVisibleLogicalRangeRef = useRef(null);
+    const savedLogicalRangeMapRef = useRef({});
     const [hoverTooltip, setHoverTooltip] = useState(null);
     const [wfaBoxCoords, setWfaBoxCoords] = useState(null);
 
@@ -505,33 +505,57 @@ const TradingViewChart = ({
             createSeriesMarkers(candlestickSeries, markers);
         }
 
-        // Sync TimeScale
+        // Sync TimeScale & Zoom Range
         const timeScale1 = chart.timeScale();
         const timeScale2 = volumeChart.timeScale();
+        const rangeKey = `${symbol || 'DEFAULT'}_${timeframe || 'D'}`;
+        let isChartReady = false;
+        let isSyncingTimeScale = false;
+        const totalBars = candleData.length;
 
         timeScale1.subscribeVisibleLogicalRangeChange((timeRange) => {
-            if (timeRange) {
+            if (!timeRange) return;
+            if (!isSyncingTimeScale) {
+                isSyncingTimeScale = true;
                 timeScale2.setVisibleLogicalRange(timeRange);
-                previousVisibleLogicalRangeRef.current = timeRange;
-                computeWfaCoords();
+                isSyncingTimeScale = false;
+            }
 
-                // Infinite historical scroll: when user scrolls near the leftmost boundary
-                if (timeRange.from <= 12 && typeof onLoadMoreRef.current === 'function' && !isLoadingMoreRef.current && hasMoreRef.current !== false) {
-                    const now = Date.now();
-                    if (now - lastLoadMoreTimeRef.current > 1000) {
-                        lastLoadMoreTimeRef.current = now;
-                        onLoadMoreRef.current();
-                    }
+            const isAutoFitSquash = totalBars > 90 && (timeRange.to - timeRange.from) >= (totalBars - 5);
+            if (isChartReady && !isAutoFitSquash && timeRange.to > timeRange.from) {
+                savedLogicalRangeMapRef.current[rangeKey] = {
+                    from: timeRange.from,
+                    to: timeRange.to,
+                };
+            }
+            computeWfaCoords();
+
+            // Infinite historical scroll: when user scrolls near the leftmost boundary
+            if (timeRange.from <= 12 && typeof onLoadMoreRef.current === 'function' && !isLoadingMoreRef.current && hasMoreRef.current !== false) {
+                const now = Date.now();
+                if (now - lastLoadMoreTimeRef.current > 1000) {
+                    lastLoadMoreTimeRef.current = now;
+                    onLoadMoreRef.current();
                 }
             }
         });
 
         timeScale2.subscribeVisibleLogicalRangeChange((timeRange) => {
-            if (timeRange) {
+            if (!timeRange) return;
+            if (!isSyncingTimeScale) {
+                isSyncingTimeScale = true;
                 timeScale1.setVisibleLogicalRange(timeRange);
-                previousVisibleLogicalRangeRef.current = timeRange;
-                computeWfaCoords();
+                isSyncingTimeScale = false;
             }
+
+            const isAutoFitSquash = totalBars > 90 && (timeRange.to - timeRange.from) >= (totalBars - 5);
+            if (isChartReady && !isAutoFitSquash && timeRange.to > timeRange.from) {
+                savedLogicalRangeMapRef.current[rangeKey] = {
+                    from: timeRange.from,
+                    to: timeRange.to,
+                };
+            }
+            computeWfaCoords();
         });
 
         const prevLength = prevDataLengthRef.current;
@@ -542,18 +566,6 @@ const TradingViewChart = ({
 
         const isSameDataset = prevSymbol === symbol && prevTf === timeframe;
         const isPrepend = isSameDataset && prevLength > 0 && sortedData.length > prevLength && currentFirstTime !== prevFirstTime;
-
-        if (isPrepend && previousVisibleLogicalRangeRef.current) {
-            const addedCount = sortedData.length - prevLength;
-            const prevRange = previousVisibleLogicalRangeRef.current;
-            const shiftedRange = {
-                from: prevRange.from + addedCount,
-                to: prevRange.to + addedCount,
-            };
-            timeScale1.setVisibleLogicalRange(shiftedRange);
-            timeScale2.setVisibleLogicalRange(shiftedRange);
-            previousVisibleLogicalRangeRef.current = shiftedRange;
-        }
 
         prevDataLengthRef.current = sortedData.length;
         prevFirstTimeRef.current = currentFirstTime;
@@ -593,25 +605,62 @@ const TradingViewChart = ({
             }
         }
 
+        const prevSavedRange = savedLogicalRangeMapRef.current[rangeKey];
+
+        const applyTargetRange = (targetRange) => {
+            if (!targetRange) return;
+            try {
+                timeScale1.setVisibleLogicalRange(targetRange);
+                timeScale2.setVisibleLogicalRange(targetRange);
+            } catch (e) {
+                // ignore
+            }
+        };
+
         if (focusIndex >= 0) {
-            const prevRange = previousVisibleLogicalRangeRef.current;
-            // Preserve the user's current zoom level (number of visible bars), default to 80 bars
-            const span = prevRange && (prevRange.to - prevRange.from > 5)
-                ? (prevRange.to - prevRange.from)
+            const span = prevSavedRange && (prevSavedRange.to - prevSavedRange.from > 5)
+                ? (prevSavedRange.to - prevSavedRange.from)
                 : 80;
             const halfSpan = span / 2;
             const visibleRange = {
                 from: focusIndex - halfSpan,
                 to: focusIndex + halfSpan,
             };
-            timeScale1.setVisibleLogicalRange(visibleRange);
-            timeScale2.setVisibleLogicalRange(visibleRange);
-            previousVisibleLogicalRangeRef.current = visibleRange;
-        } else if (candleData.length > 0 && !previousVisibleLogicalRangeRef.current) {
-            // Default on initial load: scroll to the rightmost/latest candles
-            timeScale1.scrollToRealTime();
-            timeScale2.scrollToRealTime();
+            applyTargetRange(visibleRange);
+            savedLogicalRangeMapRef.current[rangeKey] = visibleRange;
+        } else if (isSameDataset && prevSavedRange) {
+            // Restore user's current zoom & pan position instead of resetting to default
+            let targetRange = { ...prevSavedRange };
+            if (isPrepend) {
+                const addedCount = sortedData.length - prevLength;
+                targetRange.from += addedCount;
+                targetRange.to += addedCount;
+            } else if (prevLength > 0 && sortedData.length > prevLength) {
+                const addedCount = sortedData.length - prevLength;
+                // If user was looking at latest candles (near right edge), auto advance
+                if (prevSavedRange.to >= prevLength - 3) {
+                    targetRange.from += addedCount;
+                    targetRange.to += addedCount;
+                }
+            }
+            applyTargetRange(targetRange);
+            savedLogicalRangeMapRef.current[rangeKey] = targetRange;
+            requestAnimationFrame(() => applyTargetRange(targetRange));
+        } else if (totalBars > 0) {
+            // Initial load or symbol/timeframe switch: default to readable recent 80 candles with 5-bar padding
+            const defaultRange = {
+                from: Math.max(0, totalBars - 80),
+                to: totalBars + 5,
+            };
+            applyTargetRange(defaultRange);
+            savedLogicalRangeMapRef.current[rangeKey] = defaultRange;
+            requestAnimationFrame(() => applyTargetRange(defaultRange));
         }
+
+        // Allow user pan/zoom interactions to be saved after initial layout finishes
+        setTimeout(() => {
+            isChartReady = true;
+        }, 200);
 
         // Sync Crosshairs & Tooltip
         let isSyncingCrosshair = false;

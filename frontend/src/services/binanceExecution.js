@@ -116,7 +116,10 @@ export const executeBinanceOrder = async ({
     quantity,
     price,
     timeInForce = 'GTC',
-    isFutures = false
+    isFutures = false,
+    positionSide = null,
+    reduceOnly = false,
+    isClose = false
 }) => {
     const apiKey = import.meta.env.VITE_BINANCE_API_KEY;
     const apiSecret = import.meta.env.VITE_BINANCE_API_SECRET;
@@ -143,7 +146,7 @@ export const executeBinanceOrder = async ({
         proxyBase = useTestnet ? '/api-binance-testnet/api/v3/order' : '/api-binance/api/v3/order';
     }
 
-    const sendOrderAttempt = async (positionSide = null) => {
+    const sendOrderAttempt = async (targetPositionSide = positionSide) => {
         const timestamp = Date.now();
         const params = new URLSearchParams();
         params.append('symbol', normalizedSymbol);
@@ -156,8 +159,14 @@ export const executeBinanceOrder = async ({
             params.append('timeInForce', timeInForce);
         }
 
-        if (positionSide) {
-            params.append('positionSide', positionSide);
+        if (targetPositionSide && targetPositionSide !== 'BOTH') {
+            params.append('positionSide', targetPositionSide.toUpperCase());
+        } else if (targetPositionSide === 'BOTH') {
+            params.append('positionSide', 'BOTH');
+        }
+
+        if (reduceOnly && isFutures && (!targetPositionSide || targetPositionSide === 'BOTH')) {
+            params.append('reduceOnly', 'true');
         }
 
         params.append('timestamp', String(timestamp));
@@ -181,11 +190,22 @@ export const executeBinanceOrder = async ({
     try {
         let { response, data } = await sendOrderAttempt();
 
-        // If error is -4061 (Hedge mode mismatch on Futures), retry with positionSide
+        // If error is -4061 (Position side mismatch on Futures Hedge/One-way Mode), retry with appropriate mode
         if (!response.ok && data?.code === -4061 && isFutures) {
-            const hedgeSide = side.toUpperCase() === 'BUY' ? 'LONG' : 'SHORT';
-            console.log(`[Binance Execution] Retrying with Hedge Mode positionSide: ${hedgeSide}`);
-            const retryRes = await sendOrderAttempt(hedgeSide);
+            let retryPosSide = null;
+            if (!positionSide || positionSide === 'BOTH') {
+                // Was sent for One-Way mode, but account is in Hedge Mode
+                if (isClose) {
+                    retryPosSide = side.toUpperCase() === 'SELL' ? 'LONG' : 'SHORT';
+                } else {
+                    retryPosSide = side.toUpperCase() === 'BUY' ? 'LONG' : 'SHORT';
+                }
+            } else {
+                // Was sent with positionSide, but account is in One-Way Mode
+                retryPosSide = 'BOTH';
+            }
+            console.log(`[Binance Execution] Retrying with positionSide: ${retryPosSide}`);
+            const retryRes = await sendOrderAttempt(retryPosSide);
             response = retryRes.response;
             data = retryRes.data;
         }

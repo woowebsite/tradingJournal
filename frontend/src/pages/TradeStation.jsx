@@ -114,11 +114,9 @@ const TradeStation = () => {
         [
             selectedSymbolId || '',
             symbolParam || '',
-            tradeFormSetup.price || priceParam || '',
-            tradeFormSetup.slPrice || slPriceParam || '',
-            tradeFormSetup.tpPrice || tpPriceParam || ''
+            selectedAccount?.documentId || selectedAccount?.id || ''
         ].join(':')
-    ), [selectedSymbolId, symbolParam, tradeFormSetup, priceParam, slPriceParam, tpPriceParam]);
+    ), [selectedSymbolId, symbolParam, selectedAccount]);
 
     useEffect(() => {
         setTradeFormSetup({ price: '', slPrice: '', tpPrice: '' });
@@ -452,11 +450,9 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                     setLivePrice(candle.close);
                 }
 
-                // Throttle Redux dispatch to candle close or once every 5000ms
-                // This prevents state.histories from continuously churning and recreating chart instances
-                const now = Date.now();
-                if (candle.isClosed || now - lastReduxDispatchTimeRef.current > 5000) {
-                    lastReduxDispatchTimeRef.current = now;
+                // Only dispatch Redux update when candle is closed.
+                // Live real-time ticks are already smoothly rendered via setLiveCandle / liveCandle prop.
+                if (candle.isClosed) {
                     dispatch(updateRealtimeCandle({
                         symbolId: selectedSymbolId,
                         symbolName: symName,
@@ -971,6 +967,8 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         return matched;
     }, [histories, selectedSymbolId, selectedSymbol, timeframe]);
 
+    const currentLivePrice = livePrice || (activeSymbolHistories && activeSymbolHistories.length > 0 ? (activeSymbolHistories[activeSymbolHistories.length - 1]?.close || activeSymbolHistories[activeSymbolHistories.length - 1]?.price) : null);
+
     useEffect(() => {
         if (!selectedSymbolId || !selectedSymbol?.Name) return;
         const symName = selectedSymbol.Name.trim().toUpperCase();
@@ -1300,6 +1298,114 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
     const executedTradeSignals = useMemo(() => {
         return buildExecutedTradeSignals(symbolTrades);
     }, [symbolTrades]);
+
+    const handleCloseSignalTrade = useCallback(async (signal) => {
+        if (!signal) return;
+        const tradeId = signal.tradeId || signal.trade?.documentId || signal.trade?.id || (signal.rawTrade && (signal.rawTrade.documentId || signal.rawTrade.id)) || signal.documentId || signal.id;
+        const targetTrade = symbolTrades.find(t => (t.documentId || t.id) === tradeId) || (signal.trade_details ? signal : signal.rawTrade);
+
+        if (!targetTrade) {
+            alert('Không tìm thấy dữ liệu lệnh gốc để đóng.');
+            return;
+        }
+
+        const symName = targetTrade.symbol?.Name || targetTrade.symbol?.name || selectedSymbol?.Name || 'Symbol';
+        const type = targetTrade.type || 'Long';
+        const isLong = String(type).toLowerCase() === 'long';
+        const exitType = isLong ? 'Sell' : 'Buy'; // Long -> Sell to close; Short -> Buy to close
+
+        if (!window.confirm(`Bạn có chắc chắn muốn chủ động đóng vị thế ${symName} (${type})?`)) {
+            return;
+        }
+
+        try {
+            const exitPrice = Number(livePrice || targetTrade.price || 0);
+            
+            // Calculate open volume accurately
+            const rawDetails = Array.isArray(targetTrade.trade_details) ? targetTrade.trade_details : [];
+            let openVolume = 0;
+            if (rawDetails.length > 0) {
+                const buyVol = rawDetails.filter(d => d.type === 'Buy').reduce((sum, d) => sum + (Number(d.volume) || 0), 0);
+                const sellVol = rawDetails.filter(d => d.type === 'Sell').reduce((sum, d) => sum + (Number(d.volume) || 0), 0);
+                openVolume = isLong ? (buyVol - sellVol) : (sellVol - buyVol);
+            }
+            if (!openVolume || openVolume <= 0) {
+                openVolume = Number(targetTrade.volume || 1);
+            }
+
+            const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
+            const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
+            const symUpper = symName.toUpperCase();
+            const isCryptoSymbol = /USDT|\.P/i.test(symName) || symUpper.includes('BINANCE') || marketName.includes('CRYPTO') || accountName.includes('BINANCE');
+            const isFutures = symUpper.endsWith('.P') || symUpper.includes('PERP') || accountName.includes('FUTURES') || accountName.includes('DERIVATIVE') || marketName.includes('FUTURES') || marketName.includes('DERIVATIVE') || /USDT|\.P/i.test(symName);
+
+            let noteText = 'Chủ động đóng vị thế (Manual Close)';
+
+            // Execute order on Binance if it's a crypto symbol / Binance account
+            if (isCryptoSymbol) {
+                try {
+                    const binanceResult = await executeBinanceOrder({
+                        symbol: symName,
+                        side: exitType.toUpperCase(), // 'SELL' to close Long, 'BUY' to close Short
+                        type: 'MARKET',
+                        quantity: openVolume,
+                        price: exitPrice,
+                        isFutures,
+                        isClose: true,
+                        positionSide: isLong ? 'LONG' : 'SHORT',
+                        reduceOnly: true
+                    });
+
+                    if (binanceResult && (binanceResult.orderId !== undefined || binanceResult.id !== undefined)) {
+                        const orderId = binanceResult.orderId ?? binanceResult.id;
+                        noteText = `[Binance Closed] Order ID: ${orderId} | Chủ động đóng vị thế`;
+                    }
+                } catch (binanceErr) {
+                    console.error('Binance Exit Order Execution failed:', binanceErr);
+                    if (!window.confirm(`Gửi lệnh đóng vị thế lên Binance thất bại:\n${binanceErr.message || binanceErr}\n\nBạn có muốn tiếp tục ghi nhận đóng vị thế trong Nhật ký không?`)) {
+                        return;
+                    }
+                    noteText = `[Binance Error: ${binanceErr.message || binanceErr}] Chủ động đóng vị thế`;
+                }
+            }
+
+            const existingDetails = rawDetails.map(d => ({
+                id: d.id,
+                documentId: d.documentId,
+                date: d.date,
+                signal: d.signal || 'Entry',
+                type: d.type || 'Buy',
+                price: d.price,
+                volume: d.volume,
+                note: d.note
+            }));
+
+            const newDetail = {
+                type: exitType,
+                signal: 'Exit',
+                price: exitPrice,
+                volume: openVolume,
+                date: new Date().toISOString(),
+                note: noteText
+            };
+
+            const updatedTradeData = {
+                type: targetTrade.type || 'Long',
+                trade_status: 'Closed',
+                date: targetTrade.date,
+                trade_details: [...existingDetails, newDetail]
+            };
+
+            await dispatch(saveTrade({ tradeData: updatedTradeData, tradeToEdit: targetTrade })).unwrap();
+            await refreshSelectedAccountTrades();
+            if (selectedAccount) {
+                dispatch(fetchOpenTrades({ accountId: selectedAccount.documentId || selectedAccount.id }));
+            }
+        } catch (err) {
+            console.error('Failed to close trade:', err);
+            alert(`Không thể đóng vị thế: ${err?.message || err}`);
+        }
+    }, [symbolTrades, selectedSymbol, livePrice, dispatch, refreshSelectedAccountTrades, selectedAccount]);
 
 
     const handleRefresh = useCallback(() => {
@@ -1752,6 +1858,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                         isScanningOnCandleClose={isScanningOnCandleClose}
                         selectedSymbol={selectedSymbol}
                         timeframe={timeframe}
+                        onCloseTrade={handleCloseSignalTrade}
                         onClearLogs={() => setAutoTradeLogs([])}
                     />
                 </div>
@@ -1773,6 +1880,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                         selectedSymbol={selectedSymbol}
                         activeStrategy={activeStrategy}
                         value={tradeSetupValue}
+                        livePrice={currentLivePrice}
                         onSaved={refreshSelectedAccountTrades}
                     />
                     <TechnicalPanel externalIndicators={externalIndicators} />
