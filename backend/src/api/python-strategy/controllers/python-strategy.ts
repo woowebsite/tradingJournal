@@ -461,7 +461,7 @@ export default {
           ...process.env,
           PYTHONWARNINGS: 'ignore',
           PYTHONIOENCODING: 'utf-8',
-          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
+          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || `http://127.0.0.1:${process.env.PORT || 1337}`,
           STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
         },
       });
@@ -674,7 +674,7 @@ export default {
           ...process.env,
           PYTHONWARNINGS: 'ignore',
           PYTHONIOENCODING: 'utf-8',
-          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || 'http://127.0.0.1:1337',
+          STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || `http://127.0.0.1:${process.env.PORT || 1337}`,
           STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || process.env.STRAPI_TOKEN || '',
         },
       });

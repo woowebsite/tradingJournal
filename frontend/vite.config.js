@@ -1,191 +1,196 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const proxyConfig = {
-  '/api-tcbs': {
-    target: 'https://apiextaws.tcbs.com.vn',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/api-tcbs/, ''),
-    secure: false,
-    ws: true,
-    cookieDomainRewrite: { '*': '' },
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-      });
-      proxy.on('proxyRes', (proxyRes, req, res) => {
-        if (proxyRes.headers['set-cookie']) {
-          proxyRes.headers['set-cookie'] = proxyRes.headers['set-cookie'].map(cookie =>
-            cookie.replace(/;\s*Domain=[^;]+/gi, '')
-          );
-        }
-      });
-    }
-  },
-  '/openapi-tcbs': {
-    target: 'https://openapi.tcbs.com.vn',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/openapi-tcbs/, ''),
-    secure: false,
-    ws: true,
-    cookieDomainRewrite: { '*': '' },
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-        proxyReq.removeHeader('sec-fetch-dest');
-        proxyReq.removeHeader('sec-fetch-mode');
-        proxyReq.removeHeader('sec-fetch-site');
-        proxyReq.removeHeader('sec-ch-ua');
-        proxyReq.removeHeader('sec-ch-ua-mobile');
-        proxyReq.removeHeader('sec-ch-ua-platform');
-      });
-      proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-      });
-      proxy.on('proxyRes', (proxyRes, req, res) => {
-        if (proxyRes.headers['set-cookie']) {
-          proxyRes.headers['set-cookie'] = proxyRes.headers['set-cookie'].map(cookie =>
-            cookie.replace(/;\s*Domain=[^;]+/gi, '')
-          );
-        }
-      });
-    }
-  },
-  '/api-binance': {
-    target: 'https://api.binance.com',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/api-binance/, ''),
-    secure: false,
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-        proxyReq.removeHeader('sec-fetch-dest');
-        proxyReq.removeHeader('sec-fetch-mode');
-        proxyReq.removeHeader('sec-fetch-site');
-        proxyReq.removeHeader('sec-ch-ua');
-        proxyReq.removeHeader('sec-ch-ua-mobile');
-        proxyReq.removeHeader('sec-ch-ua-platform');
-      });
-    }
-  },
-  '/fapi-binance': {
-    target: 'https://fapi.binance.com',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/fapi-binance/, ''),
-    secure: false,
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-        proxyReq.removeHeader('sec-fetch-dest');
-        proxyReq.removeHeader('sec-fetch-mode');
-        proxyReq.removeHeader('sec-fetch-site');
-        proxyReq.removeHeader('sec-ch-ua');
-        proxyReq.removeHeader('sec-ch-ua-mobile');
-        proxyReq.removeHeader('sec-ch-ua-platform');
-      });
-    }
-  },
-  '/api-binance-testnet': {
-    target: 'https://testnet.binance.vision',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/api-binance-testnet/, ''),
-    secure: false,
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-        proxyReq.removeHeader('sec-fetch-dest');
-        proxyReq.removeHeader('sec-fetch-mode');
-        proxyReq.removeHeader('sec-fetch-site');
-        proxyReq.removeHeader('sec-ch-ua');
-        proxyReq.removeHeader('sec-ch-ua-mobile');
-        proxyReq.removeHeader('sec-ch-ua-platform');
-      });
-    }
-  },
-  '/fapi-binance-testnet': {
-    target: 'https://demo-fapi.binance.com',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/fapi-binance-testnet/, ''),
-    secure: false,
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-        proxyReq.removeHeader('sec-fetch-dest');
-        proxyReq.removeHeader('sec-fetch-mode');
-        proxyReq.removeHeader('sec-fetch-site');
-        proxyReq.removeHeader('sec-ch-ua');
-        proxyReq.removeHeader('sec-ch-ua-mobile');
-        proxyReq.removeHeader('sec-ch-ua-platform');
-      });
-    }
-  },
-  '/api-yahoo': {
-    target: 'https://query1.finance.yahoo.com',
-    changeOrigin: true,
-    rewrite: (path) => path.replace(/^\/api-yahoo/, ''),
-    secure: false,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'application/json, text/plain, */*'
-    },
-    configure: (proxy, _options) => {
-      proxy.on('proxyReq', (proxyReq, req, _res) => {
-        proxyReq.removeHeader('origin');
-        proxyReq.removeHeader('referer');
-      });
-    }
-  },
-  '/api': {
-    target: 'http://localhost:1337',
-    changeOrigin: true,
-    secure: false,
-  },
-  '/uploads': {
-    target: 'http://localhost:1337',
-    changeOrigin: true,
-    secure: false,
-  },
-}
-
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: './src/setupTests.js',
-  },
-  server: {
-    host: true,
-    port: 5173,
-    proxy: proxyConfig,
-  },
-  preview: {
-    host: true,
-    port: 5173,
-    proxy: proxyConfig,
-  },
-  build: {
-    target: 'esnext',
-    cssCodeSplit: true,
-    sourcemap: false,
-    minify: 'esbuild',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom', '@reduxjs/toolkit', 'react-redux'],
-          'charts-vendor': ['echarts', 'echarts-for-react', 'lightweight-charts'],
-          'icons-vendor': ['lucide-react'],
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const backendTarget = env.VITE_BACKEND_URL || (mode === 'dev' ? 'http://localhost:1336' : 'http://localhost:1337')
+
+  const proxyConfig = {
+    '/api-tcbs': {
+      target: 'https://apiextaws.tcbs.com.vn',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/api-tcbs/, ''),
+      secure: false,
+      ws: true,
+      cookieDomainRewrite: { '*': '' },
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+        });
+        proxy.on('proxyRes', (proxyRes, req, res) => {
+          if (proxyRes.headers['set-cookie']) {
+            proxyRes.headers['set-cookie'] = proxyRes.headers['set-cookie'].map(cookie =>
+              cookie.replace(/;\s*Domain=[^;]+/gi, '')
+            );
+          }
+        });
+      }
+    },
+    '/openapi-tcbs': {
+      target: 'https://openapi.tcbs.com.vn',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/openapi-tcbs/, ''),
+      secure: false,
+      ws: true,
+      cookieDomainRewrite: { '*': '' },
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+          proxyReq.removeHeader('sec-fetch-dest');
+          proxyReq.removeHeader('sec-fetch-mode');
+          proxyReq.removeHeader('sec-fetch-site');
+          proxyReq.removeHeader('sec-ch-ua');
+          proxyReq.removeHeader('sec-ch-ua-mobile');
+          proxyReq.removeHeader('sec-ch-ua-platform');
+        });
+        proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+        });
+        proxy.on('proxyRes', (proxyRes, req, res) => {
+          if (proxyRes.headers['set-cookie']) {
+            proxyRes.headers['set-cookie'] = proxyRes.headers['set-cookie'].map(cookie =>
+              cookie.replace(/;\s*Domain=[^;]+/gi, '')
+            );
+          }
+        });
+      }
+    },
+    '/api-binance': {
+      target: 'https://api.binance.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/api-binance/, ''),
+      secure: false,
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+          proxyReq.removeHeader('sec-fetch-dest');
+          proxyReq.removeHeader('sec-fetch-mode');
+          proxyReq.removeHeader('sec-fetch-site');
+          proxyReq.removeHeader('sec-ch-ua');
+          proxyReq.removeHeader('sec-ch-ua-mobile');
+          proxyReq.removeHeader('sec-ch-ua-platform');
+        });
+      }
+    },
+    '/fapi-binance': {
+      target: 'https://fapi.binance.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/fapi-binance/, ''),
+      secure: false,
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+          proxyReq.removeHeader('sec-fetch-dest');
+          proxyReq.removeHeader('sec-fetch-mode');
+          proxyReq.removeHeader('sec-fetch-site');
+          proxyReq.removeHeader('sec-ch-ua');
+          proxyReq.removeHeader('sec-ch-ua-mobile');
+          proxyReq.removeHeader('sec-ch-ua-platform');
+        });
+      }
+    },
+    '/api-binance-testnet': {
+      target: 'https://testnet.binance.vision',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/api-binance-testnet/, ''),
+      secure: false,
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+          proxyReq.removeHeader('sec-fetch-dest');
+          proxyReq.removeHeader('sec-fetch-mode');
+          proxyReq.removeHeader('sec-fetch-site');
+          proxyReq.removeHeader('sec-ch-ua');
+          proxyReq.removeHeader('sec-ch-ua-mobile');
+          proxyReq.removeHeader('sec-ch-ua-platform');
+        });
+      }
+    },
+    '/fapi-binance-testnet': {
+      target: 'https://demo-fapi.binance.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/fapi-binance-testnet/, ''),
+      secure: false,
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+          proxyReq.removeHeader('sec-fetch-dest');
+          proxyReq.removeHeader('sec-fetch-mode');
+          proxyReq.removeHeader('sec-fetch-site');
+          proxyReq.removeHeader('sec-ch-ua');
+          proxyReq.removeHeader('sec-ch-ua-mobile');
+          proxyReq.removeHeader('sec-ch-ua-platform');
+        });
+      }
+    },
+    '/api-yahoo': {
+      target: 'https://query1.finance.yahoo.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/api-yahoo/, ''),
+      secure: false,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
+      },
+      configure: (proxy, _options) => {
+        proxy.on('proxyReq', (proxyReq, req, _res) => {
+          proxyReq.removeHeader('origin');
+          proxyReq.removeHeader('referer');
+        });
+      }
+    },
+    '/api': {
+      target: backendTarget,
+      changeOrigin: true,
+      secure: false,
+    },
+    '/uploads': {
+      target: backendTarget,
+      changeOrigin: true,
+      secure: false,
+    },
+  }
+
+  return {
+    plugins: [react()],
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      setupFiles: './src/setupTests.js',
+    },
+    server: {
+      host: true,
+      port: 5173,
+      proxy: proxyConfig,
+    },
+    preview: {
+      host: true,
+      port: 5173,
+      proxy: proxyConfig,
+    },
+    build: {
+      target: 'esnext',
+      cssCodeSplit: true,
+      sourcemap: false,
+      minify: 'esbuild',
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-router-dom', '@reduxjs/toolkit', 'react-redux'],
+            'charts-vendor': ['echarts', 'echarts-for-react', 'lightweight-charts'],
+            'icons-vendor': ['lucide-react'],
+          },
         },
       },
+      chunkSizeWarningLimit: 1200,
     },
-    chunkSizeWarningLimit: 1200,
-  },
+  }
 })

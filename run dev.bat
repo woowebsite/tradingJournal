@@ -8,4 +8,4 @@ start "TradingJournal - Backend (Dev)" cmd /k "cd /d %~dp0backend && yarn run de
 start "TradingJournal - Frontend (Dev)" cmd /k "cd /d %~dp0frontend && yarn run dev"
 
 :: Ngrok
-start "TradingJournal - Ngrok" cmd /k "npx ngrok http 1337"
+start "TradingJournal - Ngrok" cmd /k "npx ngrok http 1336"
