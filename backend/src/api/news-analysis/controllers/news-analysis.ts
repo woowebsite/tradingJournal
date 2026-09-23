@@ -2211,7 +2211,7 @@ export default factories.createCoreController(NEWS_ANALYSIS_UID, ({ strapi }) =>
     const customApiKey = String(ctx.request.body?.apiKey || '').trim();
     const bsaData = Array.isArray(ctx.request.body?.bsaData) ? ctx.request.body.bsaData : [];
     const bidAskData = Array.isArray(ctx.request.body?.bidAskData) ? ctx.request.body.bidAskData : [];
-    const ticker = String(ctx.request.body?.ticker || '41I1G9000');
+    const ticker = String(ctx.request.body?.ticker || 'VN30F1M');
     const dataScope = Number(ctx.request.body?.dataScope) || 30;
 
     const providerConfig = resolveAIProviderConfig(requestedProvider, requestedModel);

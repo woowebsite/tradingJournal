@@ -38,7 +38,7 @@ const formatTimeLabel = (item) => {
     return '--:--';
 };
 
-const IntradayBidAskRatioMiniChart = ({ symbol = '41I1G9000', data = null, className = '' }) => {
+const IntradayBidAskRatioMiniChart = ({ symbol = 'VN30F1M', data = null, className = '' }) => {
     const [fetchedData, setFetchedData] = useState([]);
 
     const fetchData = useCallback(async () => {

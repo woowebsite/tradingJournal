@@ -38,7 +38,7 @@ const formatTimeLabel = (item) => {
     return '--:--';
 };
 
-const IntradayCumDeltaMiniChart = ({ symbol = '41I1G9000', data = null, className = '' }) => {
+const IntradayCumDeltaMiniChart = ({ symbol = 'VN30F1M', data = null, className = '' }) => {
     const [fetchedData, setFetchedData] = useState([]);
 
     const fetchData = useCallback(async () => {

@@ -168,8 +168,14 @@ const BidAskTable = React.memo(({ bidAskData, loading, error }) => {
     );
 });
 
-const IntradayBidAskPanel = ({ defaultTicker = '41I1G9000', className = '', onDataChange = null }) => {
+const IntradayBidAskPanel = ({ defaultTicker = 'VN30F1M', className = '', onDataChange = null }) => {
     const [ticker, setTicker] = useState(defaultTicker);
+
+    useEffect(() => {
+        if (defaultTicker) {
+            setTicker(defaultTicker);
+        }
+    }, [defaultTicker]);
     const [mode, setMode] = useState('baAll');
     const [bidAskData, setBidAskData] = useState([]);
     const [loading, setLoading] = useState(false);

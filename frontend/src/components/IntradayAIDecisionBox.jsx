@@ -256,7 +256,7 @@ const extractTextFromAIResponse = (res) => {
 const IntradayAIDecisionBox = ({
     bsaData = [],
     bidAskData = [],
-    ticker = '41I1G9000',
+    ticker = 'VN30F1M',
     className = ''
 }) => {
     // Settings state with localStorage persistence

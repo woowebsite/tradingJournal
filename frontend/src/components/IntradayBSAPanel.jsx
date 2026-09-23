@@ -126,8 +126,14 @@ const BSATable = React.memo(({ bsaData, loading, error }) => {
     );
 });
 
-const IntradayBSAPanel = ({ defaultTicker = '41I1G9000', className = '', onDataChange = null }) => {
+const IntradayBSAPanel = ({ defaultTicker = 'VN30F1M', className = '', onDataChange = null }) => {
     const [ticker, setTicker] = useState(defaultTicker);
+
+    useEffect(() => {
+        if (defaultTicker) {
+            setTicker(defaultTicker);
+        }
+    }, [defaultTicker]);
     const [timeWindow, setTimeWindow] = useState('5');
     const [tWindow, setTWindow] = useState('60m');
     const [type, setType] = useState('all');

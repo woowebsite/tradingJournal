@@ -3,10 +3,8 @@ import { RefreshCw, Activity, Zap, Scale, ArrowUpRight, ArrowDownRight } from 'l
 import { getIntradayBSA, getIntradayBidAsk } from '../services/tcbs';
 
 const normalizeTicker = (t) => {
-    if (!t) return '41I1G9000';
-    const clean = String(t).trim().toUpperCase();
-    if (clean === 'VN30F1M' || clean.startsWith('VN30')) return '41I1G9000';
-    return clean;
+    if (!t) return 'VN30F1M';
+    return String(t).trim().toUpperCase();
 };
 
 // Smart session extractor: extracts records from today if present, or fallback to the latest available trading session
@@ -82,7 +80,7 @@ const filterLatestSessionRecords = (items) => {
 };
 
 const MarketPressureGauge = ({
-    defaultTicker = '41I1G9000',
+    defaultTicker = 'VN30F1M',
     bsaData: externalBsaData = null,
     bidAskData: externalBidAskData = null,
     className = ''

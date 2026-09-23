@@ -18,19 +18,19 @@ export const normalize24hResolution = (resolution = '1D') => {
 export const getOptimalFromTimestamp = (resolution, countBack = 1000, to = Math.floor(Date.now() / 1000)) => {
     const res = normalize24hResolution(resolution);
     if (res === '1D' || res === '1W') {
-        return to - 15 * 365 * 86400; // 15 năm cho nến ngày/tuần
+        return to - Math.max(countBack * 2 * 86400, 30 * 86400); // Tối thiểu 30 ngày
     } else if (res === '240' || res === '60') {
-        return to - Math.max(730 * 86400, countBack * 15 * 3600); // 2 năm cho H1 / H4
+        return to - Math.max(countBack * 2 * 3600, 7 * 86400);   // Tối thiểu 7 ngày
     } else if (res === '30') {
-        return to - Math.max(365 * 86400, countBack * 10 * 1800); // 1 năm cho M30
+        return to - Math.max(countBack * 2 * 1800, 3 * 86400);   // Tối thiểu 3 ngày
     } else if (res === '15') {
-        return to - Math.max(240 * 86400, countBack * 8 * 900);   // 8 tháng cho M15
+        return to - Math.max(countBack * 2 * 900, 2 * 86400);    // Tối thiểu 2 ngày
     } else if (res === '5') {
-        return to - Math.max(150 * 86400, countBack * 6 * 300);   // 5 tháng cho M5 (~5000 nến)
+        return to - Math.max(countBack * 2 * 300, 86400);        // Tối thiểu 1 ngày
     } else if (res === '1') {
-        return to - Math.max(45 * 86400, countBack * 4 * 60);     // 45 ngày cho M1 (~9000 nến)
+        return to - Math.max(countBack * 2 * 60, 3600);          // Tối thiểu 1 giờ
     }
-    return to - 180 * 86400;
+    return to - 86400;
 };
 
 /**
@@ -49,8 +49,12 @@ export const getStockHistory = async (ticker, resolution = '1D', countBack = 100
 
     const url = `https://api.24hmoney.vn/tradingview/history?symbol=${normalizedTicker}&resolution=${normalizedResolution}&from=${from}&to=${to}&countback=${countBack}`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!response.ok) {
             throw new Error(`24hMoney API Error: ${response.statusText}`);
         }
@@ -77,6 +81,7 @@ export const getStockHistory = async (ticker, resolution = '1D', countBack = 100
         return [];
 
     } catch (error) {
+        clearTimeout(timeoutId);
         console.error("Failed to fetch from 24hMoney:", error);
         return [];
     }
@@ -104,8 +109,12 @@ export const getDerivativeHistory = async (symbol = 'VN30F1M', resolution = '5',
 
     const url = `https://api.24hmoney.vn/tradingview/history?symbol=${normalizedSymbol}&resolution=${normalizedResolution}&from=${fromTimestamp}&to=${toTimestamp}&countback=${countBack}`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!response.ok) {
             throw new Error(`24hMoney API Error: ${response.statusText}`);
         }
@@ -133,6 +142,7 @@ export const getDerivativeHistory = async (symbol = 'VN30F1M', resolution = '5',
         return [];
 
     } catch (error) {
+        clearTimeout(timeoutId);
         console.error("Failed to fetch derivative history from 24hMoney:", error);
         return [];
     }

@@ -8,7 +8,7 @@ export const getAIIntradayDecision = async ({
     apiKey,
     bsaData = [],
     bidAskData = [],
-    ticker = '41I1G9000',
+    ticker = 'VN30F1M',
     dataScope = 30,
 }) => {
     const response = await api.post('/news-analyses/ai/intraday-decision', {

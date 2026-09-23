@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchStrategies } from '../features/strategySlice';
 import { fetchRules } from '../features/ruleSlice';
+import { fetchWatchlists } from '../features/watchlistSlice';
 import { getTCBSToken, getTCBSDerivatives, placeTCBSConditionOrder } from '../services/tcbsJournal';
 import RealtimeChart from '../components/RealtimeChart';
 import { RefreshCw, TrendingDown, TrendingUp, AlertCircle, Key } from 'lucide-react';
@@ -19,7 +20,8 @@ const Derivation = () => {
     const dispatch = useDispatch();
     const { items: strategies } = useSelector(state => state.strategies);
     const { items: rules } = useSelector(state => state.rules);
-    const { selectedAccount } = useAccount();
+    const { items: watchlists } = useSelector(state => state.watchlists);
+    const { selectedAccount, defaultWatchlist, accountWatchlists, accountSymbols } = useAccount();
 
     const [entryPrice, setEntryPrice] = useState('');
     const [isAutoEntryPrice, setIsAutoEntryPrice] = useState(true);
@@ -64,13 +66,80 @@ const Derivation = () => {
     const cusCode = import.meta.env.VITE_TCBS_CUSTODYCODE;
 
 
-    const activeSymbol = (() => {
-        if (!derivativeData) return 'VN30F1M';
-        const info = Array.isArray(derivativeData) && derivativeData.length > 0
-            ? derivativeData[0]
-            : typeof derivativeData === 'object' ? derivativeData : null;
-        return info ? (info.symbol || info.sec || 'VN30F1M') : 'VN30F1M';
-    })();
+    const [contractSymbol, setContractSymbol] = useState(() => {
+        return localStorage.getItem('derivative_contract_symbol') || 'VN30F1M';
+    });
+
+    // Extract symbols from Default Watchlist (fallback to account watchlists or account symbols)
+    const watchlistSymbols = React.useMemo(() => {
+        const list = [];
+        const seen = new Set();
+
+        const addSymbol = (sym) => {
+            if (!sym) return;
+            const name = typeof sym === 'string' ? sym : (sym.Name || sym.name || sym.symbol || sym.ticker || '');
+            const clean = String(name).trim().toUpperCase();
+            if (clean && !seen.has(clean)) {
+                seen.add(clean);
+                const desc = typeof sym === 'object' ? (sym.description || sym.title || sym.companyName || '') : '';
+                list.push({
+                    name: clean,
+                    label: desc ? `${clean} - ${desc}` : clean
+                });
+            }
+        };
+
+        // 1. From defaultWatchlist
+        if (defaultWatchlist?.symbols && Array.isArray(defaultWatchlist.symbols)) {
+            defaultWatchlist.symbols.forEach(addSymbol);
+        }
+
+        // 2. If defaultWatchlist had no symbols, check accountWatchlists or all watchlists
+        if (list.length === 0 && accountWatchlists && Array.isArray(accountWatchlists)) {
+            accountWatchlists.forEach(wl => {
+                if (wl.symbols && Array.isArray(wl.symbols)) {
+                    wl.symbols.forEach(addSymbol);
+                }
+            });
+        }
+
+        // 3. Fallback to watchlists from Redux
+        if (list.length === 0 && watchlists && Array.isArray(watchlists)) {
+            const defWl = watchlists.find(w => w.isDefault);
+            if (defWl?.symbols && Array.isArray(defWl.symbols)) {
+                defWl.symbols.forEach(addSymbol);
+            }
+        }
+
+        // 4. Fallback to account symbols
+        if (list.length === 0 && accountSymbols && Array.isArray(accountSymbols)) {
+            accountSymbols.forEach(addSymbol);
+        }
+
+        // 5. Always ensure baseline VN30F1M is present
+        if (!seen.has('VN30F1M')) {
+            addSymbol('VN30F1M');
+        }
+
+        // 6. If currently stored contractSymbol is not in the list, keep it
+        if (contractSymbol && !seen.has(contractSymbol.trim().toUpperCase())) {
+            addSymbol(contractSymbol.trim().toUpperCase());
+        }
+
+        return list;
+    }, [defaultWatchlist, accountWatchlists, watchlists, accountSymbols, contractSymbol]);
+
+    // Auto-select first symbol if not set or invalid
+    useEffect(() => {
+        const saved = localStorage.getItem('derivative_contract_symbol');
+        if (!saved && watchlistSymbols.length > 0) {
+            const first = watchlistSymbols[0].name;
+            setContractSymbol(first);
+            localStorage.setItem('derivative_contract_symbol', first);
+        }
+    }, [watchlistSymbols]);
+
+    const activeSymbol = contractSymbol.trim() || 'VN30F1M';
 
     // Helper to ensure consistent date matching
     const formatDate = (dateInput) => {
@@ -85,6 +154,7 @@ const Derivation = () => {
     useEffect(() => {
         dispatch(fetchStrategies());
         dispatch(fetchRules());
+        dispatch(fetchWatchlists());
     }, [dispatch]);
 
     // Automatically set default strategy from selected account
@@ -298,7 +368,7 @@ const Derivation = () => {
         // If WebSocket is already connected, send new subscription without reconnecting
         if (activeSymbol && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             try {
-                const target = activeSymbol.startsWith('41I') ? activeSymbol : '41I1G9000';
+                const target = activeSymbol;
                 wsRef.current.send(`d|s|tk|bp+bi+tm+mp+op+fe|${target}`);
             } catch (e) { }
         }
@@ -371,9 +441,8 @@ const Derivation = () => {
                         const payload = JSON.parse(event.data.substring(4));
                         if (payload.success) {
                             setWsStatus('Connected (TCBS)');
-                            const curSym = activeSymbolRef.current;
-                            const target = (curSym && curSym.startsWith('41I')) ? curSym : '41I1G9000';
-                            ws.send(`d|s|tk|bp+bi+tm+mp+op+fe|${target}`);
+                            const curSym = activeSymbolRef.current || 'VN30F1M';
+                            ws.send(`d|s|tk|bp+bi+tm+mp+op+fe|${curSym}`);
                         } else {
                             console.warn('WS Auth Failed:', payload.error);
                             setWsStatus('LIVE');
@@ -658,8 +727,8 @@ const Derivation = () => {
 
                         {/* 2 Sub-charts in 1 Row inside #chartContainer */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-gray-900/90 border-t border-gray-700/80 shrink-0">
-                            <IntradayCumDeltaMiniChart symbol={activeSymbol || '41I1G9000'} data={bsaData} />
-                            <IntradayBidAskRatioMiniChart symbol={activeSymbol || '41I1G9000'} data={bidAskData} />
+                            <IntradayCumDeltaMiniChart symbol={activeSymbol || 'VN30F1M'} data={bsaData} />
+                            <IntradayBidAskRatioMiniChart symbol={activeSymbol || 'VN30F1M'} data={bidAskData} />
                         </div>
                     </div>
                 </div>
@@ -703,6 +772,35 @@ const Derivation = () => {
 
                         {/* Form Controls */}
                         <div className="flex flex-col gap-2.5">
+                            {/* Contract Code / Symbol Select from Default Watchlist */}
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block">
+                                        Mã Hợp Đồng Phái Sinh
+                                    </label>
+                                    {defaultWatchlist?.name && (
+                                        <span className="text-[9px] text-gray-400 truncate max-w-[150px]" title={`Default Watchlist: ${defaultWatchlist.name}`}>
+                                            WL: {defaultWatchlist.name}
+                                        </span>
+                                    )}
+                                </div>
+                                <select
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white uppercase font-mono font-bold focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer"
+                                    value={contractSymbol}
+                                    onChange={(e) => {
+                                        const val = e.target.value.toUpperCase();
+                                        setContractSymbol(val);
+                                        localStorage.setItem('derivative_contract_symbol', val);
+                                    }}
+                                >
+                                    {watchlistSymbols.map((item) => (
+                                        <option key={item.name} value={item.name} className="bg-gray-900 text-white font-mono">
+                                            {item.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
                             {/* Strategy Selector */}
                             <div>
                                 <label className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1 block">
@@ -889,7 +987,7 @@ const Derivation = () => {
                     {/* Lực Cung Cầu Phái Sinh (Market Pressure Gauge) */}
                     <div className="flex-1 min-h-[360px] w-full">
                         <MarketPressureGauge
-                            defaultTicker="41I1G9000"
+                            defaultTicker={activeSymbol || 'VN30F1M'}
                             bsaData={bsaData}
                             bidAskData={bidAskData}
                             className="h-full w-full"
@@ -901,12 +999,12 @@ const Derivation = () => {
             {/* Intraday BSA Panel & Intraday Bid-Ask Panel (Same Row) */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 w-full">
                 <IntradayBSAPanel
-                    defaultTicker="41I1G9000"
+                    defaultTicker={activeSymbol || 'VN30F1M'}
                     className="min-h-[650px] w-full"
                     onDataChange={setBsaData}
                 />
                 <IntradayBidAskPanel
-                    defaultTicker="41I1G9000"
+                    defaultTicker={activeSymbol || 'VN30F1M'}
                     className="min-h-[650px] w-full"
                     onDataChange={setBidAskData}
                 />
@@ -916,7 +1014,7 @@ const Derivation = () => {
             <IntradayAIDecisionBox
                 bsaData={bsaData}
                 bidAskData={bidAskData}
-                ticker={activeSymbol || '41I1G9000'}
+                ticker={activeSymbol || 'VN30F1M'}
                 className="w-full"
             />
 

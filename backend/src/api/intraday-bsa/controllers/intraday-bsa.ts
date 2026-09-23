@@ -4,7 +4,7 @@ import { fetchTcbs } from '../../../utils/tcbs-client';
 
 export default factories.createCoreController('api::intraday-bsa.intraday-bsa' as any, ({ strapi }) => ({
   async sync(ctx) {
-    const ticker = String(ctx.query.ticker || ctx.request.body?.ticker || '41I1G9000').trim().toUpperCase();
+    const ticker = String(ctx.query.ticker || ctx.request.body?.ticker || 'VN30F1M').trim().toUpperCase();
     const timeWindow = String(ctx.query.timeWindow || ctx.request.body?.timeWindow || '5');
     const tWindow = String(ctx.query.tWindow || ctx.request.body?.tWindow || '60m');
     const type = String(ctx.query.type || ctx.request.body?.type || 'all');
@@ -28,7 +28,7 @@ export default factories.createCoreController('api::intraday-bsa.intraday-bsa' a
       ? tcbsData
       : (Array.isArray(tcbsData?.data) ? tcbsData.data : []);
 
-    const isFuturesCode = /^41I1G\d{4}$/i.test(ticker);
+    const isFuturesCode = /^41I/i.test(ticker);
     const targetSymbolName = isFuturesCode ? 'VN30F1M' : ticker;
 
     let targetSymbolHistory: any = null;

@@ -4,7 +4,7 @@ import { fetchTcbs } from '../../../utils/tcbs-client';
 
 export default factories.createCoreController('api::intraday-bid-ask.intraday-bid-ask' as any, ({ strapi }) => ({
   async sync(ctx) {
-    const ticker = String(ctx.query.ticker || ctx.request.body?.ticker || '41I1G9000').trim().toUpperCase();
+    const ticker = String(ctx.query.ticker || ctx.request.body?.ticker || 'VN30F1M').trim().toUpperCase();
     const mode = String(ctx.query.mode || ctx.request.body?.mode || 'baAll');
     const symbolHistoryId = ctx.query.symbolHistoryId || ctx.request.body?.symbolHistoryId;
 
@@ -92,7 +92,7 @@ export default factories.createCoreController('api::intraday-bid-ask.intraday-bi
     // Sort ascending by time / timestamp
     dataList.sort((a, b) => (Number(a.s) || 0) - (Number(b.s) || 0));
 
-    const isFuturesCode = /^41I1G\d{4}$/i.test(ticker);
+    const isFuturesCode = /^41I/i.test(ticker);
     const targetSymbolName = isFuturesCode ? 'VN30F1M' : ticker;
 
     let targetSymbolHistory: any = null;
