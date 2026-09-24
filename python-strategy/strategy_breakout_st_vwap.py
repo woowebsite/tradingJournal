@@ -655,6 +655,7 @@ def scan_strategy_signals(
     allow_breakout_high: bool = True,
     allow_sweep_low: bool = True,
     indicator_filter: str = "st_or_vwap", # "st_or_vwap", "st_and_vwap", "st_only", "vwap_only", "none"
+    vwap_band_filter: str = "all", # "all", "inside", "outside"
     tp_type: str = "P90",
     sl_type: str = "P75",
     tp_supertrend: bool = False,
@@ -669,6 +670,7 @@ def scan_strategy_signals(
     - Long Setup 2: Phá đáy hôm trước (low[i] < low[i-1]), Supertrend Up HOẶC Giá > VWAP (Year) -> SL = Entry - SP75
     - Short Setup 1: Phá đáy hôm trước (low[i] < low[i-1]), Supertrend Down -> SL = Đỉnh hiện tại (high[i])
     - Short Setup 2: Vượt đỉnh hôm trước (high[i] > high[i-1]), Supertrend Down HOẶC Giá < VWAP (Year) -> SL = Entry + SP75
+    - VWAP Band Filter: "all" (Tất cả), "inside" (Entry trong Upperband 1 & Lowerband 1), "outside" (Entry ngoài Upperband 1 & Lowerband 1)
     """
     if len(df) < max(st_period, 5) + 2:
         return {"trades": [], "signals": [], "spreadStats": spread_stats or {}}
@@ -738,6 +740,8 @@ def scan_strategy_signals(
         st_val = float(row['supertrend']) if pd.notna(row['supertrend']) else 0.0
         st_dir = int(row['st_dir']) if pd.notna(row['st_dir']) else 0
         vwap_val = float(row['vwap']) if pd.notna(row['vwap']) else 0.0
+        vwap_up1 = float(row['vwap_upper1']) if pd.notna(row['vwap_upper1']) else 0.0
+        vwap_low1 = float(row['vwap_lower1']) if pd.notna(row['vwap_lower1']) else 0.0
 
         # Kiểm tra điều kiện bộ lọc Trend Indicator
         is_st_up = (st_dir == 1)
@@ -758,7 +762,7 @@ def scan_strategy_signals(
         elif filter_mode == "none":
             trend_up = True
             trend_down = True
-        else: # st_or_vwap (mặc định theo yêu cầu user: ST Up HOẶC Giá > VWAP)
+        else: # st_or_vwap (mặc định: ST Up HOẶC Giá > VWAP)
             trend_up = is_st_up or is_vwap_up
             trend_down = is_st_down or is_vwap_down
 
@@ -884,149 +888,160 @@ def scan_strategy_signals(
                     entry = close_p
                     action_name = "Buy"
 
-                # Stoploss chung cho cả 2 setup theo cấu hình sl_type
-                sl_mode = str(sl_type or "").lower().strip()
-                if sl_mode in ["prev_bar", "prev_candle", "prev_low", "day_before", "prev_bar_low_high"]:
-                    sl_type_label = "Đáy hôm trước"
-                    sl = prev_low
-                    if sl >= entry:
+                # Kiểm tra điều kiện vị trí VWAP Band (Inside / Outside)
+                band_mode = str(vwap_band_filter or "all").lower().strip()
+                band_passed = True
+                if band_mode in ["inside", "outside"] and vwap_up1 > 0 and vwap_low1 > 0:
+                    min_band = min(vwap_up1, vwap_low1)
+                    max_band = max(vwap_up1, vwap_low1)
+                    is_inside = (min_band <= entry <= max_band)
+                    if (band_mode == "inside" and not is_inside) or (band_mode == "outside" and is_inside):
+                        band_passed = False
+
+                if band_passed:
+                    # Stoploss chung cho cả 2 setup theo cấu hình sl_type
+                    sl_mode = str(sl_type or "").lower().strip()
+                    if sl_mode in ["prev_bar", "prev_candle", "prev_low", "day_before", "prev_bar_low_high"]:
+                        sl_type_label = "Đáy hôm trước"
+                        sl = prev_low
+                        if sl >= entry:
+                            sl = entry - sl_dist_spread
+                    elif sl_mode in ["current_bar", "current_candle", "current_low", "current_bar_low_high"]:
+                        sl_type_label = "Đáy hiện tại"
+                        sl = low_p
+                        if sl >= entry:
+                            sl = min(low_p, prev_low)
+                        if sl >= entry:
+                            sl = entry - sl_dist_spread
+                    else: # Dạng khoảng cách Spread: P25, P50, P75, P90, P99, CUSTOM
+                        sl_type_label = f"Spread ({sl_type.upper()})"
                         sl = entry - sl_dist_spread
-                elif sl_mode in ["current_bar", "current_candle", "current_low", "current_bar_low_high"]:
-                    sl_type_label = "Đáy hiện tại"
-                    sl = low_p
-                    if sl >= entry:
-                        sl = min(low_p, prev_low)
-                    if sl >= entry:
-                        sl = entry - sl_dist_spread
-                else: # Dạng khoảng cách Spread: P25, P50, P75, P90, P99, CUSTOM (Khoảng cách từ Entry tới SL)
-                    sl_type_label = f"Spread ({sl_type.upper()})"
-                    sl = entry - sl_dist_spread
 
-                # Tính Take Profit
-                if tp_type in ["close_today", "close_current_bar"]:
-                    tp = None
-                    tp_str = "Close ngày hiện tại"
-                elif tp_type in ["close_next_day", "close_next_bar"]:
-                    tp = None
-                    tp_str = "Close ngày hôm sau"
-                elif tp_type.startswith("RR") or tp_type == "RR":
-                    risk_dist = max(entry - sl, entry * 0.005)
-                    tp = round(entry + (risk_dist * risk_reward), 4)
-                    tp_str = f"{tp_type} {tp}"
-                else:
-                    tp = round(entry + tp_dist_spread, 4)
-                    tp_str = f"{tp_type} {tp}"
+                    # Tính Take Profit
+                    if tp_type in ["close_today", "close_current_bar"]:
+                        tp = None
+                        tp_str = "Close ngày hiện tại"
+                    elif tp_type in ["close_next_day", "close_next_bar"]:
+                        tp = None
+                        tp_str = "Close ngày hôm sau"
+                    elif tp_type.startswith("RR") or tp_type == "RR":
+                        risk_dist = max(entry - sl, entry * 0.005)
+                        tp = round(entry + (risk_dist * risk_reward), 4)
+                        tp_str = f"{tp_type} {tp}"
+                    else:
+                        tp = round(entry + tp_dist_spread, 4)
+                        tp_str = f"{tp_type} {tp}"
 
-                entry = round(entry, 4)
-                sl = round(sl, 4)
+                    entry = round(entry, 4)
+                    sl = round(sl, 4)
 
-                # Kiểm tra đóng lệnh ngay trong ngày (Close ngày hiện tại)
-                if tp_type in ["close_today", "close_current_bar"]:
-                    exit_price = close_p
-                    exit_reason = "TakeProfit (Close ngày hiện tại)"
-                    if low_p <= sl:
-                        exit_price = min(open_p, sl) if open_p < sl else sl
-                        exit_reason = f"StopLoss ({sl_type_label})"
+                    # Kiểm tra đóng lệnh ngay trong ngày (Close ngày hiện tại)
+                    if tp_type in ["close_today", "close_current_bar"]:
+                        exit_price = close_p
+                        exit_reason = "TakeProfit (Close ngày hiện tại)"
+                        if low_p <= sl:
+                            exit_price = min(open_p, sl) if open_p < sl else sl
+                            exit_reason = f"StopLoss ({sl_type_label})"
 
-                    pnl_amount = exit_price - entry
-                    pnl_percent = (pnl_amount / entry) * 100.0
+                        pnl_amount = exit_price - entry
+                        pnl_percent = (pnl_amount / entry) * 100.0
 
-                    completed_trade = {
-                        "trade_no": len(trades) + 1,
-                        "type": "Long",
-                        "entry_date": candle_date,
-                        "entry_time": time_str,
-                        "entry_price": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "exit_date": candle_date,
-                        "exit_time": time_str,
-                        "exit_price": round(exit_price, 4),
-                        "exit_reason": exit_reason,
-                        "status": "Closed",
-                        "pnl_amount": round(pnl_amount, 4),
-                        "pnl_percent": round(pnl_percent, 2),
-                        "holding_bars": 0,
-                        "entry_index": i,
-                        "price_action": setup_name,
-                        "sl_type_label": sl_type_label
-                    }
-                    trades.append(completed_trade)
-
-                    signals.append({
-                        "date": candle_date,
-                        "time": time_str,
-                        "type": "entry_long",
-                        "action": action_name,
-                        "price": entry,
-                        "pos_type": "Long",
-                        "entry": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "pnl_percent": 0.0,
-                        "rule": {
-                            "Name": f"Long [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
-                            "Type": "entry"
+                        completed_trade = {
+                            "trade_no": len(trades) + 1,
+                            "type": "Long",
+                            "entry_date": candle_date,
+                            "entry_time": time_str,
+                            "entry_price": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "exit_date": candle_date,
+                            "exit_time": time_str,
+                            "exit_price": round(exit_price, 4),
+                            "exit_reason": exit_reason,
+                            "status": "Closed",
+                            "pnl_amount": round(pnl_amount, 4),
+                            "pnl_percent": round(pnl_percent, 2),
+                            "holding_bars": 0,
+                            "entry_index": i,
+                            "price_action": setup_name,
+                            "sl_type_label": sl_type_label
                         }
-                    })
+                        trades.append(completed_trade)
 
-                    is_win = "TakeProfit" in str(exit_reason) or pnl_percent > 0
-                    signals.append({
-                        "date": candle_date,
-                        "time": time_str,
-                        "type": "takeprofit" if is_win else "stoploss",
-                        "action": "Close",
-                        "price": round(exit_price, 4),
-                        "pos_type": "Long",
-                        "entry": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "pnl_percent": round(pnl_percent, 2),
-                        "pnl_amount": round(pnl_amount, 4),
-                        "rule": {
-                            "Name": f"{exit_reason} (Long) @ {round(exit_price, 4)} | PnL: {pnl_percent:+.2f}%",
-                            "Type": "takeprofit" if is_win else "stoploss"
-                        }
-                    })
-                    current_trade = None
-                else:
-                    current_trade = {
-                        "trade_no": len(trades) + 1,
-                        "type": "Long",
-                        "entry_date": candle_date,
-                        "entry_time": time_str,
-                        "entry_price": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "exit_date": None,
-                        "exit_time": None,
-                        "exit_price": None,
-                        "exit_reason": None,
-                        "status": "Open",
-                        "pnl_amount": 0.0,
-                        "pnl_percent": 0.0,
-                        "holding_bars": 0,
-                        "entry_index": i,
-                        "price_action": setup_name,
-                        "sl_type_label": sl_type_label
-                    }
+                        signals.append({
+                            "date": candle_date,
+                            "time": time_str,
+                            "type": "entry_long",
+                            "action": action_name,
+                            "price": entry,
+                            "pos_type": "Long",
+                            "entry": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "pnl_percent": 0.0,
+                            "rule": {
+                                "Name": f"Long [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
+                                "Type": "entry"
+                            }
+                        })
 
-                    signals.append({
-                        "date": candle_date,
-                        "time": time_str,
-                        "type": "entry_long",
-                        "action": action_name,
-                        "price": entry,
-                        "pos_type": "Long",
-                        "entry": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "pnl_percent": 0.0,
-                        "rule": {
-                            "Name": f"Long [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
-                            "Type": "entry"
+                        is_win = "TakeProfit" in str(exit_reason) or pnl_percent > 0
+                        signals.append({
+                            "date": candle_date,
+                            "time": time_str,
+                            "type": "takeprofit" if is_win else "stoploss",
+                            "action": "Close",
+                            "price": round(exit_price, 4),
+                            "pos_type": "Long",
+                            "entry": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "pnl_percent": round(pnl_percent, 2),
+                            "pnl_amount": round(pnl_amount, 4),
+                            "rule": {
+                                "Name": f"{exit_reason} (Long) @ {round(exit_price, 4)} | PnL: {pnl_percent:+.2f}%",
+                                "Type": "takeprofit" if is_win else "stoploss"
+                            }
+                        })
+                        current_trade = None
+                    else:
+                        current_trade = {
+                            "trade_no": len(trades) + 1,
+                            "type": "Long",
+                            "entry_date": candle_date,
+                            "entry_time": time_str,
+                            "entry_price": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "exit_date": None,
+                            "exit_time": None,
+                            "exit_price": None,
+                            "exit_reason": None,
+                            "status": "Open",
+                            "pnl_amount": 0.0,
+                            "pnl_percent": 0.0,
+                            "holding_bars": 0,
+                            "entry_index": i,
+                            "price_action": setup_name,
+                            "sl_type_label": sl_type_label
                         }
-                    })
+
+                        signals.append({
+                            "date": candle_date,
+                            "time": time_str,
+                            "type": "entry_long",
+                            "action": action_name,
+                            "price": entry,
+                            "pos_type": "Long",
+                            "entry": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "pnl_percent": 0.0,
+                            "rule": {
+                                "Name": f"Long [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
+                                "Type": "entry"
+                            }
+                        })
 
             elif allow_short and (is_short_breakdown or is_short_sweep):
                 setup_name = ""
@@ -1044,148 +1059,159 @@ def scan_strategy_signals(
                     entry = close_p
                     action_name = "Sell"
 
-                # Stoploss chung cho cả 2 setup theo cấu hình sl_type
-                sl_mode = str(sl_type or "").lower().strip()
-                if sl_mode in ["prev_bar", "prev_candle", "prev_high", "day_before", "prev_bar_low_high"]:
-                    sl_type_label = "Đỉnh hôm trước"
-                    sl = prev_high
-                    if sl <= entry:
+                # Kiểm tra điều kiện vị trí VWAP Band (Inside / Outside)
+                band_mode = str(vwap_band_filter or "all").lower().strip()
+                band_passed = True
+                if band_mode in ["inside", "outside"] and vwap_up1 > 0 and vwap_low1 > 0:
+                    min_band = min(vwap_up1, vwap_low1)
+                    max_band = max(vwap_up1, vwap_low1)
+                    is_inside = (min_band <= entry <= max_band)
+                    if (band_mode == "inside" and not is_inside) or (band_mode == "outside" and is_inside):
+                        band_passed = False
+
+                if band_passed:
+                    # Stoploss chung cho cả 2 setup theo cấu hình sl_type
+                    sl_mode = str(sl_type or "").lower().strip()
+                    if sl_mode in ["prev_bar", "prev_candle", "prev_high", "day_before", "prev_bar_low_high"]:
+                        sl_type_label = "Đỉnh hôm trước"
+                        sl = prev_high
+                        if sl <= entry:
+                            sl = entry + sl_dist_spread
+                    elif sl_mode in ["current_bar", "current_candle", "current_high", "current_bar_low_high"]:
+                        sl_type_label = "Đỉnh hiện tại"
+                        sl = high_p
+                        if sl <= entry:
+                            sl = max(high_p, prev_high)
+                        if sl <= entry:
+                            sl = entry + sl_dist_spread
+                    else: # Dạng khoảng cách Spread: P25, P50, P75, P90, P99, CUSTOM
+                        sl_type_label = f"Spread ({sl_type.upper()})"
                         sl = entry + sl_dist_spread
-                elif sl_mode in ["current_bar", "current_candle", "current_high", "current_bar_low_high"]:
-                    sl_type_label = "Đỉnh hiện tại"
-                    sl = high_p
-                    if sl <= entry:
-                        sl = max(high_p, prev_high)
-                    if sl <= entry:
-                        sl = entry + sl_dist_spread
-                else: # Dạng khoảng cách Spread: P25, P50, P75, P90, P99, CUSTOM (Khoảng cách từ Entry tới SL)
-                    sl_type_label = f"Spread ({sl_type.upper()})"
-                    sl = entry + sl_dist_spread
 
-                if tp_type in ["close_today", "close_current_bar"]:
-                    tp = None
-                    tp_str = "Close ngày hiện tại"
-                elif tp_type in ["close_next_day", "close_next_bar"]:
-                    tp = None
-                    tp_str = "Close ngày hôm sau"
-                elif tp_type.startswith("RR") or tp_type == "RR":
-                    risk_dist = max(sl - entry, entry * 0.005)
-                    tp = round(entry - (risk_dist * risk_reward), 4)
-                    tp_str = f"{tp_type} {tp}"
-                else:
-                    tp = round(entry - tp_dist_spread, 4)
-                    tp_str = f"{tp_type} {tp}"
+                    if tp_type in ["close_today", "close_current_bar"]:
+                        tp = None
+                        tp_str = "Close ngày hiện tại"
+                    elif tp_type in ["close_next_day", "close_next_bar"]:
+                        tp = None
+                        tp_str = "Close ngày hôm sau"
+                    elif tp_type.startswith("RR") or tp_type == "RR":
+                        risk_dist = max(sl - entry, entry * 0.005)
+                        tp = round(entry - (risk_dist * risk_reward), 4)
+                        tp_str = f"{tp_type} {tp}"
+                    else:
+                        tp = round(entry - tp_dist_spread, 4)
+                        tp_str = f"{tp_type} {tp}"
 
-                entry = round(entry, 4)
-                sl = round(sl, 4)
+                    entry = round(entry, 4)
+                    sl = round(sl, 4)
 
-                # Kiểm tra đóng lệnh ngay trong ngày (Close ngày hiện tại)
-                if tp_type in ["close_today", "close_current_bar"]:
-                    exit_price = close_p
-                    exit_reason = "TakeProfit (Close ngày hiện tại)"
-                    if high_p >= sl:
-                        exit_price = max(open_p, sl) if open_p > sl else sl
-                        exit_reason = f"StopLoss ({sl_type_label})"
+                    # Kiểm tra đóng lệnh ngay trong ngày (Close ngày hiện tại)
+                    if tp_type in ["close_today", "close_current_bar"]:
+                        exit_price = close_p
+                        exit_reason = "TakeProfit (Close ngày hiện tại)"
+                        if high_p >= sl:
+                            exit_price = max(open_p, sl) if open_p > sl else sl
+                            exit_reason = f"StopLoss ({sl_type_label})"
 
-                    pnl_amount = entry - exit_price
-                    pnl_percent = (pnl_amount / entry) * 100.0
+                        pnl_amount = entry - exit_price
+                        pnl_percent = (pnl_amount / entry) * 100.0
 
-                    completed_trade = {
-                        "trade_no": len(trades) + 1,
-                        "type": "Short",
-                        "entry_date": candle_date,
-                        "entry_time": time_str,
-                        "entry_price": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "exit_date": candle_date,
-                        "exit_time": time_str,
-                        "exit_price": round(exit_price, 4),
-                        "exit_reason": exit_reason,
-                        "status": "Closed",
-                        "pnl_amount": round(pnl_amount, 4),
-                        "pnl_percent": round(pnl_percent, 2),
-                        "holding_bars": 0,
-                        "entry_index": i,
-                        "price_action": setup_name,
-                        "sl_type_label": sl_type_label
-                    }
-                    trades.append(completed_trade)
-
-                    signals.append({
-                        "date": candle_date,
-                        "time": time_str,
-                        "type": "entry_short",
-                        "action": action_name,
-                        "price": entry,
-                        "pos_type": "Short",
-                        "entry": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "pnl_percent": 0.0,
-                        "rule": {
-                            "Name": f"Short [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
-                            "Type": "entry"
+                        completed_trade = {
+                            "trade_no": len(trades) + 1,
+                            "type": "Short",
+                            "entry_date": candle_date,
+                            "entry_time": time_str,
+                            "entry_price": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "exit_date": candle_date,
+                            "exit_time": time_str,
+                            "exit_price": round(exit_price, 4),
+                            "exit_reason": exit_reason,
+                            "status": "Closed",
+                            "pnl_amount": round(pnl_amount, 4),
+                            "pnl_percent": round(pnl_percent, 2),
+                            "holding_bars": 0,
+                            "entry_index": i,
+                            "price_action": setup_name,
+                            "sl_type_label": sl_type_label
                         }
-                    })
+                        trades.append(completed_trade)
 
-                    is_win = "TakeProfit" in str(exit_reason) or pnl_percent > 0
-                    signals.append({
-                        "date": candle_date,
-                        "time": time_str,
-                        "type": "takeprofit" if is_win else "stoploss",
-                        "action": "Close",
-                        "price": round(exit_price, 4),
-                        "pos_type": "Short",
-                        "entry": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "pnl_percent": round(pnl_percent, 2),
-                        "pnl_amount": round(pnl_amount, 4),
-                        "rule": {
-                            "Name": f"{exit_reason} (Short) @ {round(exit_price, 4)} | PnL: {pnl_percent:+.2f}%",
-                            "Type": "takeprofit" if is_win else "stoploss"
-                        }
-                    })
-                    current_trade = None
-                else:
-                    current_trade = {
-                        "trade_no": len(trades) + 1,
-                        "type": "Short",
-                        "entry_date": candle_date,
-                        "entry_time": time_str,
-                        "entry_price": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "exit_date": None,
-                        "exit_time": None,
-                        "exit_price": None,
-                        "exit_reason": None,
-                        "status": "Open",
-                        "pnl_amount": 0.0,
-                        "pnl_percent": 0.0,
-                        "holding_bars": 0,
-                        "entry_index": i,
-                        "price_action": setup_name,
-                        "sl_type_label": sl_type_label
-                    }
+                        signals.append({
+                            "date": candle_date,
+                            "time": time_str,
+                            "type": "entry_short",
+                            "action": action_name,
+                            "price": entry,
+                            "pos_type": "Short",
+                            "entry": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "pnl_percent": 0.0,
+                            "rule": {
+                                "Name": f"Short [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
+                                "Type": "entry"
+                            }
+                        })
 
-                    signals.append({
-                        "date": candle_date,
-                        "time": time_str,
-                        "type": "entry_short",
-                        "action": action_name,
-                        "price": entry,
-                        "pos_type": "Short",
-                        "entry": entry,
-                        "stop_loss": sl,
-                        "take_profit": tp,
-                        "pnl_percent": 0.0,
-                        "rule": {
-                            "Name": f"Short [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
-                            "Type": "entry"
+                        is_win = "TakeProfit" in str(exit_reason) or pnl_percent > 0
+                        signals.append({
+                            "date": candle_date,
+                            "time": time_str,
+                            "type": "takeprofit" if is_win else "stoploss",
+                            "action": "Close",
+                            "price": round(exit_price, 4),
+                            "pos_type": "Short",
+                            "entry": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "pnl_percent": round(pnl_percent, 2),
+                            "pnl_amount": round(pnl_amount, 4),
+                            "rule": {
+                                "Name": f"{exit_reason} (Short) @ {round(exit_price, 4)} | PnL: {pnl_percent:+.2f}%",
+                                "Type": "takeprofit" if is_win else "stoploss"
+                            }
+                        })
+                        current_trade = None
+                    else:
+                        current_trade = {
+                            "trade_no": len(trades) + 1,
+                            "type": "Short",
+                            "entry_date": candle_date,
+                            "entry_time": time_str,
+                            "entry_price": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "exit_date": None,
+                            "exit_time": None,
+                            "exit_price": None,
+                            "exit_reason": None,
+                            "status": "Open",
+                            "pnl_amount": 0.0,
+                            "pnl_percent": 0.0,
+                            "holding_bars": 0,
+                            "entry_index": i,
+                            "price_action": setup_name,
+                            "sl_type_label": sl_type_label
                         }
-                    })
+
+                        signals.append({
+                            "date": candle_date,
+                            "time": time_str,
+                            "type": "entry_short",
+                            "action": action_name,
+                            "price": entry,
+                            "pos_type": "Short",
+                            "entry": entry,
+                            "stop_loss": sl,
+                            "take_profit": tp,
+                            "pnl_percent": 0.0,
+                            "rule": {
+                                "Name": f"Short [{setup_name}] @ {entry} (TP:{tp_str}, SL:{sl_type_label} {sl})",
+                                "Type": "entry"
+                            }
+                        })
 
     # Nếu lệnh cuối cùng còn Open
     if current_trade is not None:
@@ -1213,6 +1239,7 @@ def scan_symbol_json(
     allow_breakout_high: bool = True,
     allow_sweep_low: bool = True,
     indicator_filter: str = "st_or_vwap",
+    vwap_band_filter: str = "all",
     tp_type: str = "P90",
     sl_type: str = "P75",
     tp_supertrend: bool = False,
@@ -1243,6 +1270,7 @@ def scan_symbol_json(
         allow_breakout_high=allow_breakout_high,
         allow_sweep_low=allow_sweep_low,
         indicator_filter=indicator_filter,
+        vwap_band_filter=vwap_band_filter,
         tp_type=tp_type,
         sl_type=sl_type,
         tp_supertrend=tp_supertrend,
@@ -1335,6 +1363,7 @@ def scan_symbol_json(
             "allowBreakoutHigh": allow_breakout_high,
             "allowSweepLow": allow_sweep_low,
             "indicatorFilter": indicator_filter,
+            "vwapBandFilter": vwap_band_filter,
             "tpType": tp_type,
             "slType": sl_type,
             "tpSupertrend": tp_supertrend,
@@ -1362,6 +1391,7 @@ def optimize_strategy(
     current_sl_type: str = "current_bar",
     current_tp_supertrend: bool = False,
     current_indicator_filter: str = "st_or_vwap",
+    current_vwap_band_filter: str = "all",
     opt_config: Dict = None
 ) -> Dict:
     df = fetch_market_candles(ticker, countback=countback, timeframe=timeframe)
@@ -1385,6 +1415,7 @@ def optimize_strategy(
     opt_sl_type = opt_config.get("slType", True)
     opt_tp_supertrend = opt_config.get("tpSupertrend", True)
     opt_filter = opt_config.get("indicatorFilter", True)
+    opt_vwap_band = opt_config.get("vwapBandFilter", True)
 
     st_periods = [7, 10, 14] if opt_st_period else [int(current_st_period or 10)]
     st_mults = [2.0, 3.0, 4.0] if opt_st_multiplier else [float(current_st_multiplier or 3.0)]
@@ -1398,6 +1429,7 @@ def optimize_strategy(
     sl_types = ["current_bar", "prev_bar", "P50", "P75", "P90"] if opt_sl_type else [str(current_sl_type or "current_bar")]
     tp_sts = [False, True] if opt_tp_supertrend else [bool(current_tp_supertrend)]
     filters = ["st_or_vwap", "st_and_vwap", "st_only", "vwap_only"] if opt_filter else [str(current_indicator_filter or "st_or_vwap")]
+    vwap_bands = ["all", "inside", "outside"] if opt_vwap_band else [str(current_vwap_band_filter or "all")]
 
     combinations = []
     for st_p in st_periods:
@@ -1407,18 +1439,20 @@ def optimize_strategy(
                     for sl_t in sl_types:
                         for tp_s in tp_sts:
                             for f_mode in filters:
-                                combinations.append({
-                                    "st_period": st_p,
-                                    "st_multiplier": st_m,
-                                    "vwap_anchor": current_vwap_anchor,
-                                    "entry_setup": e_setup,
-                                    "allow_breakout_high": e_setup in ["setup1", "both"],
-                                    "allow_sweep_low": e_setup in ["setup2", "both"],
-                                    "tp_type": tp_t,
-                                    "sl_type": sl_t,
-                                    "tp_supertrend": tp_s,
-                                    "indicator_filter": f_mode
-                                })
+                                for b_mode in vwap_bands:
+                                    combinations.append({
+                                        "st_period": st_p,
+                                        "st_multiplier": st_m,
+                                        "vwap_anchor": current_vwap_anchor,
+                                        "entry_setup": e_setup,
+                                        "allow_breakout_high": e_setup in ["setup1", "both"],
+                                        "allow_sweep_low": e_setup in ["setup2", "both"],
+                                        "tp_type": tp_t,
+                                        "sl_type": sl_t,
+                                        "tp_supertrend": tp_s,
+                                        "indicator_filter": f_mode,
+                                        "vwap_band_filter": b_mode
+                                    })
 
     def run_eval(c):
         res = scan_strategy_signals(
@@ -1431,6 +1465,7 @@ def optimize_strategy(
             allow_breakout_high=c["allow_breakout_high"],
             allow_sweep_low=c["allow_sweep_low"],
             indicator_filter=c["indicator_filter"],
+            vwap_band_filter=c["vwap_band_filter"],
             tp_type=c["tp_type"],
             sl_type=c["sl_type"],
             tp_supertrend=c["tp_supertrend"],
@@ -1478,7 +1513,7 @@ def optimize_strategy(
     seen = set()
     for item in evaluated:
         cfg = item["config"]
-        key = (cfg["st_period"], cfg["st_multiplier"], cfg["vwap_anchor"], cfg["indicator_filter"], cfg["entry_setup"], cfg["tp_type"], cfg["sl_type"], cfg["tp_supertrend"])
+        key = (cfg["st_period"], cfg["st_multiplier"], cfg["vwap_anchor"], cfg["indicator_filter"], cfg["vwap_band_filter"], cfg["entry_setup"], cfg["tp_type"], cfg["sl_type"], cfg["tp_supertrend"])
         if key not in seen:
             seen.add(key)
             top_configs.append({
@@ -1487,6 +1522,7 @@ def optimize_strategy(
                 "stMultiplier": cfg["st_multiplier"],
                 "vwapAnchor": cfg["vwap_anchor"],
                 "indicatorFilter": cfg["indicator_filter"],
+                "vwapBandFilter": cfg["vwap_band_filter"],
                 "entrySetup": cfg["entry_setup"],
                 "allowBreakoutHigh": cfg["allow_breakout_high"],
                 "allowSweepLow": cfg["allow_sweep_low"],
@@ -1515,6 +1551,7 @@ def optimize_strategy(
         "stMultiplier": current_st_multiplier,
         "vwapAnchor": current_vwap_anchor,
         "indicatorFilter": current_indicator_filter,
+        "vwapBandFilter": current_vwap_band_filter,
         "entrySetup": eff_setup,
         "allowBreakoutHigh": eff_setup in ["setup1", "both"],
         "allowSweepLow": eff_setup in ["setup2", "both"],
@@ -1534,6 +1571,7 @@ def optimize_strategy(
         allow_breakout_high=best_combo["allowBreakoutHigh"],
         allow_sweep_low=best_combo["allowSweepLow"],
         indicator_filter=best_combo["indicatorFilter"],
+        vwap_band_filter=best_combo["vwapBandFilter"],
         tp_type=best_combo["tpType"],
         sl_type=best_combo["slType"],
         tp_supertrend=best_combo["tpSupertrend"],
@@ -1546,6 +1584,7 @@ def optimize_strategy(
         "stMultiplier": best_combo["stMultiplier"],
         "vwapAnchor": best_combo["vwapAnchor"],
         "indicatorFilter": best_combo["indicatorFilter"],
+        "vwapBandFilter": best_combo["vwapBandFilter"],
         "entrySetup": best_combo["entrySetup"],
         "allowBreakoutHigh": best_combo["allowBreakoutHigh"],
         "allowSweepLow": best_combo["allowSweepLow"],
@@ -1591,6 +1630,9 @@ if __name__ == "__main__":
 
     # Indicator Filter Condition
     parser.add_argument("--indicator-filter", type=str, default="st_or_vwap", help="Indicator filter: st_or_vwap, st_and_vwap, st_only, vwap_only, none")
+
+    # VWAP Band Filter (Inside / Outside VWAP Upper1 & Lower1)
+    parser.add_argument("--vwap-band-filter", "--vwap-band", dest="vwap_band_filter", type=str, default="all", choices=["all", "inside", "outside"], help="VWAP Band filter: all, inside, outside")
 
     # Entry Setup
     parser.add_argument("--entry-setup", type=str, default="both", choices=["setup1", "setup2", "both"], help="Entry setup (setup1, setup2, both)")
@@ -1644,6 +1686,7 @@ if __name__ == "__main__":
             current_sl_type=args.sl_type,
             current_tp_supertrend=args.tp_supertrend,
             current_indicator_filter=args.indicator_filter,
+            current_vwap_band_filter=args.vwap_band_filter,
             opt_config=opt_cfg
         )
     else:
@@ -1658,6 +1701,7 @@ if __name__ == "__main__":
             allow_breakout_high=args.allow_breakout_high,
             allow_sweep_low=args.allow_sweep_low,
             indicator_filter=args.indicator_filter,
+            vwap_band_filter=args.vwap_band_filter,
             tp_type=args.tp_type,
             sl_type=args.sl_type,
             tp_supertrend=args.tp_supertrend,
@@ -1674,7 +1718,7 @@ if __name__ == "__main__":
         bp = res.get("bestParams", {})
         if args.optimize:
             print(f"[*] KẾT QUẢ TỐI ƯU HÓA BREAKOUT + ST & VWAP ({args.ticker} • {args.timeframe}):")
-            print(f"    - Bộ tham số tốt nhất: ST({bp.get('stPeriod')}, {bp.get('stMultiplier')}) | Setup: {bp.get('entrySetup')} | Filter: {bp.get('indicatorFilter')} | TP: {bp.get('tpType')} | SL: {bp.get('slType')}")
+            print(f"    - Bộ tham số tốt nhất: ST({bp.get('stPeriod')}, {bp.get('stMultiplier')}) | Setup: {bp.get('entrySetup')} | Filter: {bp.get('indicatorFilter')} | VWAP Band: {bp.get('vwapBandFilter')} | TP: {bp.get('tpType')} | SL: {bp.get('slType')}")
             print(f"    - Profit Factor: {summary.get('profitFactor')} | Win Rate: {summary.get('winRate')}% ({summary.get('closedTrades')} trades)")
             print(f"    - Tổng PnL: {summary.get('totalPnlPercent')}%")
         else:
@@ -1682,3 +1726,4 @@ if __name__ == "__main__":
             print(f"    - Tổng số Trades: {summary.get('totalTrades')} (Thắng: {summary.get('winTrades')}, Thua: {summary.get('lossTrades')})")
             print(f"    - Win Rate: {summary.get('winRate')}% | Profit Factor: {summary.get('profitFactor')}")
             print(f"    - Tổng PnL: {summary.get('totalPnlPercent')}%")
+

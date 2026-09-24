@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Activity, Anchor, Target, ShieldAlert, Zap, Filter } from 'lucide-react';
+import { TrendingUp, Activity, Anchor, Target, ShieldAlert, Zap, Filter, Layers } from 'lucide-react';
 
 export const breakoutStVwapStrategy = {
     id: 'strategy_breakout_st_vwap.py',
@@ -12,6 +12,7 @@ export const breakoutStVwapStrategy = {
         stMultiplier: 3.0,
         vwapAnchor: 'year',
         indicatorFilter: 'st_or_vwap',
+        vwapBandFilter: 'all',
         entrySetup: 'both',
         allowBreakoutHigh: true,
         allowSweepLow: true,
@@ -90,6 +91,22 @@ export const breakoutStVwapStrategy = {
             defaultOpt: true,
         },
         {
+            name: 'vwapBandFilter',
+            label: 'Vị trí VWAP Band (Entry)',
+            title: 'VWAP_BAND_FILTER',
+            icon: Layers,
+            iconColor: 'text-amber-400',
+            type: 'select',
+            column: 1,
+            options: [
+                { value: 'all', label: 'Tất cả (Không lọc)' },
+                { value: 'inside', label: 'Inside (Trong Upperband 1 & Lowerband 1)' },
+                { value: 'outside', label: 'Outside (Ngoài Upperband 1 & Lowerband 1)' },
+            ],
+            optimizable: true,
+            defaultOpt: true,
+        },
+        {
             name: 'entrySetup',
             label: 'Điều kiện Vào lệnh (Entry)',
             title: 'BREAKOUT_ENTRY_SETUPS',
@@ -147,6 +164,7 @@ export const breakoutStVwapStrategy = {
             stMultiplier: parseFloat(params.stMultiplier) || 3.0,
             vwapAnchor: params.vwapAnchor || 'year',
             indicatorFilter: params.indicatorFilter || 'st_or_vwap',
+            vwapBandFilter: params.vwapBandFilter || 'all',
             entrySetup: setup,
             allowBreakoutHigh,
             allowSweepLow,
@@ -173,6 +191,7 @@ export const breakoutStVwapStrategy = {
             stMultiplier: params.stMultiplier,
             vwapAnchor: params.vwapAnchor || 'year',
             indicatorFilter: params.indicatorFilter || 'st_or_vwap',
+            vwapBandFilter: params.vwapBandFilter || 'all',
             entrySetup: setup,
             allowBreakoutHigh,
             allowSweepLow,
@@ -189,6 +208,7 @@ export const breakoutStVwapStrategy = {
                 slType: Boolean(optFlags.slType),
                 tpSupertrend: Boolean(optFlags.tpSupertrend),
                 indicatorFilter: Boolean(optFlags.indicatorFilter),
+                vwapBandFilter: Boolean(optFlags.vwapBandFilter),
             }
         };
     },
@@ -207,6 +227,7 @@ export const breakoutStVwapStrategy = {
             stMultiplier: config.stMultiplier !== undefined ? config.stMultiplier : currentParams.stMultiplier,
             vwapAnchor: config.vwapAnchor !== undefined ? config.vwapAnchor : (currentParams.vwapAnchor || 'year'),
             indicatorFilter: config.indicatorFilter !== undefined ? config.indicatorFilter : (currentParams.indicatorFilter || 'st_or_vwap'),
+            vwapBandFilter: config.vwapBandFilter !== undefined ? config.vwapBandFilter : (currentParams.vwapBandFilter || 'all'),
             entrySetup: nextSetup,
             allowBreakoutHigh: nextSetup === 'setup1' || nextSetup === 'both',
             allowSweepLow: nextSetup === 'setup2' || nextSetup === 'both',
@@ -239,8 +260,14 @@ export const breakoutStVwapStrategy = {
             'st_only': 'ST Only',
             'vwap_only': 'VWAP Only'
         };
+        const bandMap = {
+            'inside': ' | Band: Inside',
+            'outside': ' | Band: Outside',
+            'all': ''
+        };
         const filterStr = filterMap[params.indicatorFilter] || params.indicatorFilter || 'ST or VWAP';
-        return `Breakout ST(${params.stPeriod}, ${params.stMultiplier}) + VWAP(${params.vwapAnchor || 'year'}) | Lọc: ${filterStr} | ${setupStr} | TP: ${params.tpType} | SL: ${params.slType} | ${params.allowLong ? 'Long' : ''} ${params.allowShort ? 'Short' : ''}`.trim();
+        const bandStr = bandMap[params.vwapBandFilter] || '';
+        return `Breakout ST(${params.stPeriod}, ${params.stMultiplier}) + VWAP(${params.vwapAnchor || 'year'}) | Lọc: ${filterStr}${bandStr} | ${setupStr} | TP: ${params.tpType} | SL: ${params.slType} | ${params.allowLong ? 'Long' : ''} ${params.allowShort ? 'Short' : ''}`.trim();
     },
 
     // Hiển thị tóm tắt cấu hình ở thanh Status Bar
@@ -250,6 +277,10 @@ export const breakoutStVwapStrategy = {
             'st_and_vwap': 'ST & VWAP',
             'st_only': 'ST Only',
             'vwap_only': 'VWAP Only'
+        };
+        const bandMap = {
+            'inside': 'Inside VWAP',
+            'outside': 'Outside VWAP',
         };
         return (
             <>
@@ -261,6 +292,12 @@ export const breakoutStVwapStrategy = {
                     <Filter size={12} className="text-purple-400" />
                     Lọc: {filterMap[params.indicatorFilter] || params.indicatorFilter}
                 </span>
+                {params.vwapBandFilter && params.vwapBandFilter !== 'all' && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium font-mono">
+                        <Layers size={12} className="text-amber-400" />
+                        {bandMap[params.vwapBandFilter] || params.vwapBandFilter}
+                    </span>
+                )}
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-xs font-medium">
                     <Target size={12} className="text-emerald-400" />
                     TP: {params.tpType}
@@ -281,10 +318,17 @@ export const breakoutStVwapStrategy = {
             'st_only': 'ST Only',
             'vwap_only': 'VWAP Only'
         };
+        const bandMap = {
+            'inside': 'Inside VWAP',
+            'outside': 'Outside VWAP',
+        };
         return (
             <>
                 {' '}| <span className="font-mono text-cyan-300">ST({info.stPeriod}, {info.stMultiplier})</span>
                 {' '}| <span className="text-purple-300 font-semibold font-mono">Lọc: {filterMap[info.indicatorFilter] || info.indicatorFilter || 'ST or VWAP'}</span>
+                {info.vwapBandFilter && info.vwapBandFilter !== 'all' && (
+                    <>{' '}| <span className="text-amber-300 font-semibold font-mono">Band: {bandMap[info.vwapBandFilter] || info.vwapBandFilter}</span></>
+                )}
                 {' '}| TP: <span className="text-emerald-300 font-semibold">{info.tpType || 'P90'}</span>
                 {' '}| SL: <span className="text-rose-300 font-semibold">{info.slType || 'P75'}</span>
             </>
@@ -299,6 +343,10 @@ export const breakoutStVwapStrategy = {
             'st_only': 'ST Only',
             'vwap_only': 'VWAP Only'
         };
+        const bandMap = {
+            'inside': 'Inside VWAP',
+            'outside': 'Outside VWAP',
+        };
         const setupMap = {
             'setup1': 'Vượt đỉnh',
             'setup2': 'Phá đáy',
@@ -312,6 +360,11 @@ export const breakoutStVwapStrategy = {
                 <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium text-[11px]">
                     {filterMap[item.indicatorFilter] || item.indicatorFilter || 'ST or VWAP'}
                 </span>
+                {item.vwapBandFilter && item.vwapBandFilter !== 'all' && (
+                    <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium text-[11px]">
+                        {bandMap[item.vwapBandFilter] || item.vwapBandFilter}
+                    </span>
+                )}
                 {item.entrySetup && item.entrySetup !== 'custom' && (
                     <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-medium text-[11px]">
                         {setupMap[item.entrySetup] || item.entrySetup}
