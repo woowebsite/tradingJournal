@@ -372,6 +372,7 @@ export default {
           '--vwap-anchor', String(cleanVwapAnchor),
           '--indicator-filter', String(ctx.request.body?.indicatorFilter || ctx.request.body?.indicator_filter || 'st_or_vwap'),
           '--vwap-band-filter', String(ctx.request.body?.vwapBandFilter || ctx.request.body?.vwap_band_filter || ctx.request.body?.vwapBand || ctx.request.body?.vwap_band || 'all'),
+          '--entry-setup', String(ctx.request.body?.entrySetup || ctx.request.body?.entry_setup || 'both'),
           '--tp-type', String(cleanTpType),
           '--sl-type', String(cleanSlType),
           '--custom-tp-val', String(cleanCustomTp),
@@ -647,6 +648,10 @@ export default {
 
       if (ctx.request.body?.vwapBandFilter || ctx.request.body?.vwap_band_filter || ctx.request.body?.vwapBand || ctx.request.body?.vwap_band) {
         args.push('--vwap-band-filter', String(ctx.request.body?.vwapBandFilter || ctx.request.body?.vwap_band_filter || ctx.request.body?.vwapBand || ctx.request.body?.vwap_band));
+      }
+
+      if (ctx.request.body?.entrySetup || ctx.request.body?.entry_setup) {
+        args.push('--entry-setup', String(ctx.request.body?.entrySetup || ctx.request.body?.entry_setup));
       }
 
       if (ctx.request.body?.allowBreakoutHigh !== undefined || ctx.request.body?.allow_breakout_high !== undefined) {

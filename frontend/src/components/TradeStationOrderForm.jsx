@@ -4,6 +4,8 @@ import { Save } from 'lucide-react';
 import { saveTrade } from '../features/tradeSlice';
 import { formatMoney } from '../utils/formatMoney';
 import { executeBinanceOrder } from '../services/binanceExecution';
+import { placeTCBSConditionOrder } from '../services/tcbsJournal';
+import { calculateSupertrend } from '../indicators/supertrend';
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
@@ -68,17 +70,89 @@ const TradeStationOrderForm = ({
   activeStrategy,
   value,
   livePrice,
+  liveCandle,
+  timeframe = 'D1',
+  histories = [],
   onChange,
   onSaved,
-  disabled = false
+  disabled = false,
+  jwtToken,
+  setShowOtpModal,
+  derivativeSymbol,
+  onDerivativeSymbolChange,
+  allSymbols = []
 }) => {
   const dispatch = useDispatch();
   const riskAmount = getAccountRiskAmount(selectedAccount);
   const [form, setForm] = useState(() => getInitialForm(value, riskAmount));
   const [saving, setSaving] = useState(false);
   const [isLivePriceLinked, setIsLivePriceLinked] = useState(() => !value?.price);
+  const [slType, setSlType] = useState('manual');
+  const [tpType, setTpType] = useState('manual');
+  const [contractSymbol, setContractSymbol] = useState(() => {
+    return derivativeSymbol || localStorage.getItem('derivative_contract_symbol') || '41I1GA000';
+  });
 
   const prevValueRef = useRef(value);
+
+  // Chronologically sorted candles for current timeframe
+  const sortedCandles = useMemo(() => {
+    if (!histories || !Array.isArray(histories) || histories.length === 0) return [];
+    return [...histories]
+      .filter(c => c && (c.close !== undefined || c.Close !== undefined || c.price !== undefined))
+      .sort((a, b) => {
+        const tA = new Date(a.date || a.time || a.tradingDate || a.Date || 0).getTime();
+        const tB = new Date(b.date || b.time || b.tradingDate || b.Date || 0).getTime();
+        return tA - tB;
+      });
+  }, [histories]);
+
+  // Calculate spread values (P25, P50, P75, P90, P99) from candle histories
+  const spreadValues = useMemo(() => {
+    if (sortedCandles.length === 0) return null;
+    const spreads = sortedCandles
+      .map(c => Math.abs(Number(c.high ?? c.High ?? 0) - Number(c.low ?? c.Low ?? 0)))
+      .filter(s => s > 0)
+      .sort((a, b) => a - b);
+    if (spreads.length === 0) return null;
+    const getP = (pct) => {
+      const idx = Math.floor((pct / 100) * spreads.length);
+      return spreads[Math.min(idx, spreads.length - 1)];
+    };
+    return {
+      p25: getP(25),
+      p50: getP(50),
+      p75: getP(75),
+      p90: getP(90),
+      p99: getP(99),
+    };
+  }, [sortedCandles]);
+
+  // Calculate Supertrend level for the current candles
+  const supertrendVal = useMemo(() => {
+    if (sortedCandles.length < 10) return null;
+    try {
+      const formatted = sortedCandles.map(c => ({
+        open: Number(c.open ?? c.Open ?? c.close ?? c.Close ?? 0),
+        high: Number(c.high ?? c.High ?? c.close ?? c.Close ?? 0),
+        low: Number(c.low ?? c.Low ?? c.close ?? c.Close ?? 0),
+        close: Number(c.close ?? c.Close ?? c.price ?? 0),
+        volume: Number(c.volume ?? c.Volume ?? 0)
+      }));
+      const stData = calculateSupertrend(10, 3.0, formatted);
+      const last = stData.at(-1);
+      return last?.value ? Number(last.value.toFixed(2)) : null;
+    } catch {
+      return null;
+    }
+  }, [sortedCandles]);
+
+  // Sync external derivativeSymbol if updated from parent
+  useEffect(() => {
+    if (derivativeSymbol && derivativeSymbol !== contractSymbol) {
+      setContractSymbol(derivativeSymbol);
+    }
+  }, [derivativeSymbol]);
 
   // Sync with value prop only when external value prop changes from template / auto-trade / params
   useEffect(() => {
@@ -164,6 +238,69 @@ const TradeStationOrderForm = ({
     volume > 0
   ), [disabled, entryPrice, saving, selectedAccount, selectedSymbol, volume]);
 
+  const computeSlPrice = useCallback((type, currentPrice, currentSlPrice) => {
+    if (!type || type === 'manual') return null;
+    const curP = toFiniteNumber(currentPrice, 0) || Number(livePrice || 0);
+    if (curP <= 0) return null;
+
+    const existingSl = toFiniteNumber(currentSlPrice, 0);
+    const isLong = existingSl > 0 ? curP >= existingSl : true;
+
+    const last = liveCandle || (sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1] : null);
+    const prev = liveCandle
+      ? (sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1] : null)
+      : (sortedCandles.length > 1 ? sortedCandles[sortedCandles.length - 2] : sortedCandles[0]);
+
+    let slVal = null;
+    if (type === 'current_bar' && last) {
+      const low = Number(last.low ?? last.Low ?? curP);
+      const high = Number(last.high ?? last.High ?? curP);
+      slVal = isLong ? low : high;
+    } else if (type === 'prev_bar' && prev) {
+      const low = Number(prev.low ?? prev.Low ?? curP);
+      const high = Number(prev.high ?? prev.High ?? curP);
+      slVal = isLong ? low : high;
+    } else if (type === 'supertrend' && supertrendVal) {
+      slVal = supertrendVal;
+    } else if (spreadValues && spreadValues[type.toLowerCase()]) {
+      const spread = spreadValues[type.toLowerCase()];
+      slVal = isLong ? curP - spread : curP + spread;
+    }
+
+    if (slVal !== null && Number.isFinite(slVal) && slVal > 0) {
+      return formatCleanDecimal(slVal, 2);
+    }
+    return null;
+  }, [liveCandle, sortedCandles, supertrendVal, spreadValues, livePrice]);
+
+  const computeTpPrice = useCallback((type, currentPrice, currentSlPrice) => {
+    if (!type || type === 'manual') return null;
+    const curP = toFiniteNumber(currentPrice, 0) || Number(livePrice || 0);
+    const slP = toFiniteNumber(currentSlPrice, 0);
+    if (curP <= 0) return null;
+
+    const isLong = slP > 0 ? curP >= slP : true;
+    let tpVal = null;
+
+    if (type === 'RR1.5') {
+      const dist = slP > 0 ? Math.abs(curP - slP) : (spreadValues?.p50 || curP * 0.01);
+      tpVal = isLong ? curP + dist * 1.5 : curP - dist * 1.5;
+    } else if (type === 'RR2.0') {
+      const dist = slP > 0 ? Math.abs(curP - slP) : (spreadValues?.p50 || curP * 0.01);
+      tpVal = isLong ? curP + dist * 2.0 : curP - dist * 2.0;
+    } else if (type === 'close_today' || type === 'close_next_day') {
+      tpVal = curP;
+    } else if (spreadValues && spreadValues[type.toLowerCase()]) {
+      const spread = spreadValues[type.toLowerCase()];
+      tpVal = isLong ? curP + spread : curP - spread;
+    }
+
+    if (tpVal !== null && Number.isFinite(tpVal) && tpVal > 0) {
+      return formatCleanDecimal(tpVal, 2);
+    }
+    return null;
+  }, [livePrice, spreadValues]);
+
   const handleChange = (field, nextValue) => {
     if (field === 'price') {
       setIsLivePriceLinked(false);
@@ -171,6 +308,21 @@ const TradeStationOrderForm = ({
 
     setForm(prev => {
       const next = { ...prev, [field]: nextValue };
+
+      // If price was modified, recompute SL and TP if auto-modes are active
+      if (field === 'price') {
+        const pNum = toFiniteNumber(nextValue, 0);
+        if (pNum > 0) {
+          if (slType !== 'manual') {
+            const autoSl = computeSlPrice(slType, pNum, next.slPrice);
+            if (autoSl) next.slPrice = autoSl;
+          }
+          if (tpType !== 'manual') {
+            const autoTp = computeTpPrice(tpType, pNum, next.slPrice);
+            if (autoTp) next.tpPrice = autoTp;
+          }
+        }
+      }
 
       // Calculate volume automatically whenever Price, SL Price, or Risk Amount is modified
       const curPrice = field === 'price' ? toFiniteNumber(nextValue, 0) : toFiniteNumber(next.price, 0);
@@ -195,8 +347,17 @@ const TradeStationOrderForm = ({
     const strP = String(Number(livePrice));
     setForm(prev => {
       const next = { ...prev, price: strP };
-      const sl = toFiniteNumber(prev.slPrice, 0);
-      const r = toFiniteNumber(prev.riskAmount, 0) || riskAmount;
+      if (slType !== 'manual') {
+        const autoSl = computeSlPrice(slType, Number(livePrice), next.slPrice);
+        if (autoSl) next.slPrice = autoSl;
+      }
+      if (tpType !== 'manual') {
+        const autoTp = computeTpPrice(tpType, Number(livePrice), next.slPrice);
+        if (autoTp) next.tpPrice = autoTp;
+      }
+
+      const sl = toFiniteNumber(next.slPrice, 0);
+      const r = toFiniteNumber(next.riskAmount, 0) || riskAmount;
       if (sl > 0 && r > 0) {
         const dist = Math.abs(Number(livePrice) - sl);
         if (dist > 0) {
@@ -208,26 +369,116 @@ const TradeStationOrderForm = ({
     });
   };
 
+  const rawSymbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
+  const symUpper = rawSymbolName.toUpperCase();
+  const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
+  const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
+
+  const isDerivative = (
+    marketName.includes('DERIVATIVE') ||
+    marketName.includes('PHÁI SINH') ||
+    marketName.includes('FUTURES_VN') ||
+    accountName.includes('DERIVATIVE') ||
+    accountName.includes('PHÁI SINH') ||
+    selectedAccount?.marketType === 'Derivative' ||
+    ((symUpper === 'VN30F1M' || symUpper.startsWith('41I')) && !marketName.includes('CRYPTO') && !accountName.includes('BINANCE'))
+  );
+
+  const derivativeOptions = useMemo(() => {
+    const list = [
+      { value: '41I1GA000', label: '41I1GA000 (Tháng hiện tại - TCBS)' },
+      { value: 'VN30F1M', label: 'VN30F1M (Hợp đồng chuẩn)' },
+      { value: '41I1G4000', label: '41I1G4000' },
+      { value: '41I1G8000', label: '41I1G8000' },
+      { value: '41I1G9000', label: '41I1G9000' },
+    ];
+    if (Array.isArray(allSymbols)) {
+      allSymbols.forEach(sym => {
+        const sName = (sym.Name || sym.name || '').trim().toUpperCase();
+        if (sName && (sName.startsWith('41I') || sName.includes('VN30')) && !list.some(item => item.value === sName)) {
+          list.push({ value: sName, label: sName });
+        }
+      });
+    }
+    if (contractSymbol && !list.some(item => item.value === contractSymbol)) {
+      list.unshift({ value: contractSymbol, label: `${contractSymbol} (Tùy chọn)` });
+    }
+    return list;
+  }, [contractSymbol, allSymbols]);
+
+  const slOptions = useMemo(() => [
+    { value: 'manual', label: 'Tùy chỉnh (Nhập tay)' },
+    { value: 'current_bar', label: 'Đáy/Đỉnh nến hiện tại' },
+    { value: 'prev_bar', label: 'Đáy/Đỉnh nến hôm trước' },
+    { value: 'P25', label: `Spread P25 (Hẹp${spreadValues?.p25 ? ` • ${formatCleanDecimal(spreadValues.p25, 2)}` : ''})` },
+    { value: 'P50', label: `Spread P50 (Trung vị${spreadValues?.p50 ? ` • ${formatCleanDecimal(spreadValues.p50, 2)}` : ''})` },
+    { value: 'P75', label: `Spread P75 (Rộng${spreadValues?.p75 ? ` • ${formatCleanDecimal(spreadValues.p75, 2)}` : ''}) - Mặc định` },
+    { value: 'P90', label: `Spread P90 (Đột biến${spreadValues?.p90 ? ` • ${formatCleanDecimal(spreadValues.p90, 2)}` : ''})` },
+    { value: 'P99', label: `Spread P99 (Cực đại${spreadValues?.p99 ? ` • ${formatCleanDecimal(spreadValues.p99, 2)}` : ''})` },
+    { value: 'supertrend', label: 'Theo dải Supertrend' },
+  ], [spreadValues]);
+
+  const tpOptions = useMemo(() => [
+    { value: 'manual', label: 'Tùy chỉnh (Nhập tay)' },
+    { value: 'P25', label: `P25 (Spread Hẹp${spreadValues?.p25 ? ` • ${formatCleanDecimal(spreadValues.p25, 2)}` : ''})` },
+    { value: 'P50', label: `P50 (Trung vị${spreadValues?.p50 ? ` • ${formatCleanDecimal(spreadValues.p50, 2)}` : ''})` },
+    { value: 'P75', label: `P75 (Spread Rộng${spreadValues?.p75 ? ` • ${formatCleanDecimal(spreadValues.p75, 2)}` : ''})` },
+    { value: 'P90', label: `P90 (Spread Đột biến${spreadValues?.p90 ? ` • ${formatCleanDecimal(spreadValues.p90, 2)}` : ''}) - Mặc định` },
+    { value: 'P99', label: `P99 (Spread Cực đại${spreadValues?.p99 ? ` • ${formatCleanDecimal(spreadValues.p99, 2)}` : ''})` },
+    { value: 'RR1.5', label: 'Theo R:R (1 : 1.5)' },
+    { value: 'RR2.0', label: 'Theo R:R (1 : 2.0)' },
+    { value: 'close_today', label: '🎯 Close ngày hiện tại' },
+    { value: 'close_next_day', label: '🎯 Close ngày hôm sau' },
+  ], [spreadValues]);
+
+  const handleSlTypeChange = (type) => {
+    setSlType(type);
+    if (type === 'manual') return;
+
+    const curP = toFiniteNumber(form.price, 0) || Number(livePrice || 0);
+    const computedSl = computeSlPrice(type, curP, form.slPrice);
+    if (computedSl) {
+      handleChange('slPrice', computedSl);
+
+      // If tpType is RR-based, automatically recalculate TP Price
+      if (tpType === 'RR1.5' || tpType === 'RR2.0') {
+        const computedTp = computeTpPrice(tpType, curP, computedSl);
+        if (computedTp) {
+          handleChange('tpPrice', computedTp);
+        }
+      }
+    }
+  };
+
+  const handleTpTypeChange = (type) => {
+    setTpType(type);
+    if (type === 'manual') return;
+
+    const curP = toFiniteNumber(form.price, 0) || Number(livePrice || 0);
+    const computedTp = computeTpPrice(type, curP, form.slPrice);
+    if (computedTp) {
+      handleChange('tpPrice', computedTp);
+    }
+  };
+
   const handleSave = async () => {
     if (!canSave) return;
 
     setSaving(true);
     try {
       const now = new Date().toISOString();
-      const rawSymbolName = selectedSymbol?.Name || selectedSymbol?.name || '';
-      const symUpper = rawSymbolName.toUpperCase();
-      const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
-      const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
 
       const isLong = slPrice > 0 ? (entryPrice >= slPrice) : (tpPrice > 0 ? entryPrice <= tpPrice : true);
       const tradeType = isLong ? 'Long' : 'Short';
       const orderSide = isLong ? 'Buy' : 'Sell';
 
-      const isBinance = marketName.includes('CRYPTO') ||
+      const isBinance = !isDerivative && (
+        marketName.includes('CRYPTO') ||
         accountName.includes('BINANCE') ||
         symUpper.endsWith('.P') ||
         symUpper.includes('PERP') ||
-        /USDT|\.P/i.test(rawSymbolName);
+        /USDT|\.P/i.test(rawSymbolName)
+      );
 
       const isFutures = symUpper.endsWith('.P') ||
         symUpper.includes('PERP') ||
@@ -239,8 +490,42 @@ const TradeStationOrderForm = ({
 
       let brokerNote = '';
 
-      // 1. If Binance / Crypto account, execute order on Binance first
-      if (isBinance) {
+      // 1. If Derivative account, execute Condition Order on TCBS
+      if (isDerivative) {
+        const token = jwtToken || sessionStorage.getItem('tcbsJwtToken') || import.meta.env.VITE_TCBS_TOKEN;
+        if (!token) {
+          setShowOtpModal?.(true);
+          throw new Error('Vui lòng xác thực OTP TCBS để gửi lệnh phái sinh.');
+        }
+
+        const cusCode = import.meta.env.VITE_TCBS_CUSTODYCODE || '105C078644';
+        const targetContract = contractSymbol || '41I1GA000';
+        const slDist = slPrice > 0 ? Math.abs(entryPrice - slPrice).toFixed(1) : '3';
+        const tpDist = tpPrice > 0 ? Math.abs(tpPrice - entryPrice).toFixed(1) : '3';
+        const refId = `H.${(cusCode || '078644').replace(/\D/g, '')}${Date.now()}`;
+
+        const payload = {
+          accountId: cusCode,
+          subAccountId: cusCode + "A",
+          side: isLong ? 'B' : 'S',
+          symbol: targetContract,
+          refId,
+          price: parseFloat(entryPrice),
+          volume: parseInt(volume) || 1,
+          pin: "H",
+          type: "string",
+          cmd: "Web.newOrder",
+          condition: {
+            orderType: "SLP",
+            stopLossUnit: slDist || "3",
+            takeProfitUnit: tpDist || "3"
+          }
+        };
+
+        const tcbsResult = await placeTCBSConditionOrder(token, payload);
+        brokerNote = `[TCBS Placed] Symbol: ${targetContract}, Order Ref: ${refId}`;
+      } else if (isBinance) {
+        // 2. If Binance / Crypto account, execute order on Binance
         const binanceResult = await executeBinanceOrder({
           symbol: rawSymbolName,
           side: isLong ? 'BUY' : 'SELL',
@@ -258,9 +543,10 @@ const TradeStationOrderForm = ({
         }
       }
 
-      // 2. Only after order is successfully sent to broker, create trade in journal
+      // 3. Only after order is successfully sent to broker, create trade in journal
+      const targetDisplaySymbol = isDerivative ? (contractSymbol || rawSymbolName) : rawSymbolName;
       const plannedLines = [
-        'Created from Trade Station order form.',
+        `Created from Trade Station order form (${isDerivative ? 'TCBS Derivative' : 'Binance'}).`,
         brokerNote || null,
         slPrice > 0 ? `Planned SL: ${slPrice}` : null,
         tpPrice > 0 ? `Planned TP: ${tpPrice}` : null,
@@ -290,7 +576,7 @@ const TradeStationOrderForm = ({
 
       await dispatch(saveTrade({ tradeData, tradeToEdit: null })).unwrap();
       await onSaved?.();
-      alert(`Đã đặt lệnh ${tradeType} ${rawSymbolName} thành công và lưu vào Nhật ký!${brokerNote ? `\n${brokerNote}` : ''}`);
+      alert(`Đã đặt lệnh ${tradeType} ${targetDisplaySymbol} thành công và lưu vào Nhật ký!${brokerNote ? `\n${brokerNote}` : ''}`);
     } catch (error) {
       console.error('Failed to execute order or create trade:', error);
       alert(`Gửi lệnh lên sàn thất bại:\n${error?.message || error?.error?.message || error}\n\nLệnh CHƯA được tạo vào Nhật ký.`);
@@ -317,6 +603,36 @@ const TradeStationOrderForm = ({
           {saving ? 'Đang gửi lệnh...' : 'Order'}
         </button>
       </div>
+
+      {/* Derivative Symbol Selector for Derivative Account */}
+      {isDerivative && (
+        <div className="bg-gray-800/70 p-2.5 rounded-lg border border-cyan-500/40 space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+              <span>Contract</span>
+            </label>
+            <span className="text-[10px] text-gray-400 font-mono">Gửi lệnh tới TCBS</span>
+          </div>
+          <select
+            value={contractSymbol}
+            onChange={(e) => {
+              const val = e.target.value.toUpperCase();
+              setContractSymbol(val);
+              try {
+                localStorage.setItem('derivative_contract_symbol', val);
+              } catch { }
+              onDerivativeSymbolChange?.(val);
+            }}
+            className="w-full rounded-lg border border-cyan-700/60 bg-gray-900 px-3 py-1.5 text-xs font-mono font-bold text-cyan-200 outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer"
+          >
+            {derivativeOptions.map(opt => (
+              <option key={opt.value} value={opt.value} className="bg-gray-900 text-white font-mono">
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -365,32 +681,66 @@ const TradeStationOrderForm = ({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-gray-300">SL Price</label>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-rose-300">SL Price</label>
+            <span className="text-[10px] text-gray-500 font-mono">Stop Loss</span>
+          </div>
+          <select
+            value={slType}
+            onChange={(e) => handleSlTypeChange(e.target.value)}
+            className="w-full rounded-lg border border-rose-900/60 bg-gray-900 px-2 py-1 text-[11px] font-medium text-rose-200 outline-none focus:ring-1 focus:ring-rose-500 cursor-pointer"
+          >
+            {slOptions.map(opt => (
+              <option key={opt.value} value={opt.value} className="bg-gray-900 text-white font-mono">
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <input
             type="number"
             step="any"
             min="0"
             disabled={disabled || saving}
             value={form.slPrice}
-            onChange={(e) => handleChange('slPrice', e.target.value)}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-right font-mono text-red-300 outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            onChange={(e) => {
+              setSlType('manual');
+              handleChange('slPrice', e.target.value);
+            }}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-right font-mono text-red-300 outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50 text-xs"
             placeholder="Stop price"
           />
           <p className="mt-1 text-xs text-red-400">
             Risk/share: <span className="font-mono">{formatCleanDecimal(stopPriceDistance, 4)}</span>
           </p>
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-gray-300">TP Price</label>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-emerald-300">TP Price</label>
+            <span className="text-[10px] text-gray-500 font-mono">Take Profit</span>
+          </div>
+          <select
+            value={tpType}
+            onChange={(e) => handleTpTypeChange(e.target.value)}
+            className="w-full rounded-lg border border-emerald-900/60 bg-gray-900 px-2 py-1 text-[11px] font-medium text-emerald-200 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+          >
+            {tpOptions.map(opt => (
+              <option key={opt.value} value={opt.value} className="bg-gray-900 text-white font-mono">
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <input
             type="number"
             step="any"
             min="0"
             disabled={disabled || saving}
             value={form.tpPrice}
-            onChange={(e) => handleChange('tpPrice', e.target.value)}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-right font-mono text-green-300 outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+            onChange={(e) => {
+              setTpType('manual');
+              handleChange('tpPrice', e.target.value);
+            }}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-right font-mono text-green-300 outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50 text-xs"
             placeholder="Target price"
           />
           <p className="mt-1 text-xs text-green-400">
