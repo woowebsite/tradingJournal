@@ -2,12 +2,14 @@ import { supertrendMa288Strategy } from './supertrendMa288';
 import { vwapMa9Strategy } from './vwapMa9';
 import { supertrendPriceActionStrategy } from './supertrendPriceAction';
 import { breakoutStVwapStrategy } from './breakoutStVwap';
+import { bollingerSupertrendStrategy } from './bollingerSupertrend';
 
 const STRATEGY_REGISTRY = {
     [supertrendMa288Strategy.id]: supertrendMa288Strategy,
     [vwapMa9Strategy.id]: vwapMa9Strategy,
     [supertrendPriceActionStrategy.id]: supertrendPriceActionStrategy,
     [breakoutStVwapStrategy.id]: breakoutStVwapStrategy,
+    [bollingerSupertrendStrategy.id]: bollingerSupertrendStrategy,
 };
 
 /**
@@ -19,6 +21,7 @@ export const getStrategyConfig = (fileName) => {
         return STRATEGY_REGISTRY[fileName];
     }
     const clean = String(fileName).toLowerCase();
+    if (clean.includes('bollinger') || clean.includes('bb_')) return bollingerSupertrendStrategy;
     if (clean.includes('breakout')) return breakoutStVwapStrategy;
     if (clean.includes('vwap')) return vwapMa9Strategy;
     if (clean.includes('priceaction') || clean.includes('price_action')) return supertrendPriceActionStrategy;

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle, getSymbolHistoriesCache, loadCachedSymbolHistories } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle, getSymbolHistoriesCache, loadCachedSymbolHistories } from '../features/marketSlice';
 import { subscribeBinanceKlineWS } from '../services/binance';
+import { getYahooFinanceHistory } from '../services/yahooFinance';
+import { getStockHistory } from '../services/24hmoney';
 import { executeBinanceOrder } from '../services/binanceExecution';
 import api from '../services/api';
 import { fetchSignals, scanSignals } from '../features/signalSlice';
@@ -13,18 +15,19 @@ import { fetchWatchlists, updateWatchlist } from '../features/watchlistSlice';
 import TradingViewChart from '../components/TradingViewChart';
 import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
-import TechnicalPanel from '../containers/TechnicalPanel';
 import WatchlistSelector from '../components/WatchlistSelector';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
 import TradeStationOrderForm from '../components/TradeStationOrderForm';
+import OtpModal from '../components/otpModal';
+import { placeTCBSConditionOrder, getTCBSDerivatives } from '../services/tcbsJournal';
 import { Search, RefreshCw, Plus, History, BookmarkCheck, Bot, List, Trash2 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { getTcbsRecommendations } from '../services/tcbsRecommendation';
 import { upsertSymbolTechnicalAnalysis } from '../services/tcbs';
 import { calculateSMA } from '../indicators/movingAverages';
 import { formatNumber } from '../utils/formatNumber';
-import { buildExecutedTradeSignals } from '../utils/chartSignals';
+import { buildExecutedTradeSignals, buildPythonChartSignals } from '../utils/chartSignals';
 import { calculateSupertrend } from '../indicators/supertrend';
 import { calculateVWAP } from '../indicators/vwap';
 import { calculateIchimoku } from '../indicators/ichimoku/ichimoku';
@@ -36,7 +39,7 @@ import StrategyTemplatesListModal from '../components/python-strategy/StrategyTe
 
 const TradeStation = () => {
     const dispatch = useDispatch();
-    const { symbols, histories, externalIndicators, loading, historyLoading } = useSelector(state => state.market);
+    const { symbols, histories, loading, historyLoading } = useSelector(state => state.market);
     const { items: allSignals } = useSelector(state => state.signals);
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -60,8 +63,23 @@ const TradeStation = () => {
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [templatesListModalOpen, setTemplatesListModalOpen] = useState(false);
-    const [tradeFormSetup, setTradeFormSetup] = useState({ price: '', slPrice: '', tpPrice: '' });
+    const [tradeFormSetup, setTradeFormSetup] = useState({ entryType: 'Long', price: '', slPrice: '', tpPrice: '' });
     const [pythonScanResult, setPythonScanResult] = useState(null);
+    const [showSignals, setShowSignals] = useState(() => {
+        try {
+            return localStorage.getItem('trade_station_show_signals') === 'true';
+        } catch {
+            return false;
+        }
+    });
+    const [isScanningSignals, setIsScanningSignals] = useState(false);
+
+    const handleToggleShowSignals = useCallback((checked) => {
+        setShowSignals(checked);
+        try {
+            localStorage.setItem('trade_station_show_signals', String(checked));
+        } catch { }
+    }, []);
     const [autoTrading, setAutoTrading] = useState(false);
     const [isAutoTradeEnabled, setIsAutoTradeEnabled] = useState(() => {
         try {
@@ -73,6 +91,13 @@ const TradeStation = () => {
     const [liveCandle, setLiveCandle] = useState(null);
     const [wsStatus, setWsStatus] = useState('disconnected');
     const [livePrice, setLivePrice] = useState(null);
+    const [jwtToken, setJwtToken] = useState(() => {
+        return sessionStorage.getItem('tcbsJwtToken') || import.meta.env.VITE_TCBS_TOKEN || null;
+    });
+    const [showOtpModal, setShowOtpModal] = useState(false);
+    const [derivativeSymbol, setDerivativeSymbol] = useState(() => {
+        return localStorage.getItem('derivative_contract_symbol') || '41I1GA000';
+    });
     const lastAutoRefreshedSymbolRef = useRef(null);
     const metadataSyncedSymbolRef = useRef(null);
     const autoOpenedMissingSymbolRef = useRef('');
@@ -81,6 +106,7 @@ const TradeStation = () => {
     const autoTradeContextRef = useRef({});
     const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
+    const typeParam = searchParams.get('type') || searchParams.get('entryType');
     const priceParam = searchParams.get('price');
     const slPriceParam = searchParams.get('slPrice');
     const tpPriceParam = searchParams.get('tpPrice');
@@ -105,10 +131,11 @@ const TradeStation = () => {
     }, [symbolParam, symbols]);
 
     const tradeSetupValue = useMemo(() => ({
+        entryType: tradeFormSetup.entryType || (typeParam ? (typeParam.toLowerCase().includes('short') ? 'Short' : 'Long') : 'Long'),
         price: tradeFormSetup.price || priceParam || '',
         slPrice: tradeFormSetup.slPrice || slPriceParam || '',
         tpPrice: tradeFormSetup.tpPrice || tpPriceParam || ''
-    }), [tradeFormSetup, priceParam, slPriceParam, tpPriceParam]);
+    }), [tradeFormSetup, priceParam, slPriceParam, tpPriceParam, typeParam]);
 
     const tradeSetupKey = useMemo(() => (
         [
@@ -119,7 +146,7 @@ const TradeStation = () => {
     ), [selectedSymbolId, symbolParam, selectedAccount]);
 
     useEffect(() => {
-        setTradeFormSetup({ price: '', slPrice: '', tpPrice: '' });
+        setTradeFormSetup({ entryType: 'Long', price: '', slPrice: '', tpPrice: '' });
     }, [selectedSymbolId]);
 
     const selectedSymbol = useMemo(() => {
@@ -163,110 +190,158 @@ const TradeStation = () => {
         setAutoTradeLogs(prev => [newEntry, ...prev.slice(0, 49)]);
     }, []);
 
-    const toggleAutoTrade = useCallback(() => {
-        setIsAutoTradeEnabled(prev => {
-            const next = !prev;
+    const toggleAutoTrade = useCallback(async () => {
+        const next = !isAutoTradeEnabled;
+        if (next) {
+            // Check if current account/symbol is Derivative
+            const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
+            const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
+            const symUpper = (selectedSymbol?.Name || selectedSymbol?.name || symbolParam || '').toUpperCase();
+
+            const isDerivative = marketName.includes('DERIVATIVE') ||
+                marketName.includes('PHÁI SINH') ||
+                marketName.includes('FUTURES_VN') ||
+                accountName.includes('DERIVATIVE') ||
+                accountName.includes('PHÁI SINH') ||
+                symUpper === 'VN30F1M' ||
+                symUpper.startsWith('41I') ||
+                selectedAccount?.marketType === 'Derivative';
+
+            if (isDerivative) {
+                const token = jwtToken || sessionStorage.getItem('tcbsJwtToken');
+                if (!token) {
+                    setShowOtpModal(true);
+                    addAutoTradeLog(`⚠️ Tài khoản Phái sinh: Chưa có Token TCBS. Vui lòng nhập OTP để xác thực!`, 'warn');
+                    return;
+                }
+
+                // Call TCBS API to verify token validity in real-time
+                try {
+                    addAutoTradeLog(`🔍 Đang kiểm tra xác thực TCBS...`, 'info');
+                    await getTCBSDerivatives(token);
+                } catch (err) {
+                    console.warn('TCBS Token validation error:', err);
+                    setJwtToken(null);
+                    sessionStorage.removeItem('tcbsJwtToken');
+                    setShowOtpModal(true);
+                    addAutoTradeLog(`⚠️ Token TCBS không hợp lệ hoặc đã hết hạn (${err.message || err}). Vui lòng nhập OTP mới!`, 'warn');
+                    return;
+                }
+            }
+
+            setIsAutoTradeEnabled(true);
             try {
-                localStorage.setItem('auto_trade_enabled', String(next));
+                localStorage.setItem('auto_trade_enabled', 'true');
             } catch { }
+
             addAutoTradeLog(
-                next
-                    ? `🟢 Đã BẬT Auto Trade. Hệ thống sẽ tự động quét Python Strategy và gửi Order Binance mỗi lần đóng nến.`
-                    : `🔴 Đã TẮT Auto Trade.`,
-                next ? 'success' : 'warn'
+                isDerivative
+                    ? `🟢 Đã BẬT Auto Trade (TCBS Phái sinh - Đã xác thực OTP). Hệ thống sẽ tự động quét Python Strategy và gửi Order TCBS mỗi lần đóng nến.`
+                    : `🟢 Đã BẬT Auto Trade (Binance). Hệ thống sẽ tự động quét Python Strategy và gửi Order Binance mỗi lần đóng nến.`,
+                'success'
             );
-            return next;
-        });
-    }, [addAutoTradeLog]);
+        } else {
+            setIsAutoTradeEnabled(false);
+            try {
+                localStorage.setItem('auto_trade_enabled', 'false');
+            } catch { }
+            addAutoTradeLog(`🔴 Đã TẮT Auto Trade.`, 'warn');
+        }
+    }, [addAutoTradeLog, isAutoTradeEnabled, jwtToken, selectedAccount, selectedSymbol, symbolParam]);
 
-const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
-    const cfg = tpl?.config || {};
-    const stratFile = String(tpl?.strategyFile || (fallbackCtx.chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py')).toLowerCase();
-    const stratName = String(tpl?.name || stratFile.replace('.py', '')).toLowerCase();
-    const rawTemplate = String(tpl?.template || '').toLowerCase();
+    const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
+        const cfg = tpl?.config || {};
+        const stratFile = String(tpl?.strategyFile || (fallbackCtx.chartTemplate === 'VWAP' ? 'strategy_vwap_ma9.py' : 'strategy_supertrend_ma288.py')).toLowerCase();
+        const stratName = String(tpl?.name || stratFile.replace('.py', '')).toLowerCase();
+        const rawTemplate = String(tpl?.template || '').toLowerCase();
 
-    const isBreakout = stratFile.includes('breakout') || stratName.includes('breakout');
-    const isPriceAction = !isBreakout && (stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || stratName.includes('price action') || stratName.includes('+ pa') || stratName.includes(' pa ') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined || cfg.slType !== undefined || cfg.paBd3bu2 !== undefined);
-    const isVWAP = !isBreakout && !isPriceAction && (stratFile.includes('vwap') || stratName.includes('vwap') || rawTemplate.includes('vwap') || cfg.vwapMaPeriod !== undefined || cfg.vwapAnchor !== undefined || (!tpl && fallbackCtx.chartTemplate === 'VWAP'));
+        const isBreakout = stratFile.includes('breakout') || stratName.includes('breakout');
+        const isPriceAction = !isBreakout && (stratFile.includes('priceaction') || stratFile.includes('price_action') || stratFile.includes('pa') || stratName.includes('price action') || stratName.includes('+ pa') || stratName.includes(' pa ') || cfg.paEngulfing !== undefined || cfg.tpType !== undefined || cfg.slType !== undefined || cfg.paBd3bu2 !== undefined);
+        const isVWAP = !isBreakout && !isPriceAction && (stratFile.includes('vwap') || stratName.includes('vwap') || rawTemplate.includes('vwap') || cfg.vwapMaPeriod !== undefined || cfg.vwapAnchor !== undefined || (!tpl && fallbackCtx.chartTemplate === 'VWAP'));
 
-    if (isBreakout) {
-        return {
-            strategyFile: tpl?.strategyFile || 'strategy_breakout_st_vwap.py',
-            ticker: symName,
-            timeframe: targetTf,
-            countback: cfg.countback || 1000,
-            stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
-            stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
-            vwapAnchor: cfg.vwapAnchor || fallbackCtx.vwapAnchor || 'year',
-            indicatorFilter: cfg.indicatorFilter || 'st_or_vwap',
-            allowBreakoutHigh: cfg.allowBreakoutHigh !== undefined ? cfg.allowBreakoutHigh : true,
-            allowSweepLow: cfg.allowSweepLow !== undefined ? cfg.allowSweepLow : true,
-            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false,
-            tpType: cfg.tpType || 'P90',
-            slType: cfg.slType || 'P75',
-            customTpVal: parseFloat(cfg.customTpVal) || 0,
-            customSlVal: parseFloat(cfg.customSlVal) || 0,
-            riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
-        };
-    } else if (isPriceAction) {
-        return {
-            strategyFile: tpl?.strategyFile || 'strategy_supertrend_priceaction.py',
-            ticker: symName,
-            timeframe: targetTf,
-            countback: cfg.countback || 1000,
-            stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
-            stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
-            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false,
-            paEngulfing: cfg.paEngulfing !== undefined ? cfg.paEngulfing : true,
-            paBd3bu2: cfg.paBd3bu2 !== undefined ? cfg.paBd3bu2 : true,
-            paIncludeOpposite: cfg.paIncludeOpposite !== undefined ? cfg.paIncludeOpposite : true,
-            paPointUp: cfg.paPointUp !== undefined ? cfg.paPointUp : false,
-            paSwingUp: cfg.paSwingUp !== undefined ? cfg.paSwingUp : false,
-            tpType: cfg.tpType || 'P50',
-            slType: cfg.slType || 'P75',
-            customTpVal: parseFloat(cfg.customTpVal) || 0,
-            customSlVal: parseFloat(cfg.customSlVal) || 0,
-        };
-    } else if (isVWAP) {
-        return {
-            strategyFile: tpl?.strategyFile || 'strategy_vwap_ma9.py',
-            ticker: symName,
-            timeframe: targetTf,
-            countback: cfg.countback || 1000,
-            maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || fallbackCtx.maPeriod || 9) || 9,
-            vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || fallbackCtx.maPeriod || 9) || 9,
-            vwapAnchor: cfg.vwapAnchor || fallbackCtx.vwapAnchor || 'year',
-            mult1: parseFloat(cfg.mult1) || 1.0,
-            mult2: parseFloat(cfg.mult2) || 2.0,
-            mult3: parseFloat(cfg.mult3) || 3.0,
-            tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-            vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
-            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-        };
-    } else {
-        return {
-            strategyFile: tpl?.strategyFile || 'strategy_supertrend_ma288.py',
-            ticker: symName,
-            timeframe: targetTf,
-            countback: cfg.countback || 1000,
-            rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
-            riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
-            entryType: cfg.entryType || 'candle_close',
-            stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
-            stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
-            maPeriod: parseInt(cfg.maPeriod || fallbackCtx.maPeriod || 288) || 288,
-            tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
-            tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
-            allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
-            allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
-        };
-    }
-};
+        if (isBreakout) {
+            const setup = cfg.entrySetup || (cfg.allowBreakoutHigh && !cfg.allowSweepLow ? 'setup1' : (!cfg.allowBreakoutHigh && cfg.allowSweepLow ? 'setup2' : 'both'));
+            const allowBreakoutHigh = setup === 'setup1' || setup === 'both';
+            const allowSweepLow = setup === 'setup2' || setup === 'both';
+            return {
+                strategyFile: tpl?.strategyFile || 'strategy_breakout_st_vwap.py',
+                ticker: symName,
+                timeframe: targetTf,
+                countback: cfg.countback || 1000,
+                stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
+                stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
+                vwapAnchor: cfg.vwapAnchor || fallbackCtx.vwapAnchor || 'year',
+                indicatorFilter: cfg.indicatorFilter || 'st_or_vwap',
+                vwapBandFilter: cfg.vwapBandFilter || cfg.vwap_band_filter || 'all',
+                entrySetup: setup,
+                allowBreakoutHigh: cfg.allowBreakoutHigh !== undefined ? cfg.allowBreakoutHigh : allowBreakoutHigh,
+                allowSweepLow: cfg.allowSweepLow !== undefined ? cfg.allowSweepLow : allowSweepLow,
+                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+                tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false,
+                tpType: cfg.tpType || 'P90',
+                slType: cfg.slType || 'P75',
+                customTpVal: parseFloat(cfg.customTpVal) || 0,
+                customSlVal: parseFloat(cfg.customSlVal) || 0,
+                riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+            };
+        } else if (isPriceAction) {
+            return {
+                strategyFile: tpl?.strategyFile || 'strategy_supertrend_priceaction.py',
+                ticker: symName,
+                timeframe: targetTf,
+                countback: cfg.countback || 1000,
+                stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
+                stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
+                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+                tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : false,
+                paEngulfing: cfg.paEngulfing !== undefined ? cfg.paEngulfing : true,
+                paBd3bu2: cfg.paBd3bu2 !== undefined ? cfg.paBd3bu2 : true,
+                paIncludeOpposite: cfg.paIncludeOpposite !== undefined ? cfg.paIncludeOpposite : true,
+                paPointUp: cfg.paPointUp !== undefined ? cfg.paPointUp : false,
+                paSwingUp: cfg.paSwingUp !== undefined ? cfg.paSwingUp : false,
+                tpType: cfg.tpType || 'P50',
+                slType: cfg.slType || 'P75',
+                customTpVal: parseFloat(cfg.customTpVal) || 0,
+                customSlVal: parseFloat(cfg.customSlVal) || 0,
+            };
+        } else if (isVWAP) {
+            return {
+                strategyFile: tpl?.strategyFile || 'strategy_vwap_ma9.py',
+                ticker: symName,
+                timeframe: targetTf,
+                countback: cfg.countback || 1000,
+                maPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || fallbackCtx.maPeriod || 9) || 9,
+                vwapMaPeriod: parseInt(cfg.vwapMaPeriod || cfg.maPeriod || fallbackCtx.maPeriod || 9) || 9,
+                vwapAnchor: cfg.vwapAnchor || fallbackCtx.vwapAnchor || 'year',
+                mult1: parseFloat(cfg.mult1) || 1.0,
+                mult2: parseFloat(cfg.mult2) || 2.0,
+                mult3: parseFloat(cfg.mult3) || 3.0,
+                tpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+                vwapTpTarget: cfg.vwapTpTarget || cfg.tpTarget || 'tp1_vwap',
+                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+            };
+        } else {
+            return {
+                strategyFile: tpl?.strategyFile || 'strategy_supertrend_ma288.py',
+                ticker: symName,
+                timeframe: targetTf,
+                countback: cfg.countback || 1000,
+                rr: parseFloat(cfg.rr || cfg.riskReward) || 1.5,
+                riskReward: parseFloat(cfg.riskReward || cfg.rr) || 1.5,
+                entryType: cfg.entryType || 'candle_close',
+                stPeriod: parseInt(cfg.stPeriod || fallbackCtx.stPeriod || 10) || 10,
+                stMultiplier: parseFloat(cfg.stMultiplier || fallbackCtx.stMultiplier || 3.0) || 3.0,
+                maPeriod: parseInt(cfg.maPeriod || fallbackCtx.maPeriod || 288) || 288,
+                tpSupertrend: cfg.tpSupertrend !== undefined ? cfg.tpSupertrend : true,
+                tpRR: cfg.tpRR !== undefined ? cfg.tpRR : true,
+                allowLong: cfg.allowLong !== undefined ? cfg.allowLong : true,
+                allowShort: cfg.allowShort !== undefined ? cfg.allowShort : true,
+            };
+        }
+    };
 
     const handleCandleCloseAutoTrade = useCallback(async (candle, symName, currentTf) => {
         const ctx = autoTradeContextRef.current;
@@ -340,35 +415,96 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
             const stopDist = Math.abs(Number(targetSignal.entry) - Number(targetSignal.stop_loss));
             const volume = (riskAmount > 0 && stopDist > 0) ? Number((riskAmount / stopDist).toFixed(6)) : 0.001;
 
-            addAutoTradeLog(`🎯 Phát hiện tín hiệu ${targetSignal.type.toUpperCase()} @ $${targetSignal.entry}! Đang gửi Order sang Binance...`, 'info', {
-                signal: targetSignal,
-                volume,
-                riskAmount
-            });
-
-            // 1. Send Order directly to Binance via executeBinanceOrder (Client-side signed, zero API Key exposure)
             const symbolUpper = symName.toUpperCase();
-            const isFutures = symbolUpper.endsWith('.P') ||
-                symbolUpper.includes('PERP') ||
-                symbolUpper.includes('FUTURES');
-            const side = targetSignal.type.toLowerCase() === 'long' ? 'BUY' : 'SELL';
+            const accountName = (account?.name || account?.Name || '').toUpperCase();
+            const marketName = (account?.market?.Name || account?.market?.name || '').toUpperCase();
 
-            const binanceOrderResult = await executeBinanceOrder({
-                symbol: symName,
-                side,
-                type: 'MARKET',
-                quantity: volume,
-                price: targetSignal.entry,
-                isFutures
-            });
+            const isDerivative = marketName.includes('DERIVATIVE') ||
+                marketName.includes('PHÁI SINH') ||
+                marketName.includes('FUTURES_VN') ||
+                accountName.includes('DERIVATIVE') ||
+                accountName.includes('PHÁI SINH') ||
+                symbolUpper === 'VN30F1M' ||
+                symbolUpper.startsWith('41I') ||
+                account?.marketType === 'Derivative';
 
-            const orderId = binanceOrderResult?.orderId || binanceOrderResult?.clientOrderId || 'SUCCESS';
+            const isLong = targetSignal.type.toLowerCase() === 'long';
+            let orderId = 'SUCCESS';
+            let brokerName = 'Binance';
+
+            if (isDerivative) {
+                brokerName = 'TCBS';
+                const token = ctx.jwtToken || sessionStorage.getItem('tcbsJwtToken') || import.meta.env.VITE_TCBS_TOKEN;
+                if (!token) {
+                    addAutoTradeLog('⚠️ Chưa có Token TCBS hoặc token hết hạn. Vui lòng xác thực OTP TCBS!', 'warn');
+                    setShowOtpModal(true);
+                    return;
+                }
+
+                const targetContract = ctx.derivativeSymbol || localStorage.getItem('derivative_contract_symbol') || '41I1GA000';
+                const cusCode = import.meta.env.VITE_TCBS_CUSTODYCODE || '105C078644';
+                const slDist = targetSignal.stop_loss ? Math.abs(Number(targetSignal.entry) - Number(targetSignal.stop_loss)).toFixed(1) : '3';
+                const tpDist = targetSignal.take_profit ? Math.abs(Number(targetSignal.take_profit) - Number(targetSignal.entry)).toFixed(1) : '3';
+                const refId = `H.${(cusCode || '078644').replace(/\D/g, '')}${Date.now()}`;
+                const derivativeVolume = Math.max(1, Math.round(volume) || 1);
+
+                addAutoTradeLog(`🎯 Phát hiện tín hiệu ${targetSignal.type.toUpperCase()} @ ${targetSignal.entry}! Đang gửi Condition Order sang TCBS (${targetContract})...`, 'info', {
+                    signal: targetSignal,
+                    volume: derivativeVolume,
+                    symbol: targetContract
+                });
+
+                const payload = {
+                    accountId: cusCode,
+                    subAccountId: cusCode + "A",
+                    side: isLong ? 'B' : 'S',
+                    symbol: targetContract,
+                    refId,
+                    price: parseFloat(targetSignal.entry),
+                    volume: derivativeVolume,
+                    pin: "H",
+                    type: "string",
+                    cmd: "Web.newOrder",
+                    condition: {
+                        orderType: "SLP",
+                        stopLossUnit: slDist || "3",
+                        takeProfitUnit: tpDist || "3"
+                    }
+                };
+
+                await placeTCBSConditionOrder(token, payload);
+                orderId = refId;
+            } else {
+                // 1. Send Order directly to Binance via executeBinanceOrder (Client-side signed, zero API Key exposure)
+                addAutoTradeLog(`🎯 Phát hiện tín hiệu ${targetSignal.type.toUpperCase()} @ $${targetSignal.entry}! Đang gửi Order sang Binance...`, 'info', {
+                    signal: targetSignal,
+                    volume,
+                    riskAmount
+                });
+
+                const isFutures = symbolUpper.endsWith('.P') ||
+                    symbolUpper.includes('PERP') ||
+                    symbolUpper.includes('FUTURES');
+                const side = isLong ? 'BUY' : 'SELL';
+
+                const binanceOrderResult = await executeBinanceOrder({
+                    symbol: symName,
+                    side,
+                    type: 'MARKET',
+                    quantity: volume,
+                    price: targetSignal.entry,
+                    isFutures
+                });
+
+                orderId = binanceOrderResult?.orderId || binanceOrderResult?.clientOrderId || 'SUCCESS';
+            }
+
             const nowIso = targetSignal.date || new Date().toISOString();
 
             // 2. Save Open Trade and Trade Detail in Strapi DB
             const plannedNotes = [
                 `Auto Trade on Candle Close (${currentTf}) via Python Strategy ${stratName}`,
-                `Binance Order ID: ${orderId} (${isFutures ? 'Futures' : 'Spot'})`,
+                `${brokerName} Order ID/Ref: ${orderId}`,
                 targetSignal.stop_loss ? `Planned SL: ${targetSignal.stop_loss}` : null,
                 targetSignal.take_profit ? `Planned TP: ${targetSignal.take_profit}` : null,
             ].filter(Boolean).join('\n');
@@ -398,7 +534,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                                 signal: 'Entry',
                                 type: targetSignal.type.toLowerCase() === 'long' ? 'Buy' : 'Sell',
                                 price: Number(targetSignal.entry),
-                                volume: Number(volume),
+                                volume: isDerivative ? Math.max(1, Math.round(volume) || 1) : Number(volume),
                                 note: `Auto Trade entry filled @ ${targetSignal.entry}. SL: ${targetSignal.stop_loss || '--'}, TP: ${targetSignal.take_profit || '--'}. Order ID: ${orderId}`
                             }
                         });
@@ -412,7 +548,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
             lastExecutedTradeTimeRef.current = signalKey;
 
-            addAutoTradeLog(`🚀 [KHỚP LỆNH LIVE BINANCE] Đã gửi thành công lệnh ${targetSignal.type.toUpperCase()} ${symName} @ $${targetSignal.entry} lên Binance (Order #${orderId})! Đã tạo Open Trade vào DB.`, 'success');
+            addAutoTradeLog(`🚀 [KHỚP LỆNH LIVE ${brokerName.toUpperCase()}] Đã gửi thành công lệnh ${targetSignal.type.toUpperCase()} ${isDerivative ? (ctx.derivativeSymbol || '41I1GA000') : symName} @ ${targetSignal.entry} lên ${brokerName} (Order #${orderId})! Đã tạo Open Trade vào DB.`, 'success');
 
             // Refresh account trades
             const accountId = account?.documentId || account?.id;
@@ -423,16 +559,16 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         } catch (err) {
             console.error('Auto Trade Candle Close execution failed:', err);
             const errMsg = err?.message || JSON.stringify(err);
-            addAutoTradeLog(`❌ Lỗi thực thi Auto Trade Binance: ${errMsg}`, 'error');
+            addAutoTradeLog(`❌ Lỗi thực thi Auto Trade: ${errMsg}`, 'error');
         } finally {
             setIsScanningOnCandleClose(false);
         }
     }, [addAutoTradeLog, dispatch, refreshSelectedAccountTrades]);
 
-    // Binance WebSocket Real-time Kline Connection
+    // Real-time Kline & Live Price Connection (WebSocket cho Crypto, Polling cho Stocks / VN30F1M / Indices)
     useEffect(() => {
         const symName = selectedSymbol?.Name || selectedSymbol?.name || symbolParam;
-        if (!symName || !isCryptoSymbol) {
+        if (!symName) {
             setWsStatus('disconnected');
             setLiveCandle(null);
             setLivePrice(null);
@@ -441,45 +577,103 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
         const currentTf = timeframe || 'D1';
 
-        const unsubscribe = subscribeBinanceKlineWS(
-            symName,
-            currentTf,
-            (candle) => {
-                setLiveCandle(candle);
-                if (candle.close !== undefined) {
-                    setLivePrice(candle.close);
-                }
+        // 1. Đối với Crypto -> Dùng Binance WebSocket trực tiếp
+        if (isCryptoSymbol) {
+            const unsubscribe = subscribeBinanceKlineWS(
+                symName,
+                currentTf,
+                (candle) => {
+                    setLiveCandle(candle);
+                    if (candle.close !== undefined) {
+                        setLivePrice(candle.close);
+                    }
 
-                // Only dispatch Redux update when candle is closed.
-                // Live real-time ticks are already smoothly rendered via setLiveCandle / liveCandle prop.
-                if (candle.isClosed) {
-                    dispatch(updateRealtimeCandle({
-                        symbolId: selectedSymbolId,
-                        symbolName: symName,
-                        candle,
-                        timeframe: currentTf
-                    }));
-                }
+                    // Only dispatch Redux update when candle is closed.
+                    // Live real-time ticks are already smoothly rendered via setLiveCandle / liveCandle prop.
+                    if (candle.isClosed) {
+                        dispatch(updateRealtimeCandle({
+                            symbolId: selectedSymbolId,
+                            symbolName: symName,
+                            candle,
+                            timeframe: currentTf
+                        }));
+                    }
 
-                // Tự động quét Python Strategy và gửi Order Binance khi nến đóng
-                if (candle.isClosed) {
-                    const ctx = autoTradeContextRef.current;
-                    if (ctx?.isAutoTradeEnabled) {
-                        const candleKey = `${symName}:${currentTf}:${candle.rawTime || candle.date || candle.tradingDate}`;
-                        if (lastScannedCandleTimeRef.current !== candleKey) {
-                            lastScannedCandleTimeRef.current = candleKey;
-                            handleCandleCloseAutoTrade(candle, symName, currentTf);
+                    // Tự động quét Python Strategy và gửi Order Binance khi nến đóng
+                    if (candle.isClosed) {
+                        const ctx = autoTradeContextRef.current;
+                        if (ctx?.isAutoTradeEnabled) {
+                            const candleKey = `${symName}:${currentTf}:${candle.rawTime || candle.date || candle.tradingDate}`;
+                            if (lastScannedCandleTimeRef.current !== candleKey) {
+                                lastScannedCandleTimeRef.current = candleKey;
+                                handleCandleCloseAutoTrade(candle, symName, currentTf);
+                            }
                         }
                     }
+                },
+                (status) => {
+                    setWsStatus(status);
                 }
-            },
-            (status) => {
-                setWsStatus(status);
+            );
+
+            return () => {
+                unsubscribe();
+            };
+        }
+
+        // 2. Đối với Cổ phiếu / Chỉ số / Phái sinh VN (VN30F1M, VNINDEX, 41I..., HPG, SSI, NASDAQ...) -> Polling thời gian thực mỗi 5s
+        let isCancelled = false;
+        setWsStatus('connecting');
+
+        const pollLatestCandle = async () => {
+            if (isCancelled) return;
+            try {
+                const isUsOrGlobal = [
+                    'USTEC', 'USTECH', 'USTEC.P', 'NAS100', 'NAS100.P', 'NAS100USD', 'US100', 'US100.P',
+                    'NASDAQ', 'IXIC', '^IXIC', 'NDX', '^NDX', 'NASDAQ100', 'NQ', 'NQ=F', 'QQQ',
+                    'US500', 'US500.P', 'SPX500', 'ES', 'ES=F', 'SP500', 'S&P500', 'SPX', 'GSPC', '^GSPC', 'SPY',
+                    'US30', 'US30.P', 'DJ30', 'WALLSTREET', 'YM', 'YM=F', 'DOW', 'DOWJONES', 'DJI', '^DJI', 'DIA',
+                    'GER40', 'GER30', 'DAX', 'UK100', 'FTSE', 'JPN225', 'NIKKEI', 'HK50',
+                    'GOLD', 'GC=F', 'XAUUSD', 'XAUUSD.P', 'SILVER', 'SI=F', 'XAGUSD',
+                    'BRENT', 'BZ=F', 'UKOIL', 'WTI', 'CL=F', 'USOIL', 'CRUDEOIL', 'NATGAS', 'COPPER',
+                    'DXY', 'DX-Y.NYB', 'USDX', 'US10Y', '^TNX', 'VIX', '^VIX',
+                    'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD'
+                ].includes(symName.toUpperCase()) || symName.startsWith('^') || symName.includes('=');
+
+                let latestCandles = [];
+                if (isUsOrGlobal) {
+                    latestCandles = await getYahooFinanceHistory(symName, currentTf, 5);
+                } else {
+                    latestCandles = await getStockHistory(symName, currentTf, 5);
+                    if (!latestCandles || latestCandles.length === 0) {
+                        latestCandles = await getYahooFinanceHistory(symName, currentTf, 5);
+                    }
+                }
+
+                if (!isCancelled && Array.isArray(latestCandles) && latestCandles.length > 0) {
+                    const last = latestCandles[latestCandles.length - 1];
+                    setLiveCandle({
+                        ...last,
+                        isClosed: false,
+                    });
+                    if (last.close !== undefined && last.close !== null) {
+                        setLivePrice(last.close);
+                    }
+                    setWsStatus('connected');
+                }
+            } catch (err) {
+                if (!isCancelled) {
+                    setWsStatus('error');
+                }
             }
-        );
+        };
+
+        pollLatestCandle();
+        const pollInterval = setInterval(pollLatestCandle, 5000);
 
         return () => {
-            unsubscribe();
+            isCancelled = true;
+            clearInterval(pollInterval);
         };
     }, [dispatch, handleCandleCloseAutoTrade, isCryptoSymbol, selectedSymbol?.Name, selectedSymbol?.name, selectedSymbolId, symbolParam, timeframe]);
 
@@ -534,16 +728,6 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                     } else {
                         dispatch(fetchHistories({ symbolId: selectedSymbolId, timeframe: curTf, forceRefresh: true }));
                     }
-                }
-            }
-
-            // Also fetch external indicators (only for VN stocks)
-            const sym = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
-            if (sym && sym.Name) {
-                const isCrypto = selectedAccount?.market?.Name === 'Crypto' ||
-                    /USDT|\.P|BINANCE:/i.test(sym.Name);
-                if (!isCrypto) {
-                    dispatch(fetchExternalIndicators(sym.Name));
                 }
             }
         }
@@ -787,7 +971,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         if (targetSymId && tplId) {
             try {
                 await assignDefaultStrategyTemplate(targetSymId, tplId);
-                getStrategyTemplates().then(data => setTemplates(data || [])).catch(() => {});
+                getStrategyTemplates().then(data => setTemplates(data || [])).catch(() => { });
                 if (selectedAccount?.market) {
                     const marketId = selectedAccount.market.documentId || selectedAccount.market.id;
                     dispatch(fetchSymbols(marketId));
@@ -862,17 +1046,20 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         }
     }, [selectedSymbolId, templates]);
 
-    // Auto scan python strategy when template is selected or changed to keep signals and chart in sync
+    // Auto scan python strategy when showSignals is enabled to keep signals and chart in sync
     useEffect(() => {
-        if (!selectedTemplate || !selectedSymbol?.Name) {
+        if (!showSignals || !selectedSymbol?.Name) {
             setPythonScanResult(null);
+            setIsScanningSignals(false);
             return;
         }
 
         const symName = selectedSymbol.Name.trim().toUpperCase();
-        const targetTf = selectedTemplate.timeframe || timeframe || 'D1';
-        const scanParams = buildPythonScanParams(selectedTemplate, symName, targetTf, { chartTemplate, timeframe, vwapAnchor, maPeriod, stPeriod, stMultiplier });
-        const cacheKey = `python_scan_${symName}_${selectedTemplate.documentId || selectedTemplate.id}_${targetTf}`;
+        const targetTf = timeframe || selectedTemplate?.timeframe || 'D1';
+        const activeTpl = selectedTemplate || (symbolTemplates && symbolTemplates.length > 0 ? symbolTemplates[0] : null);
+        const scanParams = buildPythonScanParams(activeTpl, symName, targetTf, { chartTemplate, timeframe: targetTf, vwapAnchor, maPeriod, stPeriod, stMultiplier });
+        const tplKey = activeTpl ? (activeTpl.documentId || activeTpl.id) : 'default';
+        const cacheKey = `python_scan_${symName}_${tplKey}_${targetTf}`;
 
         // 1. Instantly load cached scan result if available
         try {
@@ -883,20 +1070,41 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                     setPythonScanResult(parsed);
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
 
         // 2. Fetch fresh scan in background
+        setIsScanningSignals(true);
+        let isCurrent = true;
         scanPythonStrategy(scanParams)
             .then(res => {
+                if (!isCurrent) return;
                 if (res && !res.error) {
-                    setPythonScanResult(res);
+                    setPythonScanResult(prev => {
+                        if (JSON.stringify(prev) === JSON.stringify(res)) {
+                            return prev;
+                        }
+                        return res;
+                    });
                     try {
                         localStorage.setItem(cacheKey, JSON.stringify(res));
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             })
-            .catch(err => console.warn('Could not sync python strategy signals for template:', err));
-    }, [selectedTemplate, selectedSymbol?.Name, timeframe, chartTemplate, vwapAnchor, maPeriod, stPeriod, stMultiplier]);
+            .catch(err => {
+                if (isCurrent) {
+                    console.warn('Could not sync python strategy signals:', err);
+                }
+            })
+            .finally(() => {
+                if (isCurrent) {
+                    setIsScanningSignals(false);
+                }
+            });
+
+        return () => {
+            isCurrent = false;
+        };
+    }, [showSignals, selectedTemplate, symbolTemplates, selectedSymbol?.Name, timeframe, chartTemplate, vwapAnchor, maPeriod, stPeriod, stMultiplier]);
 
     const handleTimeframeChange = (newTf) => {
         setTimeframe(newTf);
@@ -1299,6 +1507,21 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
         return buildExecutedTradeSignals(symbolTrades);
     }, [symbolTrades]);
 
+    // Convert python strategy scan signals into Chart Markers (Entry, TP, SL)
+    const pythonChartSignals = useMemo(() => {
+        if (!showSignals || !pythonScanResult?.signals) return [];
+        return buildPythonChartSignals(pythonScanResult.signals);
+    }, [showSignals, pythonScanResult]);
+
+    // Active chart signals combined
+    const activeChartSignals = useMemo(() => {
+        const list = [...executedTradeSignals];
+        if (showSignals && pythonChartSignals.length > 0) {
+            list.push(...pythonChartSignals);
+        }
+        return list;
+    }, [executedTradeSignals, showSignals, pythonChartSignals]);
+
     const handleCloseSignalTrade = useCallback(async (signal) => {
         if (!signal) return;
         const tradeId = signal.tradeId || signal.trade?.documentId || signal.trade?.id || (signal.rawTrade && (signal.rawTrade.documentId || signal.rawTrade.id)) || signal.documentId || signal.id;
@@ -1320,7 +1543,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
         try {
             const exitPrice = Number(livePrice || targetTrade.price || 0);
-            
+
             // Calculate open volume accurately
             const rawDetails = Array.isArray(targetTrade.trade_details) ? targetTrade.trade_details : [];
             let openVolume = 0;
@@ -1472,9 +1695,11 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
             vwapAnchor,
             stPeriod,
             stMultiplier,
-            activeSymbolHistories
+            activeSymbolHistories,
+            jwtToken,
+            derivativeSymbol
         };
-    }, [isAutoTradeEnabled, selectedTemplate, selectedAccount, accountTrades, activeStrategyId, selectedSymbol, selectedSymbolId, chartTemplate, timeframe, vwapAnchor, stPeriod, stMultiplier, activeSymbolHistories]);
+    }, [isAutoTradeEnabled, selectedTemplate, selectedAccount, accountTrades, activeStrategyId, selectedSymbol, selectedSymbolId, chartTemplate, timeframe, vwapAnchor, stPeriod, stMultiplier, activeSymbolHistories, jwtToken, derivativeSymbol]);
 
     const handleAutoTrade = useCallback(async () => {
         if (!selectedSymbol) {
@@ -1484,6 +1709,37 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
         const symName = selectedSymbol.Name || selectedSymbol.name;
         setAutoTrading(true);
+
+        // For Derivative accounts, proactively verify TCBS authentication
+        const accountName = (selectedAccount?.name || selectedAccount?.Name || '').toUpperCase();
+        const marketName = (selectedAccount?.market?.Name || selectedAccount?.market?.name || '').toUpperCase();
+        const symUpper = (symName || '').toUpperCase();
+        const isDerivative = marketName.includes('DERIVATIVE') ||
+            marketName.includes('PHÁI SINH') ||
+            marketName.includes('FUTURES_VN') ||
+            accountName.includes('DERIVATIVE') ||
+            accountName.includes('PHÁI SINH') ||
+            symUpper === 'VN30F1M' ||
+            symUpper.startsWith('41I') ||
+            selectedAccount?.marketType === 'Derivative';
+
+        if (isDerivative) {
+            const token = jwtToken || sessionStorage.getItem('tcbsJwtToken');
+            if (!token) {
+                setShowOtpModal(true);
+                addAutoTradeLog(`⚠️ Tài khoản Phái sinh: Vui lòng xác thực OTP TCBS để thực hiện Auto Trade!`, 'warn');
+            } else {
+                try {
+                    await getTCBSDerivatives(token);
+                } catch (err) {
+                    console.warn('TCBS Token verification failed in handleAutoTrade:', err);
+                    setJwtToken(null);
+                    sessionStorage.removeItem('tcbsJwtToken');
+                    setShowOtpModal(true);
+                    addAutoTradeLog(`⚠️ Token TCBS đã hết hạn. Vui lòng nhập OTP mới!`, 'warn');
+                }
+            }
+        }
 
         try {
             // 1. Determine template & configuration
@@ -1599,6 +1855,7 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 const finalTp = tp ? Number(tp) : calculatedTp;
 
                 setTradeFormSetup({
+                    entryType: isLong ? 'Long' : 'Short',
                     price: String(Number(actualEntry.toFixed(6))),
                     slPrice: String(Number(actualSl.toFixed(6))),
                     tpPrice: String(Number(finalTp.toFixed(6)))
@@ -1674,36 +1931,22 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                                 </h2>
                                 <span className="text-sm text-gray-400">{selectedSymbol?.exchange} - {selectedSymbol?.sector}</span>
 
-                                {isCryptoSymbol && (
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition ${wsStatus === 'connected'
-                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                                : wsStatus === 'connecting'
-                                                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
-                                                    : 'bg-gray-700/50 text-gray-400 border border-gray-600'
-                                            }`}>
-                                            <span className={`w-2 h-2 rounded-full ${wsStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-gray-400'}`} />
-                                            <span>{wsStatus === 'connected' ? 'Binance Live' : wsStatus === 'connecting' ? 'Connecting...' : 'Offline'}</span>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition ${wsStatus === 'connected'
+                                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                        : wsStatus === 'connecting'
+                                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
+                                            : 'bg-gray-700/50 text-gray-400 border border-gray-600'
+                                        }`}>
+                                        <span className={`w-2 h-2 rounded-full ${wsStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-gray-400'}`} />
+                                        <span>{wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Connecting...' : 'Offline'}</span>
+                                    </span>
+                                    {livePrice !== null && livePrice !== undefined && (
+                                        <span className="text-xs font-mono font-bold text-emerald-300 bg-gray-900 px-2 py-0.5 rounded border border-emerald-500/30 shadow-sm animate-pulse">
+                                            {isCryptoSymbol ? `$${Number(livePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}` : Number(livePrice).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
                                         </span>
-                                        {livePrice && (
-                                            <span className="text-xs font-mono font-bold text-emerald-300 bg-gray-900 px-2 py-0.5 rounded border border-emerald-500/30 shadow-sm animate-pulse">
-                                                ${Number(livePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
-                                            </span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={toggleAutoTrade}
-                                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition cursor-pointer shadow-sm ${isAutoTradeEnabled
-                                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/60 hover:bg-emerald-500/30'
-                                                    : 'bg-gray-800/80 text-gray-400 border border-gray-700 hover:bg-gray-700 hover:text-gray-300'
-                                                }`}
-                                            title={isAutoTradeEnabled ? 'Auto Trade đang BẬT: Quét nến đóng và gửi Order Binance' : 'Bấm để Bật Auto Trade'}
-                                        >
-                                            <span className={`w-2 h-2 rounded-full ${isAutoTradeEnabled ? 'bg-emerald-400 animate-ping' : 'bg-gray-500'}`} />
-                                            <span>{isAutoTradeEnabled ? 'Auto Trade: ON' : 'Auto Trade: OFF'}</span>
-                                        </button>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
 
                             {loading && <span className="text-sm text-blue-400 animate-pulse">Loading data...</span>}
@@ -1711,7 +1954,6 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                             <div className="ml-auto flex items-center justify-end gap-2 flex-wrap">
                                 {/* Timeframe Dropdown */}
                                 <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-                                    <span>Timeframe</span>
                                     <select
                                         aria-label="Timeframe"
                                         value={timeframe}
@@ -1731,8 +1973,6 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
 
                                 {/* Strategy Template Dropdown */}
                                 <div className="inline-flex items-center gap-1.5 text-xs text-cyan-300">
-                                    <BookmarkCheck size={14} className="text-cyan-400 shrink-0" />
-                                    <span>Template</span>
                                     <select
                                         aria-label="Strategy Template"
                                         value={selectedTemplateId}
@@ -1762,6 +2002,30 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                                             <span>Tất cả</span>
                                         </button>
                                     )}
+                                    {/* Checkbox Show signal */}
+                                    <label
+                                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-medium cursor-pointer transition select-none ${showSignals
+                                            ? 'bg-cyan-950/60 border-cyan-500/60 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                                            : 'bg-gray-900/70 border-gray-700/70 text-gray-400 hover:text-gray-200'
+                                            }`}
+                                        title="Hiển thị tín hiệu Entry, TP, SL từ Python Strategy"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={showSignals}
+                                            onChange={e => handleToggleShowSignals(e.target.checked)}
+                                            className="rounded border-gray-600 bg-gray-800 text-cyan-500 focus:ring-cyan-500 h-3.5 w-3.5 cursor-pointer accent-cyan-500"
+                                        />
+                                        <span>Show signal</span>
+                                        {isScanningSignals && (
+                                            <RefreshCw size={11} className="animate-spin text-cyan-400 ml-0.5" />
+                                        )}
+                                        {showSignals && !isScanningSignals && pythonChartSignals.length > 0 && (
+                                            <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-300 text-[10px] font-mono font-bold rounded-full border border-cyan-500/30">
+                                                {pythonChartSignals.length}
+                                            </span>
+                                        )}
+                                    </label>
                                     {selectedTemplateId && (
                                         <button
                                             type="button"
@@ -1823,11 +2087,12 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                                 )}
                             </div>
                         </div>
+
                         <div className="flex-1 min-h-0">
                             <TradingViewChart
                                 data={activeSymbolHistories}
                                 symbol={selectedSymbol?.Name}
-                                signals={executedTradeSignals}
+                                signals={activeChartSignals}
                                 strategy={activeStrategy}
                                 template={chartTemplate}
                                 vwapAnchor={vwapAnchor}
@@ -1881,9 +2146,16 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                         activeStrategy={activeStrategy}
                         value={tradeSetupValue}
                         livePrice={currentLivePrice}
+                        liveCandle={liveCandle}
+                        timeframe={timeframe}
+                        histories={activeSymbolHistories}
                         onSaved={refreshSelectedAccountTrades}
+                        jwtToken={jwtToken}
+                        setShowOtpModal={setShowOtpModal}
+                        derivativeSymbol={derivativeSymbol}
+                        onDerivativeSymbolChange={setDerivativeSymbol}
+                        allSymbols={symbols}
                     />
-                    <TechnicalPanel externalIndicators={externalIndicators} />
                 </div>
             </div>
             <TradeDetailModal
@@ -1912,6 +2184,21 @@ const buildPythonScanParams = (tpl, symName, targetTf, fallbackCtx = {}) => {
                 onApplyTemplate={handleApplyTemplateFromModal}
                 onSetDefaultTemplate={handleSetDefaultTemplate}
                 onDeleteTemplate={handleDeleteTemplate}
+            />
+            <OtpModal
+                isOpen={showOtpModal}
+                allowClose={true}
+                onClose={() => setShowOtpModal(false)}
+                onSuccess={(token) => {
+                    setJwtToken(token);
+                    sessionStorage.setItem('tcbsJwtToken', token);
+                    setShowOtpModal(false);
+                    setIsAutoTradeEnabled(true);
+                    try {
+                        localStorage.setItem('auto_trade_enabled', 'true');
+                    } catch { }
+                    addAutoTradeLog('🔑 Xác thực OTP TCBS thành công! Đã kích hoạt Auto Trade cho Phái sinh.', 'success');
+                }}
             />
         </div>
     );
