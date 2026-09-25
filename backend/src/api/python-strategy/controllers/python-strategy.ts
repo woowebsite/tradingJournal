@@ -308,6 +308,12 @@ export default {
         custom_tp_val,
         customSlVal,
         custom_sl_val,
+        bbPeriod,
+        bb_period,
+        bbStd,
+        bb_std,
+        maxPendingBars,
+        max_pending_bars,
         timeframe = 'D1',
       } = ctx.request.body || {};
       
@@ -316,6 +322,9 @@ export default {
       const cleanEntryType = entry_type || entryType || 'candle_close';
       const cleanStPeriod = st_period || stPeriod || supertrend_period || supertrendPeriod || 10;
       const cleanStMultiplier = st_multiplier || stMultiplier || supertrend_multiplier || supertrendMultiplier || 3.0;
+      const cleanBbPeriod = bb_period || bbPeriod || 26;
+      const cleanBbStd = bb_std !== undefined ? bb_std : (bbStd !== undefined ? bbStd : 1.0);
+      const cleanMaxPendingBars = max_pending_bars || maxPendingBars || 5;
       const cleanMaPeriod = ma_period || maPeriod || 288;
       const cleanVwapMa = vwapMaPeriod || vwap_ma_period || ma_period || maPeriod || 9;
       const cleanVwapAnchor = vwap_anchor || vwapAnchor || 'year';
@@ -356,6 +365,7 @@ export default {
       const isBreakout = safeFileName.toLowerCase().includes('breakout');
       const isVWAP = !isBreakout && safeFileName.toLowerCase().includes('vwap');
       const isPriceAction = !isBreakout && (safeFileName.toLowerCase().includes('priceaction') || safeFileName.toLowerCase().includes('price_action'));
+      const isBollinger = !isBreakout && (safeFileName.toLowerCase().includes('bollinger') || safeFileName.toLowerCase().includes('bb_'));
 
       const args = [
         fullScriptPath,
@@ -365,7 +375,26 @@ export default {
         '--countback', String(countback),
       ];
 
-      if (isBreakout) {
+      const signalCandleType = ctx.request.body?.signalCandleType || ctx.request.body?.signal_candle_type;
+
+      if (isBollinger) {
+        args.push(
+          '--bb-period', String(cleanBbPeriod),
+          '--bb-std', String(cleanBbStd),
+          '--st-period', String(cleanStPeriod),
+          '--st-multiplier', String(cleanStMultiplier),
+          '--max-pending-bars', String(cleanMaxPendingBars)
+        );
+        if (signalCandleType) {
+          args.push('--signal-candle-type', String(signalCandleType));
+        }
+        if (slType || sl_type) {
+          args.push('--sl-type', String(slType || sl_type));
+        }
+        if (tpType || tp_type) {
+          args.push('--tp-type', String(tpType || tp_type));
+        }
+      } else if (isBreakout) {
         args.push(
           '--st-period', String(cleanStPeriod),
           '--st-multiplier', String(cleanStMultiplier),
@@ -538,6 +567,12 @@ export default {
         tp_type,
         slType,
         sl_type,
+        bbPeriod,
+        bb_period,
+        bbStd,
+        bb_std,
+        maxPendingBars,
+        max_pending_bars,
         optConfig,
         opt_config,
       } = ctx.request.body || {};
@@ -576,6 +611,15 @@ export default {
         args.push('--opt-config', JSON.stringify(safeOptConfig));
       }
 
+      if (bbPeriod || bb_period) {
+        args.push('--bb-period', String(bbPeriod || bb_period));
+      }
+      if (bbStd !== undefined || bb_std !== undefined) {
+        args.push('--bb-std', String(bbStd !== undefined ? bbStd : bb_std));
+      }
+      if (maxPendingBars || max_pending_bars) {
+        args.push('--max-pending-bars', String(maxPendingBars || max_pending_bars));
+      }
       if (stPeriod || st_period) {
         args.push('--st-period', String(stPeriod || st_period));
       }
@@ -635,6 +679,9 @@ export default {
       }
       if (slType || sl_type) {
         args.push('--sl-type', String(slType || sl_type));
+      }
+      if (ctx.request.body?.signalCandleType || ctx.request.body?.signal_candle_type) {
+        args.push('--signal-candle-type', String(ctx.request.body?.signalCandleType || ctx.request.body?.signal_candle_type));
       }
 
       if (vwap_anchor || vwapAnchor) {

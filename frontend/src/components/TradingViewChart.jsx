@@ -5,6 +5,7 @@ import { calculateSMA, drawMA } from '../indicators/movingAverages';
 import { calculateSupertrend, drawSupertrend } from '../indicators/supertrend';
 import { calculateIchimoku, drawIchimoku78 } from '../indicators/ichimoku/ichimoku';
 import { calculateVWAP, drawVWAP } from '../indicators/vwap';
+import { drawBollingerBands } from '../indicators/bollingerBands';
 import { RefreshCw } from 'lucide-react';
 import { formatPriceDisplay, getSignalMarkerConfig } from '../utils/chartSignals';
 
@@ -22,6 +23,9 @@ const TradingViewChart = ({
     vwapAnchor = 'Year',
     supertrendPeriod = 10,
     supertrendMultiplier = 3,
+    bbPeriod = null,
+    bbStdDev = 1.0,
+    showBollingerBands = false,
     maPeriod = null,
     showMA = false,
     showVWAP = false,
@@ -392,6 +396,7 @@ const TradingViewChart = ({
         const tmpl = String(template || '').toLowerCase();
         const hasIchimoku = tmpl.includes('ichimoku');
         const hasVWAP = Boolean(showVWAP || tmpl === 'vwap' || tmpl.includes('supertrend_vwap') || tmpl.includes('breakout'));
+        const hasBollinger = Boolean(showBollingerBands || tmpl.includes('bollinger') || tmpl.includes('bb') || bbPeriod);
         const isVwapOnly = tmpl === 'vwap';
         const hasSupertrend = showSupertrend === true || (showSupertrend !== false && !isVwapOnly && !hasIchimoku);
 
@@ -418,6 +423,9 @@ const TradingViewChart = ({
             if (hasSupertrend) {
                 const supertrendData = calculateSupertrend(supertrendPeriod || 10, supertrendMultiplier || 3, candleData);
                 drawSupertrend(chart, LineSeries, supertrendData);
+            }
+            if (hasBollinger) {
+                drawBollingerBands(chart, LineSeries, candleData, parseInt(bbPeriod) || 26, parseFloat(bbStdDev) || 1.0);
             }
             if (hasVWAP) {
                 const vwapData = calculateVWAP(candleData, vwapAnchor || 'Year');

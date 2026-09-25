@@ -17,6 +17,10 @@ export const DEFAULT_PYTHON_STRATEGIES = [
     {
         fileName: 'strategy_breakout_st_vwap.py',
         name: 'Breakout ST & VWAP Strategy'
+    },
+    {
+        fileName: 'strategy_bollinger_supertrend.py',
+        name: 'Bollinger Band & Supertrend Strategy'
     }
 ];
 
