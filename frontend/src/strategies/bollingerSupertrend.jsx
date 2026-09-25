@@ -15,6 +15,7 @@ export const bollingerSupertrendStrategy = {
         signalCandleType: 'upper_band',
         slType: 'touch_lower_band',
         tpType: 'rr_2',
+        pyramiding: 1,
         allowLong: true,
         allowShort: true,
     },
@@ -87,6 +88,7 @@ export const bollingerSupertrendStrategy = {
             type: 'select',
             column: 2,
             options: [
+                { value: 'both', label: 'Cả 2 (Upper Band & Lower Band)' },
                 { value: 'upper_band', label: 'Close > Upper band, open < Upper band' },
                 { value: 'lower_band', label: 'Close > Lower band, open < Lower band' },
             ],
@@ -102,6 +104,7 @@ export const bollingerSupertrendStrategy = {
             type: 'select',
             column: 2,
             options: [
+                { value: 'break_supertrend', label: 'Break Supertrend (Close < ST hoặc ST đảo chiều)' },
                 { value: 'close_below_ma', label: 'Giá đóng cửa dưới MA' },
                 { value: 'touch_lower_band', label: 'Giá chạm Lower Band' },
                 { value: 'signal_candle_low', label: 'Đáy nến signal' },
@@ -119,10 +122,14 @@ export const bollingerSupertrendStrategy = {
             type: 'select',
             column: 2,
             options: [
+                { value: 'rr_1', label: 'RRR 1:1' },
+                { value: 'rr_1_5', label: 'RRR 1.5:1' },
                 { value: 'rr_2', label: 'RRR 2:1' },
                 { value: 'rr_3', label: 'RRR 3:1' },
                 { value: 'rr_5', label: 'RRR 5:1' },
                 { value: 'close_upper_band', label: 'Giá đóng cửa < Upper Band' },
+                { value: 'next_candle_1', label: 'Next Candle 1 (Thoát sau 1 nến)' },
+                { value: 'next_candle_2', label: 'Next Candle 2 (Thoát sau 2 nến)' },
             ],
             optimizable: true,
             defaultOpt: true,
@@ -140,6 +147,20 @@ export const bollingerSupertrendStrategy = {
             placeholder: '5',
             optimizable: true,
             defaultOpt: false,
+        },
+        {
+            name: 'pyramiding',
+            label: 'Pyramiding (Số lệnh vào tối đa)',
+            title: 'PYRAMIDING_ENTRIES',
+            icon: Layers,
+            iconColor: 'text-indigo-400',
+            type: 'number',
+            column: 2,
+            min: 1,
+            max: 20,
+            placeholder: '1',
+            optimizable: true,
+            defaultOpt: false,
         }
     ],
 
@@ -154,6 +175,7 @@ export const bollingerSupertrendStrategy = {
         signalCandleType: params.signalCandleType || 'upper_band',
         slType: params.slType || 'touch_lower_band',
         tpType: params.tpType || 'rr_2',
+        pyramiding: parseInt(params.pyramiding) || 1,
         allowLong: params.allowLong !== undefined ? params.allowLong : true,
         allowShort: params.allowShort !== undefined ? params.allowShort : true,
     }),
@@ -169,6 +191,7 @@ export const bollingerSupertrendStrategy = {
         signalCandleType: params.signalCandleType || 'upper_band',
         slType: params.slType || 'touch_lower_band',
         tpType: params.tpType || 'rr_2',
+        pyramiding: parseInt(params.pyramiding) || 1,
         allowLong: params.allowLong,
         allowShort: params.allowShort,
         optConfig: {
@@ -180,6 +203,7 @@ export const bollingerSupertrendStrategy = {
             signalCandleType: Boolean(optFlags.signalCandleType),
             slType: Boolean(optFlags.slType),
             tpType: Boolean(optFlags.tpType),
+            pyramiding: Boolean(optFlags.pyramiding),
         }
     }),
 
@@ -194,6 +218,7 @@ export const bollingerSupertrendStrategy = {
         ...(config.signalCandleType !== undefined && { signalCandleType: config.signalCandleType }),
         ...(config.slType !== undefined && { slType: config.slType }),
         ...(config.tpType !== undefined && { tpType: config.tpType }),
+        ...(config.pyramiding !== undefined && { pyramiding: config.pyramiding }),
     }),
 
     // Cấu hình truyền vào TradingViewChart
@@ -212,41 +237,53 @@ export const bollingerSupertrendStrategy = {
     // Tạo mô tả mặc định khi lưu Template
     generateDescription: (params) => {
         const signalLabels = {
+            both: 'Signal: Cả 2',
             upper_band: 'Signal: Upper Band',
             lower_band: 'Signal: Lower Band',
         };
         const slLabels = {
+            break_supertrend: 'SL: Break Supertrend',
             close_below_ma: 'SL: Đóng cửa dưới MA',
             touch_lower_band: 'SL: Chạm Lower Band',
             signal_candle_low: 'SL: Đáy Signal',
             entry_candle_low: 'SL: Đáy Entry'
         };
         const tpLabels = {
+            rr_1: 'TP: RRR 1:1',
+            rr_1_5: 'TP: RRR 1.5:1',
             rr_2: 'TP: RRR 2:1',
             rr_3: 'TP: RRR 3:1',
             rr_5: 'TP: RRR 5:1',
-            close_upper_band: 'TP: Đóng < Upper Band'
+            close_upper_band: 'TP: Đóng < Upper Band',
+            next_candle_1: 'TP: Next Candle 1',
+            next_candle_2: 'TP: Next Candle 2'
         };
-        return `BB(${params.bbPeriod || 26}, ${params.bbStd || 1.0}) + ST(${params.stPeriod || 10}, ${params.stMultiplier || 3.0}) | ${signalLabels[params.signalCandleType] || 'Signal: Upper Band'} | ${slLabels[params.slType] || 'SL: Lower Band'} | ${tpLabels[params.tpType] || 'TP: RRR 2:1'} | ${params.allowLong ? 'Long' : ''} ${params.allowShort ? 'Short' : ''}`.trim();
+        return `BB(${params.bbPeriod || 26}, ${params.bbStd || 1.0}) + ST(${params.stPeriod || 10}, ${params.stMultiplier || 3.0}) | ${signalLabels[params.signalCandleType] || 'Signal: Upper Band'} | ${slLabels[params.slType] || 'SL: Lower Band'} | ${tpLabels[params.tpType] || 'TP: RRR 2:1'} | Pyr: ${params.pyramiding || 1} | ${params.allowLong ? 'Long' : ''} ${params.allowShort ? 'Short' : ''}`.trim();
     },
 
     // Hiển thị tóm tắt cấu hình ở thanh Status Bar
     renderConfigSummaryBadges: (params) => {
         const signalLabels = {
+            both: 'Signal: Cả 2',
             upper_band: 'Signal: Upper Band',
             lower_band: 'Signal: Lower Band',
         };
         const slLabels = {
+            break_supertrend: 'Break Supertrend',
             close_below_ma: 'Close < MA',
             touch_lower_band: 'Chạm Lower Band',
             signal_candle_low: 'Đáy Signal',
             entry_candle_low: 'Đáy Entry'
         };
         const tpLabels = {
+            rr_1: 'RRR 1:1',
+            rr_1_5: 'RRR 1.5:1',
             rr_2: 'RRR 2:1',
             rr_3: 'RRR 3:1',
             rr_5: 'RRR 5:1',
-            close_upper_band: 'Close < Upper Band'
+            close_upper_band: 'Close < Upper Band',
+            next_candle_1: 'Next Candle 1',
+            next_candle_2: 'Next Candle 2'
         };
         return (
             <>
@@ -273,6 +310,10 @@ export const bollingerSupertrendStrategy = {
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium">
                     <Clock size={12} className="text-amber-400" />
                     Chờ: {params.maxPendingBars || 5} nến
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-medium">
+                    <Layers size={12} className="text-indigo-400" />
+                    Pyr: {params.pyramiding || 1}
                 </span>
             </>
         );

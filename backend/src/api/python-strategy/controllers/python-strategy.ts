@@ -394,6 +394,9 @@ export default {
         if (tpType || tp_type) {
           args.push('--tp-type', String(tpType || tp_type));
         }
+        if (ctx.request.body?.pyramiding) {
+          args.push('--pyramiding', String(ctx.request.body?.pyramiding));
+        }
       } else if (isBreakout) {
         args.push(
           '--st-period', String(cleanStPeriod),
@@ -682,6 +685,9 @@ export default {
       }
       if (ctx.request.body?.signalCandleType || ctx.request.body?.signal_candle_type) {
         args.push('--signal-candle-type', String(ctx.request.body?.signalCandleType || ctx.request.body?.signal_candle_type));
+      }
+      if (ctx.request.body?.pyramiding) {
+        args.push('--pyramiding', String(ctx.request.body?.pyramiding));
       }
 
       if (vwap_anchor || vwapAnchor) {

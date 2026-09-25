@@ -437,23 +437,32 @@ def scan_strategy_signals(
     max_pending_bars: int = 5,
     signal_candle_type: str = "upper_band",
     sl_type: str = "touch_lower_band",
-    tp_type: str = "rr_2"
+    tp_type: str = "rr_2",
+    pyramiding: int = 1
 ) -> Dict:
     """
     Backtest và quét tín hiệu chiến lược Bollinger Band (26, 1) + Supertrend (10, 3) Breakout
     Tùy chọn Signal Candle (signal_candle_type):
+      - 'both': Cả 2 (Thỏa mãn nến bứt phá Upper Band HOẶC nến hồi phục Lower Band)
       - 'upper_band': Long: Close > Upper Band, Open < Upper Band | Short: Close < Lower Band, Open > Lower Band
       - 'lower_band': Long: Close > Lower Band, Open < Lower Band | Short: Close < Upper Band, Open > Upper Band
     Tùy chọn Stoploss (sl_type):
+      - 'break_supertrend': Break Supertrend (Close < Supertrend hoặc ST đảo chiều cho Long / Close > Supertrend hoặc ST đảo chiều cho Short)
       - 'close_below_ma': Giá đóng cửa dưới MA (Middle Band) cho Long / trên MA cho Short
       - 'touch_lower_band': Giá chạm Lower Band cho Long / Upper Band cho Short
       - 'signal_candle_low': Đáy nến signal cho Long / Đỉnh nến signal cho Short
       - 'entry_candle_low': Đáy nến entry cho Long / Đỉnh nến entry cho Short
     Tùy chọn Take Profit (tp_type):
+      - 'rr_1': Tỷ lệ RRR 1:1
+      - 'rr_1_5': Tỷ lệ RRR 1.5:1
       - 'rr_2': Tỷ lệ RRR 2:1
       - 'rr_3': Tỷ lệ RRR 3:1
       - 'rr_5': Tỷ lệ RRR 5:1
       - 'close_upper_band': Giá đóng cửa < Upper Band cho Long / > Lower Band cho Short
+      - 'next_candle_1': Thoát lệnh sau 1 nến kể từ nến entry
+      - 'next_candle_2': Thoát lệnh sau 2 nến kể từ nến entry
+    Tham số Pyramiding (pyramiding):
+      - Số lượng lệnh tối đa có thể mở đồng thời khi tiếp tục xuất hiện tín hiệu entry hợp lệ.
     """
     min_bars = max(bb_period, st_period) + 5
     if len(df) < min_bars:
@@ -471,7 +480,7 @@ def scan_strategy_signals(
 
     trades = []
     signals = []
-    current_trade = None
+    open_trades = []  # Danh sách các vị thế đang mở (hỗ trợ Pyramiding)
     pending_signal = None  # Lưu nến signal đang chờ breakout
 
     for i in range(min_bars, len(df)):
@@ -493,9 +502,10 @@ def scan_strategy_signals(
             continue
 
         # -------------------------------------------------------------
-        # 1. KIỂM TRA ĐÓNG VỊ THẾ (NẾU ĐANG CÓ LỆNH MỞ)
+        # 1. KIỂM TRA ĐÓNG VỊ THẾ CHO TỪNG LỆNH ĐANG MỞ (OPEN TRADES)
         # -------------------------------------------------------------
-        if current_trade is not None:
+        active_trades = []
+        for current_trade in open_trades:
             pos_type = current_trade['type']
             entry_p = current_trade['entry_price']
             sl_p = current_trade['stop_loss']
@@ -510,57 +520,87 @@ def scan_strategy_signals(
             exit_price = None
 
             if pos_type == 'Long':
-                # a. Stop Loss: Chạm Lower Band (Stop order tại Lower Band của nến hiện tại, khớp ngay khi low chạm Lower Band)
-                if trade_sl_type == 'touch_lower_band' and low_p <= bb_low:
+                # a. Stop Loss: Break Supertrend (Close < Supertrend hoặc ST đảo chiều)
+                if trade_sl_type == 'break_supertrend' and (close_p < st_val or st_dir == -1):
+                    is_closed = True
+                    exit_reason = 'StopLoss (Break Supertrend)'
+                    exit_price = close_p
+                # b. Stop Loss: Chạm Lower Band (Stop order tại Lower Band của nến hiện tại, khớp ngay khi low chạm Lower Band)
+                elif trade_sl_type == 'touch_lower_band' and low_p <= bb_low:
                     is_closed = True
                     exit_reason = 'StopLoss (Chạm Lower Band)'
                     exit_price = min(open_p, bb_low)
-                # b. Stop Loss: Đáy nến signal / Đáy nến entry (Stop order cố định tại mức sl_p)
+                # c. Stop Loss: Đáy nến signal / Đáy nến entry (Stop order cố định tại mức sl_p)
                 elif trade_sl_type in ['signal_candle_low', 'entry_candle_low'] and low_p <= sl_p:
                     is_closed = True
                     exit_reason = f'StopLoss ({sl_label})'
                     exit_price = min(open_p, sl_p)
-                # c. Stop Loss: Giá đóng cửa dưới MA (Chờ đóng nến Close < Middle Band)
+                # d. Stop Loss: Giá đóng cửa dưới MA (Chờ đóng nến Close < Middle Band)
                 elif trade_sl_type == 'close_below_ma' and close_p < bb_mid:
                     is_closed = True
                     exit_reason = 'StopLoss (Close < MA)'
                     exit_price = close_p
-                # d. Take Profit RRR (2:1, 3:1, 5:1 - Limit order chạm giá TP)
+                # e. Take Profit RRR (1:1, 1.5:1, 2:1, 3:1, 5:1 - Limit order chạm giá TP)
                 elif tp_p is not None and high_p >= tp_p:
                     is_closed = True
                     exit_reason = f'TakeProfit ({tp_label})'
                     exit_price = max(open_p, tp_p) if open_p >= tp_p else tp_p
-                # e. Exit condition: Close < Upper Band (Chờ đóng nến < Upper Band)
+                # f. Exit condition: Close < Upper Band (Chờ đóng nến < Upper Band)
                 elif trade_tp_type == 'close_upper_band' and close_p < bb_up:
                     is_closed = True
                     exit_reason = 'Exit (Close < Upper Band)'
                     exit_price = close_p
+                # g. Exit condition: Next Candle 1 (Thoát sau 1 nến kể từ nến entry)
+                elif trade_tp_type == 'next_candle_1' and (i - current_trade['entry_index']) >= 1:
+                    is_closed = True
+                    exit_reason = 'Exit (Next Candle 1)'
+                    exit_price = close_p
+                # h. Exit condition: Next Candle 2 (Thoát sau 2 nến kể từ nến entry)
+                elif trade_tp_type == 'next_candle_2' and (i - current_trade['entry_index']) >= 2:
+                    is_closed = True
+                    exit_reason = 'Exit (Next Candle 2)'
+                    exit_price = close_p
 
             elif pos_type == 'Short':
-                # a. Stop Loss: Chạm Upper Band (Stop order tại Upper Band của nến hiện tại, khớp ngay khi high chạm Upper Band)
-                if trade_sl_type == 'touch_lower_band' and high_p >= bb_up:
+                # a. Stop Loss: Break Supertrend (Close > Supertrend hoặc ST đảo chiều)
+                if trade_sl_type == 'break_supertrend' and (close_p > st_val or st_dir == 1):
+                    is_closed = True
+                    exit_reason = 'StopLoss (Break Supertrend)'
+                    exit_price = close_p
+                # b. Stop Loss: Chạm Upper Band (Stop order tại Upper Band của nến hiện tại, khớp ngay khi high chạm Upper Band)
+                elif trade_sl_type == 'touch_lower_band' and high_p >= bb_up:
                     is_closed = True
                     exit_reason = 'StopLoss (Chạm Upper Band)'
                     exit_price = max(open_p, bb_up)
-                # b. Stop Loss: Đỉnh nến signal / Đỉnh nến entry (Stop order cố định tại mức sl_p)
+                # c. Stop Loss: Đỉnh nến signal / Đỉnh nến entry (Stop order cố định tại mức sl_p)
                 elif trade_sl_type in ['signal_candle_low', 'entry_candle_low'] and high_p >= sl_p:
                     is_closed = True
                     exit_reason = f'StopLoss ({sl_label})'
                     exit_price = max(open_p, sl_p)
-                # c. Stop Loss: Giá đóng cửa trên MA (Chờ đóng nến Close > Middle Band)
+                # d. Stop Loss: Giá đóng cửa trên MA (Chờ đóng nến Close > Middle Band)
                 elif trade_sl_type == 'close_below_ma' and close_p > bb_mid:
                     is_closed = True
                     exit_reason = 'StopLoss (Close > MA)'
                     exit_price = close_p
-                # d. Take Profit RRR (2:1, 3:1, 5:1 - Limit order chạm giá TP)
+                # e. Take Profit RRR (1:1, 1.5:1, 2:1, 3:1, 5:1 - Limit order chạm giá TP)
                 elif tp_p is not None and low_p <= tp_p:
                     is_closed = True
                     exit_reason = f'TakeProfit ({tp_label})'
                     exit_price = min(open_p, tp_p) if open_p <= tp_p else tp_p
-                # e. Exit condition: Close > Lower Band (Chờ đóng nến > Lower Band)
+                # f. Exit condition: Close > Lower Band (Chờ đóng nến > Lower Band)
                 elif trade_tp_type == 'close_upper_band' and close_p > bb_low:
                     is_closed = True
                     exit_reason = 'Exit (Close > Lower Band)'
+                    exit_price = close_p
+                # g. Exit condition: Next Candle 1 (Thoát sau 1 nến kể từ nến entry)
+                elif trade_tp_type == 'next_candle_1' and (i - current_trade['entry_index']) >= 1:
+                    is_closed = True
+                    exit_reason = 'Exit (Next Candle 1)'
+                    exit_price = close_p
+                # h. Exit condition: Next Candle 2 (Thoát sau 2 nến kể từ nến entry)
+                elif trade_tp_type == 'next_candle_2' and (i - current_trade['entry_index']) >= 2:
+                    is_closed = True
+                    exit_reason = 'Exit (Next Candle 2)'
                     exit_price = close_p
 
             if is_closed:
@@ -595,30 +635,36 @@ def scan_strategy_signals(
                         "Type": "takeprofit" if is_win else "stoploss"
                     }
                 })
+            else:
+                active_trades.append(current_trade)
 
-                current_trade = None
-                pending_signal = None
-                continue
+        open_trades = active_trades
 
         # -------------------------------------------------------------
         # 2. KIỂM TRA KHỚP LỆNH PENDING TỪ NẾN SIGNAL TRƯỚC ĐÓ
         # -------------------------------------------------------------
-        if current_trade is None and pending_signal is not None:
+        if pending_signal is not None:
             # Kiểm tra thời hạn hiệu lực của pending signal
             bars_elapsed = i - pending_signal['signal_index']
             if bars_elapsed > max_pending_bars:
                 pending_signal = None
-            else:
+            elif len(open_trades) < pyramiding:
                 p_type = pending_signal['type']
                 breakout_price = pending_signal['breakout_price']
 
-                if p_type == 'Long' and allow_long:
+                # Chỉ cho phép vào thêm lệnh cùng chiều nếu đã có lệnh mở
+                can_entry = (not open_trades or open_trades[0]['type'] == p_type)
+
+                if can_entry and p_type == 'Long' and allow_long:
                     # Breakout qua High nến signal: high_p > breakout_price
                     if high_p > breakout_price:
                         entry_price = max(open_p, breakout_price)
 
                         # Xác định Stop Loss cho vị thế Long
-                        if sl_type == 'close_below_ma':
+                        if sl_type == 'break_supertrend':
+                            calc_sl = round(st_val, 2)
+                            sl_label = 'Break Supertrend'
+                        elif sl_type == 'close_below_ma':
                             calc_sl = round(bb_mid, 2)
                             sl_label = 'Close < MA'
                         elif sl_type == 'signal_candle_low':
@@ -637,7 +683,13 @@ def scan_strategy_signals(
                         risk_dist = entry_price - calc_sl
 
                         # Xác định Take Profit cho vị thế Long
-                        if tp_type == 'rr_3':
+                        if tp_type == 'rr_1':
+                            tp_price = round(entry_price + 1.0 * risk_dist, 2)
+                            tp_label = 'RRR 1:1'
+                        elif tp_type == 'rr_1_5':
+                            tp_price = round(entry_price + 1.5 * risk_dist, 2)
+                            tp_label = 'RRR 1.5:1'
+                        elif tp_type == 'rr_3':
                             tp_price = round(entry_price + 3.0 * risk_dist, 2)
                             tp_label = 'RRR 3:1'
                         elif tp_type == 'rr_5':
@@ -646,11 +698,17 @@ def scan_strategy_signals(
                         elif tp_type == 'close_upper_band':
                             tp_price = None
                             tp_label = 'Close < Upper Band'
+                        elif tp_type == 'next_candle_1':
+                            tp_price = None
+                            tp_label = 'Next Candle 1'
+                        elif tp_type == 'next_candle_2':
+                            tp_price = None
+                            tp_label = 'Next Candle 2'
                         else:  # rr_2
                             tp_price = round(entry_price + 2.0 * risk_dist, 2)
                             tp_label = 'RRR 2:1'
 
-                        current_trade = {
+                        new_trade = {
                             "type": "Long",
                             "entry_date": candle_date,
                             "entry_time": time_str,
@@ -667,6 +725,7 @@ def scan_strategy_signals(
                             "status": "Open",
                             "rule_name": f"Breakout BB({bb_period},{bb_std}) Upper & ST({st_period},{st_multiplier})"
                         }
+                        open_trades.append(new_trade)
                         signals.append({
                             "date": candle_date,
                             "time": time_str,
@@ -682,15 +741,17 @@ def scan_strategy_signals(
                             }
                         })
                         pending_signal = None
-                        continue
 
-                elif p_type == 'Short' and allow_short:
+                elif can_entry and p_type == 'Short' and allow_short:
                     # Breakout qua Low nến signal: low_p < breakout_price
                     if low_p < breakout_price:
                         entry_price = min(open_p, breakout_price)
 
                         # Xác định Stop Loss cho vị thế Short
-                        if sl_type == 'close_below_ma':
+                        if sl_type == 'break_supertrend':
+                            calc_sl = round(st_val, 2)
+                            sl_label = 'Break Supertrend'
+                        elif sl_type == 'close_below_ma':
                             calc_sl = round(bb_mid, 2)
                             sl_label = 'Close > MA'
                         elif sl_type == 'signal_candle_low':
@@ -709,7 +770,13 @@ def scan_strategy_signals(
                         risk_dist = calc_sl - entry_price
 
                         # Xác định Take Profit cho vị thế Short
-                        if tp_type == 'rr_3':
+                        if tp_type == 'rr_1':
+                            tp_price = round(entry_price - 1.0 * risk_dist, 2)
+                            tp_label = 'RRR 1:1'
+                        elif tp_type == 'rr_1_5':
+                            tp_price = round(entry_price - 1.5 * risk_dist, 2)
+                            tp_label = 'RRR 1.5:1'
+                        elif tp_type == 'rr_3':
                             tp_price = round(entry_price - 3.0 * risk_dist, 2)
                             tp_label = 'RRR 3:1'
                         elif tp_type == 'rr_5':
@@ -718,11 +785,17 @@ def scan_strategy_signals(
                         elif tp_type == 'close_upper_band':
                             tp_price = None
                             tp_label = 'Close > Lower Band'
+                        elif tp_type == 'next_candle_1':
+                            tp_price = None
+                            tp_label = 'Next Candle 1'
+                        elif tp_type == 'next_candle_2':
+                            tp_price = None
+                            tp_label = 'Next Candle 2'
                         else:  # rr_2
                             tp_price = round(entry_price - 2.0 * risk_dist, 2)
                             tp_label = 'RRR 2:1'
 
-                        current_trade = {
+                        new_trade = {
                             "type": "Short",
                             "entry_date": candle_date,
                             "entry_time": time_str,
@@ -739,6 +812,7 @@ def scan_strategy_signals(
                             "status": "Open",
                             "rule_name": f"Breakout BB({bb_period},{bb_std}) Lower & ST({st_period},{st_multiplier})"
                         }
+                        open_trades.append(new_trade)
                         signals.append({
                             "date": candle_date,
                             "time": time_str,
@@ -754,13 +828,25 @@ def scan_strategy_signals(
                             }
                         })
                         pending_signal = None
-                        continue
 
         # -------------------------------------------------------------
-        # 3. NHẬN DIỆN NẾN SIGNAL MỚI (CHỈ KHI KHÔNG CÓ LỆNH ĐANG MỞ)
+        # 3. NHẬN DIỆN NẾN SIGNAL MỚI (CHỈ KHI SỐ LỆNH MỞ < PYRAMIDING)
         # -------------------------------------------------------------
-        if current_trade is None:
-            if signal_candle_type == 'lower_band':
+        if len(open_trades) < pyramiding:
+            if signal_candle_type == 'both':
+                # Cả 2: Thỏa mãn 1 trong 2 điều kiện nến Signal (Upper Band HOẶC Lower Band)
+                # Long: (Open < Upper Band và Close > Upper Band) HOẶC (Open < Lower Band và Close > Lower Band)
+                #       VÀ (Supertrend tăng: st_dir == 1 hoặc close_p > st_val)
+                is_long_upper = (open_p < bb_up) and (close_p > bb_up)
+                is_long_lower = (open_p < bb_low) and (close_p > bb_low)
+                is_long_signal = (is_long_upper or is_long_lower) and (st_dir == 1 or close_p > st_val)
+
+                # Short: (Open > Lower Band và Close < Lower Band) HOẶC (Open > Upper Band và Close < Upper Band)
+                #        VÀ (Supertrend giảm: st_dir == -1 hoặc close_p < st_val)
+                is_short_lower = (open_p > bb_low) and (close_p < bb_low)
+                is_short_upper = (open_p > bb_up) and (close_p < bb_up)
+                is_short_signal = (is_short_lower or is_short_upper) and (st_dir == -1 or close_p < st_val)
+            elif signal_candle_type == 'lower_band':
                 # Điều kiện nến Signal Long (Bắt đáy/Hồi phục từ Lower Band):
                 # - Open < Lower Band (nến mở cửa dưới Lower Band)
                 # - Close > Lower Band (nến đóng cửa cắt lên trên Lower Band)
@@ -785,7 +871,10 @@ def scan_strategy_signals(
                 # - Close < Supertrend (st_dir == -1 hoặc close_p < st_val)
                 is_short_signal = (open_p > bb_low) and (close_p < bb_low) and (st_dir == -1 or close_p < st_val)
 
-            if is_long_signal and allow_long:
+            allow_new_long = (not open_trades or open_trades[0]['type'] == 'Long')
+            allow_new_short = (not open_trades or open_trades[0]['type'] == 'Short')
+
+            if is_long_signal and allow_long and allow_new_long:
                 pending_signal = {
                     "type": "Long",
                     "signal_index": i,
@@ -798,7 +887,7 @@ def scan_strategy_signals(
                     "bb_mid": bb_mid
                 }
 
-            elif is_short_signal and allow_short:
+            elif is_short_signal and allow_short and allow_new_short:
                 pending_signal = {
                     "type": "Short",
                     "signal_index": i,
@@ -812,19 +901,20 @@ def scan_strategy_signals(
                 }
 
     # Nếu còn lệnh mở ở nến cuối cùng
-    if current_trade is not None:
+    if open_trades:
         last_row = df.iloc[-1]
         last_close = float(last_row['close'])
-        pos_type = current_trade['type']
-        entry_p = current_trade['entry_price']
-        pnl_amount = (last_close - entry_p) if pos_type == 'Long' else (entry_p - last_close)
-        pnl_percent = (pnl_amount / entry_p) * 100.0
+        for current_trade in open_trades:
+            pos_type = current_trade['type']
+            entry_p = current_trade['entry_price']
+            pnl_amount = (last_close - entry_p) if pos_type == 'Long' else (entry_p - last_close)
+            pnl_percent = (pnl_amount / entry_p) * 100.0
 
-        current_trade['current_price'] = round(last_close, 2)
-        current_trade['unrealized_pnl_percent'] = round(pnl_percent, 2)
-        current_trade['unrealized_pnl_amount'] = round(pnl_amount, 2)
-        current_trade['holding_bars'] = len(df) - 1 - current_trade['entry_index']
-        trades.append(current_trade)
+            current_trade['current_price'] = round(last_close, 2)
+            current_trade['unrealized_pnl_percent'] = round(pnl_percent, 2)
+            current_trade['unrealized_pnl_amount'] = round(pnl_amount, 2)
+            current_trade['holding_bars'] = len(df) - 1 - current_trade['entry_index']
+            trades.append(current_trade)
 
     return {"trades": trades, "signals": signals}
 
@@ -920,6 +1010,7 @@ def scan_symbol_json(
     signal_candle_type: str = "upper_band",
     sl_type: str = "touch_lower_band",
     tp_type: str = "rr_2",
+    pyramiding: int = 1,
     timeframe: str = "D1"
 ) -> Dict:
     """Quét tín hiệu & backtest, trả về JSON chuẩn"""
@@ -944,7 +1035,8 @@ def scan_symbol_json(
         max_pending_bars=max_pending_bars,
         signal_candle_type=signal_candle_type,
         sl_type=sl_type,
-        tp_type=tp_type
+        tp_type=tp_type,
+        pyramiding=pyramiding
     )
 
     trades = res.get("trades", [])
@@ -998,8 +1090,10 @@ def scan_symbol_json(
             "allow_long": allow_long,
             "allow_short": allow_short,
             "max_pending_bars": max_pending_bars,
+            "signal_candle_type": signal_candle_type,
             "sl_type": sl_type,
-            "tp_type": tp_type
+            "tp_type": tp_type,
+            "pyramiding": pyramiding
         },
         "summary": summary,
         "trades": trades,
@@ -1024,6 +1118,7 @@ def optimize_bollinger_supertrend(
     current_signal_candle_type: str = "upper_band",
     current_sl_type: str = "touch_lower_band",
     current_tp_type: str = "rr_2",
+    current_pyramiding: int = 1,
     opt_config: Dict = None
 ) -> Dict:
     df = fetch_market_candles(ticker, countback=countback, timeframe=timeframe)
@@ -1043,9 +1138,10 @@ def optimize_bollinger_supertrend(
     st_periods = [7, 10, 14, 20] if opt_cfg.get("stPeriod", True) else [current_st_period]
     st_mults = [1.5, 2.0, 2.5, 3.0, 3.5] if opt_cfg.get("stMultiplier", True) else [current_st_multiplier]
     pending_bars = [2, 3, 5, 8] if opt_cfg.get("maxPendingBars", False) else [current_max_pending_bars]
-    signal_candle_types = ["upper_band", "lower_band"] if opt_cfg.get("signalCandleType", False) else [current_signal_candle_type]
-    sl_types = ["close_below_ma", "touch_lower_band", "signal_candle_low", "entry_candle_low"] if opt_cfg.get("slType", False) else [current_sl_type]
-    tp_types = ["rr_2", "rr_3", "rr_5", "close_upper_band"] if opt_cfg.get("tpType", False) else [current_tp_type]
+    signal_candle_types = ["upper_band", "lower_band", "both"] if opt_cfg.get("signalCandleType", False) else [current_signal_candle_type]
+    sl_types = ["break_supertrend", "close_below_ma", "touch_lower_band", "signal_candle_low", "entry_candle_low"] if opt_cfg.get("slType", False) else [current_sl_type]
+    tp_types = ["rr_1", "rr_1_5", "rr_2", "rr_3", "rr_5", "close_upper_band", "next_candle_1", "next_candle_2"] if opt_cfg.get("tpType", False) else [current_tp_type]
+    pyramidings = [1, 2, 3, 5] if opt_cfg.get("pyramiding", False) else [current_pyramiding]
 
     all_candidates = []
     best_score = None
@@ -1059,77 +1155,65 @@ def optimize_bollinger_supertrend(
                         for sct in signal_candle_types:
                             for sl_t in sl_types:
                                 for tp_t in tp_types:
-                                    res = scan_strategy_signals(
-                                        df=df,
-                                        bb_period=bbp,
-                                        bb_std=bbs,
-                                        st_period=stp,
-                                        st_multiplier=stm,
-                                        allow_long=allow_long,
-                                        allow_short=allow_short,
-                                        max_pending_bars=pb,
-                                        signal_candle_type=sct,
-                                        sl_type=sl_t,
-                                        tp_type=tp_t
-                                    )
-                                    trades = res.get("trades", [])
-                                    closed_trades = [t for t in trades if t.get("status") == "Closed"]
-                                    if not closed_trades:
-                                        continue
+                                    for pyr in pyramidings:
+                                        res = scan_strategy_signals(
+                                            df=df,
+                                            bb_period=bbp,
+                                            bb_std=bbs,
+                                            st_period=stp,
+                                            st_multiplier=stm,
+                                            allow_long=allow_long,
+                                            allow_short=allow_short,
+                                            max_pending_bars=pb,
+                                            signal_candle_type=sct,
+                                            sl_type=sl_t,
+                                            tp_type=tp_t,
+                                            pyramiding=pyr
+                                        )
+                                        trades = res.get("trades", [])
+                                        closed_trades = [t for t in trades if t.get("status") == "Closed"]
+                                        if not closed_trades:
+                                            continue
 
-                                    wins = [t for t in closed_trades if t.get("pnl_amount", 0) > 0]
-                                    losses = [t for t in closed_trades if t.get("pnl_amount", 0) <= 0]
-                                    trades_count = len(closed_trades)
-                                    win_count = len(wins)
-                                    loss_count = len(losses)
-                                    win_rate = (win_count / trades_count) * 100.0 if trades_count > 0 else 0.0
+                                        wins = [t for t in closed_trades if t.get("pnl_amount", 0) > 0]
+                                        losses = [t for t in closed_trades if t.get("pnl_amount", 0) <= 0]
+                                        trades_count = len(closed_trades)
+                                        win_count = len(wins)
+                                        loss_count = len(losses)
+                                        win_rate = (win_count / trades_count) * 100.0 if trades_count > 0 else 0.0
 
-                                    gross_profit = sum(t.get("pnl_amount", 0) for t in wins)
-                                    gross_loss = abs(sum(t.get("pnl_amount", 0) for t in losses))
-                                    total_pnl = sum(t.get("pnl_percent", 0) for t in closed_trades)
+                                        gross_profit = sum(t.get("pnl_amount", 0) for t in wins)
+                                        gross_loss = abs(sum(t.get("pnl_amount", 0) for t in losses))
+                                        total_pnl = sum(t.get("pnl_percent", 0) for t in closed_trades)
 
-                                    pf = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.0 if gross_profit > 0 else 0.0)
-                                    capped_pf = min(pf, 10.0)
+                                        pf = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.0 if gross_profit > 0 else 0.0)
+                                        capped_pf = min(pf, 10.0)
 
-                                    if trades_count >= 15 and total_pnl > 0 and pf >= 1.2:
-                                        tier = 4
-                                    elif trades_count >= 8 and total_pnl > 0 and pf >= 1.1:
-                                        tier = 3
-                                    elif trades_count >= 4 and total_pnl > 0:
-                                        tier = 2
-                                    elif trades_count >= 2:
-                                        tier = 1
-                                    else:
-                                        tier = 0
+                                        if trades_count >= 15 and total_pnl > 0 and pf >= 1.2:
+                                            tier = 4
+                                        elif trades_count >= 8 and total_pnl > 0 and pf >= 1.1:
+                                            tier = 3
+                                        elif trades_count >= 4 and total_pnl > 0:
+                                            tier = 2
+                                        elif trades_count >= 2:
+                                            tier = 1
+                                        else:
+                                            tier = 0
 
-                                    trade_weight = np.sqrt(trades_count)
-                                    wr_factor = 1.0 if win_rate >= 40.0 else max(0.2, win_rate / 40.0)
-                                    pnl_weight = max(0.1, total_pnl) if total_pnl > 0 else (total_pnl / 10.0)
-                                    fitness = capped_pf * trade_weight * pnl_weight * wr_factor
-                                    score = (tier, round(fitness, 4), total_pnl, capped_pf, trades_count)
+                                        trade_weight = np.sqrt(trades_count)
+                                        wr_factor = 1.0 if win_rate >= 40.0 else max(0.2, win_rate / 40.0)
+                                        pnl_weight = max(0.1, total_pnl) if total_pnl > 0 else (total_pnl / 10.0)
+                                        fitness = capped_pf * trade_weight * pnl_weight * wr_factor
+                                        score = (tier, round(fitness, 4), total_pnl, capped_pf, trades_count)
 
-                                    candidate = {
-                                        "score": score,
-                                        "profitFactor": pf,
-                                        "winRate": round(win_rate, 2),
-                                        "totalTrades": trades_count,
-                                        "winTrades": win_count,
-                                        "lossTrades": loss_count,
-                                        "totalPnlPercent": round(total_pnl, 2),
-                                        "bbPeriod": bbp,
-                                        "bbStd": bbs,
-                                        "stPeriod": stp,
-                                        "stMultiplier": stm,
-                                        "maxPendingBars": pb,
-                                        "signalCandleType": sct,
-                                        "slType": sl_t,
-                                        "tpType": tp_t
-                                    }
-                                    all_candidates.append(candidate)
-
-                                    if best_score is None or score > best_score:
-                                        best_score = score
-                                        best_combo = {
+                                        candidate = {
+                                            "score": score,
+                                            "profitFactor": pf,
+                                            "winRate": round(win_rate, 2),
+                                            "totalTrades": trades_count,
+                                            "winTrades": win_count,
+                                            "lossTrades": loss_count,
+                                            "totalPnlPercent": round(total_pnl, 2),
                                             "bbPeriod": bbp,
                                             "bbStd": bbs,
                                             "stPeriod": stp,
@@ -1137,15 +1221,31 @@ def optimize_bollinger_supertrend(
                                             "maxPendingBars": pb,
                                             "signalCandleType": sct,
                                             "slType": sl_t,
-                                            "tpType": tp_t
+                                            "tpType": tp_t,
+                                            "pyramiding": pyr
                                         }
+                                        all_candidates.append(candidate)
+
+                                        if best_score is None or score > best_score:
+                                            best_score = score
+                                            best_combo = {
+                                                "bbPeriod": bbp,
+                                                "bbStd": bbs,
+                                                "stPeriod": stp,
+                                                "stMultiplier": stm,
+                                                "maxPendingBars": pb,
+                                                "signalCandleType": sct,
+                                                "slType": sl_t,
+                                                "tpType": tp_t,
+                                                "pyramiding": pyr
+                                            }
 
     top_configs = []
     if all_candidates:
         all_candidates.sort(key=lambda x: x["score"], reverse=True)
         seen = set()
         for c in all_candidates:
-            key = (c["bbPeriod"], c["bbStd"], c["stPeriod"], c["stMultiplier"], c["maxPendingBars"], c["signalCandleType"], c["slType"], c["tpType"])
+            key = (c["bbPeriod"], c["bbStd"], c["stPeriod"], c["stMultiplier"], c["maxPendingBars"], c["signalCandleType"], c["slType"], c["tpType"], c["pyramiding"])
             if key not in seen:
                 seen.add(key)
                 item = {k: v for k, v in c.items() if k != "score"}
@@ -1162,7 +1262,8 @@ def optimize_bollinger_supertrend(
             "maxPendingBars": current_max_pending_bars,
             "signalCandleType": current_signal_candle_type,
             "slType": current_sl_type,
-            "tpType": current_tp_type
+            "tpType": current_tp_type,
+            "pyramiding": current_pyramiding
         }
 
     # Chạy lại với best combo để lấy full kết quả trades và signals
@@ -1177,7 +1278,8 @@ def optimize_bollinger_supertrend(
         max_pending_bars=best_combo["maxPendingBars"],
         signal_candle_type=best_combo["signalCandleType"],
         sl_type=best_combo["slType"],
-        tp_type=best_combo["tpType"]
+        tp_type=best_combo["tpType"],
+        pyramiding=best_combo.get("pyramiding", 1)
     )
     final_summary = calculate_performance_summary(final_res.get("trades", []))
 
@@ -1242,10 +1344,11 @@ def main():
     parser.add_argument("--st-period", type=int, default=DEFAULT_ST_PERIOD, help="Chu kỳ Supertrend (mặc định: 10)")
     parser.add_argument("--st-multiplier", type=float, default=DEFAULT_ST_MULTIPLIER, help="Hệ số Supertrend ATR Multiplier (mặc định: 3.0)")
 
-    # Tùy chọn Signal Candle, Stop Loss & Take Profit
-    parser.add_argument("--signal-candle-type", type=str, default="upper_band", help="Loại nến Signal (upper_band: Close > Upper, Open < Upper | lower_band: Close > Lower, Open < Lower)")
-    parser.add_argument("--sl-type", type=str, default="touch_lower_band", help="Phương pháp Stop Loss (close_below_ma, touch_lower_band, signal_candle_low, entry_candle_low)")
-    parser.add_argument("--tp-type", type=str, default="rr_2", help="Phương pháp Take Profit (rr_2, rr_3, rr_5, close_upper_band)")
+    # Tùy chọn Signal Candle, Stop Loss, Take Profit & Pyramiding
+    parser.add_argument("--signal-candle-type", type=str, default="upper_band", help="Loại nến Signal (both: Cả 2 | upper_band: Close > Upper, Open < Upper | lower_band: Close > Lower, Open < Lower)")
+    parser.add_argument("--sl-type", type=str, default="touch_lower_band", help="Phương pháp Stop Loss (break_supertrend, close_below_ma, touch_lower_band, signal_candle_low, entry_candle_low)")
+    parser.add_argument("--tp-type", type=str, default="rr_2", help="Phương pháp Take Profit (rr_1, rr_1_5, rr_2, rr_3, rr_5, close_upper_band, next_candle_1, next_candle_2)")
+    parser.add_argument("--pyramiding", type=int, default=1, help="Số lượng lệnh vào tối đa đồng thời (Pyramiding)")
 
     # Tùy chọn vị thế
     parser.add_argument("--allow-long", dest="allow_long", action="store_true", default=True, help="Cho phép lệnh Long")
@@ -1285,6 +1388,7 @@ def main():
             current_signal_candle_type=args.signal_candle_type,
             current_sl_type=args.sl_type,
             current_tp_type=args.tp_type,
+            current_pyramiding=args.pyramiding,
             opt_config=opt_cfg
         )
     else:
@@ -1301,6 +1405,7 @@ def main():
             signal_candle_type=args.signal_candle_type,
             sl_type=args.sl_type,
             tp_type=args.tp_type,
+            pyramiding=args.pyramiding,
             timeframe=args.timeframe
         )
 
@@ -1319,7 +1424,7 @@ def main():
             print("=" * 75)
             print(f" KẾT QUẢ TỐI ƯU HÓA: BOLLINGER BAND + SUPERTREND BREAKOUT")
             print(f" Mã: {result.get('ticker')} | Timeframe: {result.get('timeframe')} | Số nến: {result.get('totalCandles')}")
-            print(f" Tham số tốt nhất: BB({bp.get('bbPeriod')}, {bp.get('bbStd')}) | ST({bp.get('stPeriod')}, {bp.get('stMultiplier')}) | SL: {bp.get('slType')} | TP: {bp.get('tpType')}")
+            print(f" Tham số tốt nhất: BB({bp.get('bbPeriod')}, {bp.get('bbStd')}) | ST({bp.get('stPeriod')}, {bp.get('stMultiplier')}) | SL: {bp.get('slType')} | TP: {bp.get('tpType')} | Pyramiding: {bp.get('pyramiding', 1)}")
             print("=" * 75)
             print(f"  • Tỷ lệ Thắng (WinRate): {summary.get('winRate')}% ({summary.get('closedTrades')} lệnh)")
             print(f"  • Profit Factor        : {summary.get('profitFactor')}")
@@ -1329,7 +1434,7 @@ def main():
         else:
             print("=" * 75)
             print(f" CHIẾN LƯỢC: BOLLINGER BAND ({args.bb_period}, {args.bb_std}) + SUPERTREND ({args.st_period}, {args.st_multiplier}) BREAKOUT")
-            print(f" Mã: {result.get('ticker')} | Timeframe: {result.get('timeframe')} | SL: {args.sl_type} | TP: {args.tp_type}")
+            print(f" Mã: {result.get('ticker')} | Timeframe: {result.get('timeframe')} | SL: {args.sl_type} | TP: {args.tp_type} | Pyramiding: {args.pyramiding}")
             print("=" * 75)
             print(f"  • Tổng số lệnh       : {summary.get('totalTrades')} (Đã đóng: {summary.get('closedTrades')}, Đang mở: {summary.get('openTrades')})")
             print(f"  • Lệnh Thắng / Thua  : {summary.get('winTrades')} Thắng / {summary.get('lossTrades')} Thua")
