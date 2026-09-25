@@ -2,28 +2,43 @@
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TCBS_TOKEN_SYNC') {
     const rawData = message.payload;
+    const bodyStr = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
 
-    fetch('http://localhost:1337/api/tcbs-strategies/update-token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: typeof rawData === 'string' ? rawData : JSON.stringify(rawData),
-    })
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          sendResponse({ success: true, data });
-        } else {
-          const err = await res.text();
-          sendResponse({ success: false, error: err });
+    const endpoints = [
+      'http://localhost:1337/api/tcbs-strategies/update-token',
+      'http://127.0.0.1:1337/api/tcbs-strategies/update-token',
+    ];
+
+    async function trySend() {
+      let lastErr = null;
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: bodyStr,
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            sendResponse({ success: true, data });
+            return;
+          } else {
+            const errText = await res.text();
+            lastErr = new Error(`Server returned ${res.status}: ${errText}`);
+          }
+        } catch (err) {
+          lastErr = err;
         }
-      })
-      .catch((err) => {
-        console.warn('[TCBS Sync Extension] Failed to send token to localhost:', err);
-        sendResponse({ success: false, error: err.message });
-      });
+      }
 
-    return true; // Keep channel open for async response
+      console.warn('[TCBS Sync Extension] Failed to send token to Strapi:', lastErr?.message || lastErr);
+      sendResponse({ success: false, error: lastErr?.message || String(lastErr) });
+    }
+
+    trySend();
+    return true; // Keep message channel open for async response
   }
 });

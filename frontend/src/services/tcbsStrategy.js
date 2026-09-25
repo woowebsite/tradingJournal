@@ -111,3 +111,13 @@ export const getBacktestConclusion = async (ticker = 'All') => {
     });
     return response.data;
 };
+
+export const getTcbsTokenStatus = async () => {
+    try {
+        const response = await api.get('/tcbs-strategies/token-status');
+        return response.data || { hasToken: false };
+    } catch {
+        return { hasToken: false };
+    }
+};
+

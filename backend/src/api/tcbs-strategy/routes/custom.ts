@@ -44,5 +44,13 @@ export default {
         auth: false,
       },
     },
+    {
+      method: 'GET',
+      path: '/tcbs-strategies/token-status',
+      handler: 'tcbs-strategy.getTokenStatus',
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

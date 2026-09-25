@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { factories } from '@strapi/strapi';
-import { fetchTcbs } from '../../../utils/tcbs-client';
+import { fetchTcbs, getEffectiveTcbsToken, setCachedTcbsToken } from '../../../utils/tcbs-client';
 
 const DEFAULT_STRATEGY_KEY = 'price_volume_increase';
 const DEFAULT_STRATEGY_NAME = 'Bùng nổ khối lượng';
@@ -50,6 +50,21 @@ function normalizeInvestorDate(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
 }
 
+function updateEnvFile(filePath: string, varName: string, value: string) {
+  try {
+    let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
+    const regex = new RegExp(`^${varName}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${value}`);
+    } else {
+      content = content.trim() + (content.trim() ? '\n' : '') + `${varName}=${value}\n`;
+    }
+    fs.writeFileSync(filePath, content, 'utf8');
+  } catch {
+    // Ignore individual write errors
+  }
+}
+
 export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy' as any, ({ strapi }) => ({
   async tcbsData(ctx) {
     const resource = String(ctx.params.resource || '');
@@ -80,7 +95,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     const params = Object.fromEntries(allowedParams[resource]
       .filter(key => ctx.query[key] !== undefined)
       .map(key => [key, String(ctx.query[key])]));
-    const token = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
+    const token = getEffectiveTcbsToken(ctx.get('x-tcbs-token'));
 
     try {
       ctx.body = await fetchTcbs(
@@ -121,7 +136,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       });
     }
 
-    const tcbsToken = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
+    const tcbsToken = getEffectiveTcbsToken(ctx.get('x-tcbs-token'));
     const response = await fetchTcbs(
       '/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-signal',
       {
@@ -206,7 +221,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     const documents = (strapi as any).documents;
     const detailUid = 'api::tcbs-strategy-detail.tcbs-strategy-detail';
 
-    const tcbsToken = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
+    const tcbsToken = getEffectiveTcbsToken(ctx.get('x-tcbs-token'));
     const response = await fetchTcbs(
       '/tcbs-asset-allocation/v1/backtestv2/recomm/strategy-detail',
       {
@@ -280,7 +295,7 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
       ? { documentId: symbol.documentId }
       : { id: symbol.id };
 
-    const token = process.env.TCBS_TOKEN || process.env.VITE_TCBS_TOKEN || ctx.get('x-tcbs-token');
+    const token = getEffectiveTcbsToken(ctx.get('x-tcbs-token'));
     const investorPath = /^[A-Z]+$/.test(ticker)
       ? `/stock-insight/v1/intraday/${encodeURIComponent(ticker)}/investor`
       : `/futures-insight/v1/intraday/${encodeURIComponent(ticker)}/investor`;
@@ -361,6 +376,33 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     };
   },
 
+  async getTokenStatus(ctx) {
+    const token = getEffectiveTcbsToken();
+    let cookieData: any = {};
+    const candidateCookiePaths = [
+      path.join(process.cwd(), 'tcbs-cookie.json'),
+      path.resolve(process.cwd(), '../frontend/tcbs-cookie.json'),
+    ];
+
+    for (const cPath of candidateCookiePaths) {
+      try {
+        if (fs.existsSync(cPath)) {
+          cookieData = JSON.parse(fs.readFileSync(cPath, 'utf8'));
+          break;
+        }
+      } catch {}
+    }
+
+    ctx.body = {
+      success: true,
+      hasToken: Boolean(token && token.length > 20),
+      tokenPrefix: token ? `${token.substring(0, 10)}...${token.substring(token.length - 6)}` : null,
+      fullName: cookieData.fullName || undefined,
+      custodyId: cookieData.custodyId || undefined,
+      accountNo: cookieData.accountNo || undefined,
+    };
+  },
+
   async updateToken(ctx) {
     try {
       let rawData = ctx.request.body;
@@ -395,68 +437,66 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
 
       const backendRoot = process.cwd();
       const frontendRoot = path.resolve(backendRoot, '../frontend');
-      const cookiePath = path.join(frontendRoot, 'tcbs-cookie.json');
+      const backendCookiePath = path.join(backendRoot, 'tcbs-cookie.json');
+      const frontendCookiePath = path.join(frontendRoot, 'tcbs-cookie.json');
 
-      // 1. Write/Update tcbs-cookie.json
+      const jsonString = JSON.stringify(cookieObject, null, 2);
+
+      // 1. Write/Update tcbs-cookie.json in both backend and frontend
       try {
-        fs.writeFileSync(cookiePath, JSON.stringify(cookieObject, null, 2), 'utf8');
+        fs.writeFileSync(backendCookiePath, jsonString, 'utf8');
       } catch (err: any) {
-        strapi.log.warn(`Could not write tcbs-cookie.json: ${err.message}`);
+        strapi.log.warn(`Could not write backend tcbs-cookie.json: ${err.message}`);
       }
 
-      // 2. Update frontend .env files
+      try {
+        if (fs.existsSync(frontendRoot)) {
+          fs.writeFileSync(frontendCookiePath, jsonString, 'utf8');
+        }
+      } catch (err: any) {
+        strapi.log.warn(`Could not write frontend tcbs-cookie.json: ${err.message}`);
+      }
+
+      // 2. Update all backend .env files (.env, .env.prod, .env.dev, .env.local)
+      const backendEnvNames = ['.env', '.env.prod', '.env.dev', '.env.local'];
+      for (const envName of backendEnvNames) {
+        const envPath = path.join(backendRoot, envName);
+        if (fs.existsSync(envPath) || envName === '.env' || envName === '.env.prod') {
+          updateEnvFile(envPath, 'TCBS_TOKEN', authToken);
+          updateEnvFile(envPath, 'VITE_TCBS_TOKEN', authToken);
+        }
+      }
+
+      // 3. Update all frontend .env files (.env, .env.prod, .env.dev, .env.local)
       if (fs.existsSync(frontendRoot)) {
-        try {
-          const files = fs.readdirSync(frontendRoot);
-          const envFiles = files.filter(file => file === '.env' || (file.startsWith('.env.') && !file.endsWith('.example')));
-          
-          if (envFiles.length === 0) {
-            const defaultEnvPath = path.join(frontendRoot, '.env');
-            fs.writeFileSync(defaultEnvPath, `VITE_TCBS_TOKEN=${authToken}\n`, 'utf8');
-          } else {
-            for (const file of envFiles) {
-              const filePath = path.join(frontendRoot, file);
-              let envContent = fs.readFileSync(filePath, 'utf8');
-              const tokenRegex = /^VITE_TCBS_TOKEN=.*$/m;
-              if (tokenRegex.test(envContent)) {
-                envContent = envContent.replace(tokenRegex, `VITE_TCBS_TOKEN=${authToken}`);
-              } else {
-                envContent = envContent.trim() + `\nVITE_TCBS_TOKEN=${authToken}\n`;
-              }
-              fs.writeFileSync(filePath, envContent, 'utf8');
-            }
+        const frontendEnvNames = ['.env', '.env.prod', '.env.dev', '.env.local'];
+        for (const envName of frontendEnvNames) {
+          const envPath = path.join(frontendRoot, envName);
+          if (fs.existsSync(envPath) || envName === '.env' || envName === '.env.prod') {
+            updateEnvFile(envPath, 'VITE_TCBS_TOKEN', authToken);
+            updateEnvFile(envPath, 'TCBS_TOKEN', authToken);
           }
-        } catch (err: any) {
-          strapi.log.warn(`Could not update frontend .env: ${err.message}`);
         }
       }
 
-      // 3. Update backend/.env
-      const backendEnvPath = path.join(backendRoot, '.env');
-      if (fs.existsSync(backendEnvPath)) {
-        try {
-          let backendEnvContent = fs.readFileSync(backendEnvPath, 'utf8');
-          const backendTokenRegex = /^TCBS_TOKEN=.*$/m;
-          if (backendTokenRegex.test(backendEnvContent)) {
-            backendEnvContent = backendEnvContent.replace(backendTokenRegex, `TCBS_TOKEN=${authToken}`);
-          } else {
-            backendEnvContent = backendEnvContent.trim() + `\nTCBS_TOKEN=${authToken}\n`;
-          }
-          fs.writeFileSync(backendEnvPath, backendEnvContent, 'utf8');
-        } catch (err: any) {
-          strapi.log.warn(`Could not update backend .env: ${err.message}`);
-        }
+      // 4. Update runtime environment variables in Node.js process and cache
+      setCachedTcbsToken(authToken);
+
+      // 5. Broadcast realtime event via Socket.IO to connected browser tabs
+      if ((strapi as any).io) {
+        (strapi as any).io.emit('tcbs:token-updated', {
+          authToken,
+          fullName: cookieObject.fullName,
+          custodyId: cookieObject.custodyId,
+          updatedAt: new Date().toISOString(),
+        });
       }
 
-      // 4. Update runtime environment variables in Node.js process
-      process.env.TCBS_TOKEN = authToken;
-      process.env.VITE_TCBS_TOKEN = authToken;
-
-      strapi.log.info(`[tcbs-strategy] TCBS Token updated successfully`);
+      strapi.log.info(`[tcbs-strategy] TCBS Token updated and synced across all backend/frontend envs & clients`);
 
       ctx.body = {
         success: true,
-        message: 'Đã đồng bộ Token TCBS thành công!',
+        message: 'Đã đồng bộ Token TCBS thành công sang toàn bộ hệ thống!',
         authTokenPrefix: authToken.substring(0, 15) + '...',
         fullName: cookieObject.fullName || undefined,
         custodyId: cookieObject.custodyId || undefined,
@@ -468,4 +508,5 @@ export default factories.createCoreController('api::tcbs-strategy.tcbs-strategy'
     }
   }
 }));
+
 

@@ -1,0 +1,47 @@
+{
+  "authToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhdXRoZW5fc2VydmljZSIsImV4cCI6MTc5MDI1OTU0NiwianRpIjoiIiwiaWF0IjoxNzkwMjE2MzQ2LCJzdWIiOiIxMDAwMDEyMjAxMSIsImN1c3RvZHlJRCI6IjEwNUMwNzg2NDQiLCJ0Y2JzSWQiOiIxMDAwMDEyMjAxMSIsImVtYWlsIjoiY2hpZXVkb25nNDcxMkBnbWFpbC5jb20iLCJyb2xlcyI6WyJjdXN0b21lciIsIkFwcGxpY2F0aW9uL09QRU5fQVBJX1BJTE9UIl0sInNjb3BlcyI6WyJhbGw6YWxsIiwic29ja2V0OmFsbCJdLCJzdGVwdXBfZXhwIjoxNzkwMjQ1NzEzLCJzb3RwX3NpZ24iOiIiLCJjbGllbnRfa2V5IjoiNHRtY2hZdWxNc1lvRk1GcER5c3FmY0RiVThWdktpc2ciLCJzZXNzaW9uSUQiOiI4YzFjNTc2MC0xYWUyLTQxYmUtOTliNy03Njk0YmIwZWM4MDMiLCJhY2NvdW50X3N0YXR1cyI6IjEiLCJvdHAiOiI2NzMxODYiLCJvdHBUeXBlIjoiVE9UUCIsIm90cFNvdXJjZSI6IlRDSU5WRVNUIiwib3RwU2Vzc2lvbklkIjoiYWJlMjhkZDYtYzBmMi00NWJmLTg5NDctZTE0ZTY2MWY2NDUxIiwiYWNjb3VudFR5cGUiOiJQUklNQVJZIiwicHJpbWFyeVN1YiI6IiIsInByaW1hcnlDdXN0b2R5SUQiOiIiLCJlbm90cF9zaWduIjoiIiwic3FhX3NpZ24iOiIiLCJlbl9vdHAiOiIiLCJlbk9UUFR5cGUiOiIiLCJjYVN0YXR1cyI6IklHTk9SRSIsImN1c1R5cGUiOiJJTkRJVklEVUFMIiwidGVuYW50IjoidGNicyIsImNoYW5uZWwiOiIiLCJ0Y2JzUm9sZXMiOm51bGx9.-WfR6nbUE9AdhHucQIGcoVxvke5XILHiF4n706AR73hrHtiU9UUFnmk9zuK9HyRljE21mIUq0XoKJ7jcQpPJ5j7DyqNLQb5qI92CF0dO6-ZuUhzDuDiLYQgdZrxUJR6_4CM1YQkwdpuNbGOemDWWHZJ1Qss1nkb1qndM0NQYkrurwAP_EMWAUE8APedccwgp7_ruZS2aSba0RZYqwatQaKFFVsDnENEzQ2jNqVHtu5A8HogNYcW4MQgEqHdateACx1HeLpj3M4HUE4XdD4tZ7dCi7jNdU6bDTUX04vjBvnvT2LjQcBhuqp5c-Z6TI3zEbdsYey2ECyDJXXesaGOPkA",
+  "fullName": "Trần Nam Nghiệm",
+  "TCBSId": "10000122011",
+  "custodyId": "105C078644",
+  "email": "chieudong4712@gmail.com",
+  "channel": "TCBS",
+  "roles": [
+    "customer",
+    "Application/OPEN_API_PILOT"
+  ],
+  "cusType": "INDIVIDUAL",
+  "client_key": "4tmchYulMsYoFMFpDysqfcDbU8VvKisg",
+  "lifeTime": 1790261329238,
+  "derivativeStatus": "ACTIVE",
+  "derivativeAccount": {
+    "accountNo": "105C078644A",
+    "accountName": "Trần Nam Nghiệm",
+    "bankCode": "105C078644A",
+    "accountType": "DERIVATIVE",
+    "accountTypeName": "Phái sinh",
+    "status": "1",
+    "isDefault": "N"
+  },
+  "bankAccounts": [
+    {
+      "bankAccountId": 8994371,
+      "accountNo": "19031720241017",
+      "accountName": "Trần Nam Nghiệm",
+      "accountNameNoAccent": "Tran Nam Nghiem",
+      "bankCode": "01310001",
+      "bankName": "Ngân hàng TMCP Kỹ Thương Việt Nam",
+      "bankProvince": "HA-NOI",
+      "branchCode": "NH TMCP KY THUONG VN HOI SO CHINH",
+      "bankType": "CENTRALIZED_PAYMENT",
+      "bankSys": "310",
+      "bankAccountType": "STOCK_FUND",
+      "authorized": null,
+      "rootBankProvince": null,
+      "rootBranchCode": null,
+      "rootBankCode": "01310001",
+      "rootBankName": "NH TMCP KY THUONG VN",
+      "insType": "LOCAL",
+      "isVirtualAccount": 0
+    }
+  ]
+}

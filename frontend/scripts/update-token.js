@@ -7,71 +7,72 @@ const __dirname = path.dirname(__filename);
 
 // Paths relative to this script in frontend/scripts/
 const frontendRoot = path.join(__dirname, '..');
+const backendRoot = path.join(frontendRoot, '../backend');
 const cookiePath = path.join(frontendRoot, 'tcbs-cookie.json');
+const backendCookiePath = path.join(backendRoot, 'tcbs-cookie.json');
+
+function updateEnvFile(filePath, varName, value) {
+  try {
+    let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
+    const regex = new RegExp(`^${varName}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${value}`);
+    } else {
+      content = content.trim() + (content.trim() ? '\n' : '') + `${varName}=${value}\n`;
+    }
+    fs.writeFileSync(filePath, content, 'utf8');
+    console.log(`\x1b[32mUpdated ${varName} in ${path.basename(filePath)}\x1b[0m`);
+  } catch (err) {
+    console.warn(`\x1b[33mWarning: Could not update ${filePath}: ${err.message}\x1b[0m`);
+  }
+}
 
 try {
   // 1. Verify and read tcbs-cookie.json
-  if (!fs.existsSync(cookiePath)) {
-    console.error(`\x1b[31mError: File not found at ${cookiePath}\x1b[0m`);
+  let cookieData = null;
+  if (fs.existsSync(cookiePath)) {
+    cookieData = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
+  } else if (fs.existsSync(backendCookiePath)) {
+    cookieData = JSON.parse(fs.readFileSync(backendCookiePath, 'utf8'));
+  }
+
+  if (!cookieData) {
+    console.error(`\x1b[31mError: File tcbs-cookie.json not found in frontend or backend.\x1b[0m`);
     process.exit(1);
   }
 
-  const cookieData = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
-  const authToken = cookieData.authToken;
+  const authToken = cookieData.authToken || cookieData.token || cookieData.accessToken || cookieData.jwt;
 
   if (!authToken) {
     console.error("\x1b[31mError: field 'authToken' not found in tcbs-cookie.json\x1b[0m");
     process.exit(1);
   }
 
-  // 2. Find all .env files in frontend root
-  const files = fs.readdirSync(frontendRoot);
-  const envFiles = files.filter(file => file === '.env' || (file.startsWith('.env.') && !file.endsWith('.example')));
+  // Sync cookie JSON to both directories
+  fs.writeFileSync(cookiePath, JSON.stringify(cookieData, null, 2), 'utf8');
+  fs.writeFileSync(backendCookiePath, JSON.stringify(cookieData, null, 2), 'utf8');
 
-  if (envFiles.length === 0) {
-    // If no .env files exist, create a default .env
-    const defaultEnvPath = path.join(frontendRoot, '.env');
-    fs.writeFileSync(defaultEnvPath, `VITE_TCBS_TOKEN=${authToken}\n`, 'utf8');
-    console.log(`\x1b[32mCreated new .env file and set VITE_TCBS_TOKEN.\x1b[0m`);
-  } else {
-    // Update all matching .env files
-    for (const file of envFiles) {
-      const filePath = path.join(frontendRoot, file);
-      let envContent = fs.readFileSync(filePath, 'utf8');
-      const tokenRegex = /^VITE_TCBS_TOKEN=.*$/m;
-
-      if (tokenRegex.test(envContent)) {
-        envContent = envContent.replace(tokenRegex, `VITE_TCBS_TOKEN=${authToken}`);
-      } else {
-        // If the file doesn't have VITE_TCBS_TOKEN, append it
-        envContent = envContent.trim() + `\nVITE_TCBS_TOKEN=${authToken}\n`;
-      }
-
-      fs.writeFileSync(filePath, envContent, 'utf8');
-      console.log(`\x1b[32mSuccessfully updated VITE_TCBS_TOKEN in ${file}\x1b[0m`);
+  // 2. Update frontend .env files
+  const frontendEnvNames = ['.env', '.env.prod', '.env.dev', '.env.local'];
+  for (const envName of frontendEnvNames) {
+    const envPath = path.join(frontendRoot, envName);
+    if (fs.existsSync(envPath) || envName === '.env' || envName === '.env.prod') {
+      updateEnvFile(envPath, 'VITE_TCBS_TOKEN', authToken);
+      updateEnvFile(envPath, 'TCBS_TOKEN', authToken);
     }
   }
 
-  // 3. Update TCBS_TOKEN in backend/.env
-  const backendRoot = path.join(frontendRoot, '../backend');
-  const backendEnvPath = path.join(backendRoot, '.env');
-
-  if (fs.existsSync(backendEnvPath)) {
-    let backendEnvContent = fs.readFileSync(backendEnvPath, 'utf8');
-    const backendTokenRegex = /^TCBS_TOKEN=.*$/m;
-
-    if (backendTokenRegex.test(backendEnvContent)) {
-      backendEnvContent = backendEnvContent.replace(backendTokenRegex, `TCBS_TOKEN=${authToken}`);
-    } else {
-      // If the file doesn't have TCBS_TOKEN, append it
-      backendEnvContent = backendEnvContent.trim() + `\nTCBS_TOKEN=${authToken}\n`;
+  // 3. Update backend .env files
+  const backendEnvNames = ['.env', '.env.prod', '.env.dev', '.env.local'];
+  for (const envName of backendEnvNames) {
+    const envPath = path.join(backendRoot, envName);
+    if (fs.existsSync(envPath) || envName === '.env' || envName === '.env.prod') {
+      updateEnvFile(envPath, 'TCBS_TOKEN', authToken);
+      updateEnvFile(envPath, 'VITE_TCBS_TOKEN', authToken);
     }
-
-    fs.writeFileSync(backendEnvPath, backendEnvContent, 'utf8');
-    console.log(`\x1b[32mSuccessfully updated TCBS_TOKEN in backend/.env\x1b[0m`);
-  } else {
-    console.warn(`\x1b[33mWarning: backend/.env file not found at ${backendEnvPath}\x1b[0m`);
   }
+
+  console.log(`\x1b[32m✅ Successfully synchronized TCBS token across all environments!\x1b[0m`);
 } catch (error) {
   console.error("\x1b[31mAn error occurred while updating the token:\x1b[0m", error.message);
   process.exit(1);
