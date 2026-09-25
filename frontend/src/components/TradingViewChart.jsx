@@ -38,6 +38,8 @@ const TradingViewChart = ({
     const chartRef = useRef(null);
     const candlestickSeriesRef = useRef(null);
     const volumeSeriesRef = useRef(null);
+    const markersPluginRef = useRef(null);
+    const sortedDataRef = useRef([]);
     const savedLogicalRangeMapRef = useRef({});
     const [hoverTooltip, setHoverTooltip] = useState(null);
     const [wfaBoxCoords, setWfaBoxCoords] = useState(null);
@@ -276,6 +278,9 @@ const TradingViewChart = ({
         return map;
     }, [signals, data, findMatchingCandleTime, getTimeKey, strategyRuleLookup]);
 
+    const signalsByDateRef = useRef(signalsByDate);
+    signalsByDateRef.current = signalsByDate;
+
     useEffect(() => {
         if (!data || data.length === 0) return;
 
@@ -296,6 +301,8 @@ const TradingViewChart = ({
                 }
                 return unique;
             }, []);
+
+        sortedDataRef.current = sortedData;
 
         // Format data for lightweight-charts
         const candleData = sortedData.map(item => ({
@@ -442,67 +449,9 @@ const TradingViewChart = ({
             minimumWidth: 80,
         });
 
-        // Markers (Signals and an optional externally-selected candle)
-        if ((signals && signals.length > 0) || focusDate) {
-            const rawMarkers = (signals || []).map(sig => {
-                const matchedTime = findMatchingCandleTime(sig, sortedData);
-                if (!matchedTime) return null;
-
-                const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
-                const ruleId = String(getRuleId(rule));
-                const rawType = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'entry';
-                const posType = sig.posType || sig.pos_type || rule.posType || (String(sig.type || '').includes('short') ? 'Short' : 'Long');
-
-                const cfg = getSignalMarkerConfig({
-                    type: rawType,
-                    posType,
-                    action: sig.action
-                });
-
-                const color = sig.color || cfg.color;
-                const shape = sig.shape && ['arrowUp', 'arrowDown', 'circle', 'square'].includes(sig.shape) ? sig.shape : cfg.shape;
-                const position = sig.position && ['aboveBar', 'belowBar', 'inBar'].includes(sig.position) ? sig.position : cfg.position;
-                const text = sig.text !== undefined && sig.text !== '' ? sig.text : cfg.shortLabel;
-
-                return {
-                    time: matchedTime,
-                    position,
-                    color,
-                    shape,
-                    text, // On chart: ONLY "Long", "Short", "TP", "SL", "Exit"
-                    size: 1
-                };
-            }).filter(Boolean);
-
-            // Deduplicate markers on same candle and position with identical text & shape to avoid stacked duplicate markers
-            const markerMap = new Map();
-            rawMarkers.forEach(m => {
-                const key = `${m.time}_${m.position}_${m.text}_${m.shape}_${m.color}`;
-                if (!markerMap.has(key)) {
-                    markerMap.set(key, m);
-                }
-            });
-            const markers = Array.from(markerMap.values());
-
-            const focusKey = focusDate ? getTimeKey({ date: focusDate, time: focusDate }) : null;
-            if (focusKey && sortedData.some(candle => candle._timeKey === focusKey)) {
-                markers.push({
-                    time: focusKey,
-                    position: 'belowBar',
-                    color: '#fbbf24',
-                    shape: 'arrowUp',
-                    text: 'Pattern',
-                    size: 1.5,
-                });
-            }
-
-            markers.sort((a, b) => {
-                if (typeof a.time === 'number' && typeof b.time === 'number') {
-                    return a.time - b.time;
-                }
-                return String(a.time).localeCompare(String(b.time));
-            });
-            createSeriesMarkers(candlestickSeries, markers);
+        // Initialize Series Markers Plugin
+        if (!markersPluginRef.current) {
+            markersPluginRef.current = createSeriesMarkers(candlestickSeries, []);
         }
 
         // Sync TimeScale & Zoom Range
@@ -682,7 +631,7 @@ const TradingViewChart = ({
                     isSyncingCrosshair = false;
                 }
 
-                const activeSignals = signalsByDate.get(param.time);
+                const activeSignals = signalsByDateRef.current ? signalsByDateRef.current.get(param.time) : null;
                 if (activeSignals && activeSignals.length > 0) {
                     let dateDisplay = String(param.time);
                     if (typeof param.time === 'number') {
@@ -767,12 +716,92 @@ const TradingViewChart = ({
             if (chartContainer) {
                 chartContainer.removeEventListener('mouseleave', handleMouseLeave);
             }
+            if (markersPluginRef.current) {
+                try {
+                    markersPluginRef.current.detach();
+                } catch (e) { }
+                markersPluginRef.current = null;
+            }
             candlestickSeriesRef.current = null;
             volumeSeriesRef.current = null;
             chart.remove();
             volumeChart.remove();
         };
-    }, [data, symbol, signals, strategyRuleLookup, signalsByDate, template, vwapAnchor, disableScrollZoom, disableChartMove, focusDate, timeframe, supertrendPeriod, supertrendMultiplier, maPeriod, getTimeKey]);
+    }, [data, symbol, strategyRuleLookup, template, vwapAnchor, disableScrollZoom, disableChartMove, timeframe, supertrendPeriod, supertrendMultiplier, maPeriod, getTimeKey]);
+
+    // Smooth Marker Updates: Update markers without destroying/recreating the chart canvas
+    useEffect(() => {
+        if (!candlestickSeriesRef.current) return;
+        if (!markersPluginRef.current) {
+            markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, []);
+        }
+
+        const sortedData = sortedDataRef.current || [];
+        const rawMarkers = (signals || []).map(sig => {
+            const matchedTime = findMatchingCandleTime(sig, sortedData);
+            if (!matchedTime) return null;
+
+            const rule = sig.rules && sig.rules.length > 0 ? sig.rules[0] : (sig.rule || { Name: 'Signal' });
+            const ruleId = String(getRuleId(rule));
+            const rawType = strategyRuleLookup.get(ruleId) || rule.Type || rule.type || sig.type || 'entry';
+            const posType = sig.posType || sig.pos_type || rule.posType || (String(sig.type || '').includes('short') ? 'Short' : 'Long');
+
+            const cfg = getSignalMarkerConfig({
+                type: rawType,
+                posType,
+                action: sig.action
+            });
+
+            const color = sig.color || cfg.color;
+            const shape = sig.shape && ['arrowUp', 'arrowDown', 'circle', 'square'].includes(sig.shape) ? sig.shape : cfg.shape;
+            const position = sig.position && ['aboveBar', 'belowBar', 'inBar'].includes(sig.position) ? sig.position : cfg.position;
+            const text = sig.text !== undefined && sig.text !== '' ? sig.text : cfg.shortLabel;
+
+            return {
+                time: matchedTime,
+                position,
+                color,
+                shape,
+                text, // On chart: ONLY "Long", "Short", "TP", "SL", "Exit"
+                size: 1
+            };
+        }).filter(Boolean);
+
+        // Deduplicate markers on same candle and position with identical text & shape to avoid stacked duplicate markers
+        const markerMap = new Map();
+        rawMarkers.forEach(m => {
+            const key = `${m.time}_${m.position}_${m.text}_${m.shape}_${m.color}`;
+            if (!markerMap.has(key)) {
+                markerMap.set(key, m);
+            }
+        });
+        const markers = Array.from(markerMap.values());
+
+        const focusKey = focusDate ? getTimeKey({ date: focusDate, time: focusDate }) : null;
+        if (focusKey && sortedData.some(candle => candle._timeKey === focusKey)) {
+            markers.push({
+                time: focusKey,
+                position: 'belowBar',
+                color: '#fbbf24',
+                shape: 'arrowUp',
+                text: 'Pattern',
+                size: 1.5,
+            });
+        }
+
+        markers.sort((a, b) => {
+            if (typeof a.time === 'number' && typeof b.time === 'number') {
+                return a.time - b.time;
+            }
+            return String(a.time).localeCompare(String(b.time));
+        });
+
+        try {
+            markersPluginRef.current.setMarkers(markers);
+        } catch (e) {
+            console.warn('Could not update markers:', e);
+        }
+    }, [signals, focusDate, strategyRuleLookup, findMatchingCandleTime, getTimeKey]);
 
     // Live Realtime Kline Update Effect
     useEffect(() => {

@@ -48,6 +48,7 @@ const normalizeField = (fieldValue) => (
 const getInitialForm = (value = {}, defaultRisk = 0) => {
   const source = value || {};
   return {
+    entryType: source.entryType || (source.type ? String(source.type) : 'Long'),
     price: normalizeField(source.price),
     volume: normalizeField(source.volume),
     riskAmount: normalizeField(source.riskAmount) || (defaultRisk > 0 ? String(Number(defaultRisk.toFixed(2))) : ''),
@@ -57,6 +58,7 @@ const getInitialForm = (value = {}, defaultRisk = 0) => {
 };
 
 const isSameForm = (left, right) => (
+  left?.entryType === right?.entryType &&
   left?.price === right?.price &&
   left?.volume === right?.volume &&
   left?.riskAmount === right?.riskAmount &&
@@ -160,6 +162,7 @@ const TradeStationOrderForm = ({
       prevValueRef.current = value;
       setForm(prev => {
         const next = {
+          entryType: value?.entryType || (value?.type ? String(value.type) : (prev.entryType || 'Long')),
           price: value?.price !== undefined && value?.price !== '' ? String(value.price) : prev.price,
           slPrice: value?.slPrice !== undefined && value?.slPrice !== '' ? String(value.slPrice) : prev.slPrice,
           tpPrice: value?.tpPrice !== undefined && value?.tpPrice !== '' ? String(value.tpPrice) : prev.tpPrice,
@@ -215,6 +218,8 @@ const TradeStationOrderForm = ({
     });
   }, [riskAmount]);
 
+  const entryType = form.entryType || 'Long';
+  const isLong = entryType === 'Long';
   const manualRiskAmount = toFiniteNumber(form.riskAmount, 0);
   const effectiveRiskAmount = manualRiskAmount > 0 ? manualRiskAmount : riskAmount;
   const riskPercent = toFiniteNumber(selectedAccount?.setting?.riskPerTrade, 0);
@@ -238,13 +243,12 @@ const TradeStationOrderForm = ({
     volume > 0
   ), [disabled, entryPrice, saving, selectedAccount, selectedSymbol, volume]);
 
-  const computeSlPrice = useCallback((type, currentPrice, currentSlPrice) => {
+  const computeSlPrice = useCallback((type, currentPrice, currentSlPrice, currentEntryType = entryType) => {
     if (!type || type === 'manual') return null;
     const curP = toFiniteNumber(currentPrice, 0) || Number(livePrice || 0);
     if (curP <= 0) return null;
 
-    const existingSl = toFiniteNumber(currentSlPrice, 0);
-    const isLong = existingSl > 0 ? curP >= existingSl : true;
+    const isDirectionLong = currentEntryType === 'Long';
 
     const last = liveCandle || (sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1] : null);
     const prev = liveCandle
@@ -255,51 +259,102 @@ const TradeStationOrderForm = ({
     if (type === 'current_bar' && last) {
       const low = Number(last.low ?? last.Low ?? curP);
       const high = Number(last.high ?? last.High ?? curP);
-      slVal = isLong ? low : high;
+      slVal = isDirectionLong ? low : high;
     } else if (type === 'prev_bar' && prev) {
       const low = Number(prev.low ?? prev.Low ?? curP);
       const high = Number(prev.high ?? prev.High ?? curP);
-      slVal = isLong ? low : high;
+      slVal = isDirectionLong ? low : high;
     } else if (type === 'supertrend' && supertrendVal) {
       slVal = supertrendVal;
     } else if (spreadValues && spreadValues[type.toLowerCase()]) {
       const spread = spreadValues[type.toLowerCase()];
-      slVal = isLong ? curP - spread : curP + spread;
+      slVal = isDirectionLong ? curP - spread : curP + spread;
     }
 
     if (slVal !== null && Number.isFinite(slVal) && slVal > 0) {
       return formatCleanDecimal(slVal, 2);
     }
     return null;
-  }, [liveCandle, sortedCandles, supertrendVal, spreadValues, livePrice]);
+  }, [liveCandle, sortedCandles, supertrendVal, spreadValues, livePrice, entryType]);
 
-  const computeTpPrice = useCallback((type, currentPrice, currentSlPrice) => {
+  const computeTpPrice = useCallback((type, currentPrice, currentSlPrice, currentEntryType = entryType) => {
     if (!type || type === 'manual') return null;
     const curP = toFiniteNumber(currentPrice, 0) || Number(livePrice || 0);
     const slP = toFiniteNumber(currentSlPrice, 0);
     if (curP <= 0) return null;
 
-    const isLong = slP > 0 ? curP >= slP : true;
+    const isDirectionLong = currentEntryType === 'Long';
     let tpVal = null;
 
     if (type === 'RR1.5') {
       const dist = slP > 0 ? Math.abs(curP - slP) : (spreadValues?.p50 || curP * 0.01);
-      tpVal = isLong ? curP + dist * 1.5 : curP - dist * 1.5;
+      tpVal = isDirectionLong ? curP + dist * 1.5 : curP - dist * 1.5;
     } else if (type === 'RR2.0') {
       const dist = slP > 0 ? Math.abs(curP - slP) : (spreadValues?.p50 || curP * 0.01);
-      tpVal = isLong ? curP + dist * 2.0 : curP - dist * 2.0;
+      tpVal = isDirectionLong ? curP + dist * 2.0 : curP - dist * 2.0;
     } else if (type === 'close_today' || type === 'close_next_day') {
       tpVal = curP;
     } else if (spreadValues && spreadValues[type.toLowerCase()]) {
       const spread = spreadValues[type.toLowerCase()];
-      tpVal = isLong ? curP + spread : curP - spread;
+      tpVal = isDirectionLong ? curP + spread : curP - spread;
     }
 
     if (tpVal !== null && Number.isFinite(tpVal) && tpVal > 0) {
       return formatCleanDecimal(tpVal, 2);
     }
     return null;
-  }, [livePrice, spreadValues]);
+  }, [livePrice, spreadValues, entryType]);
+
+  const handleEntryTypeChange = (newType) => {
+    const curP = toFiniteNumber(form.price, 0) || Number(livePrice || 0);
+
+    let nextSl = form.slPrice;
+    const currentSlNum = toFiniteNumber(form.slPrice, 0);
+
+    if (slType !== 'manual') {
+      const autoSl = computeSlPrice(slType, curP, form.slPrice, newType);
+      if (autoSl) nextSl = autoSl;
+    } else if (curP > 0 && currentSlNum > 0) {
+      const dist = Math.abs(curP - currentSlNum);
+      if (dist > 0) {
+        nextSl = formatCleanDecimal(newType === 'Long' ? curP - dist : curP + dist, 2);
+      }
+    }
+
+    let nextTp = form.tpPrice;
+    const currentTpNum = toFiniteNumber(form.tpPrice, 0);
+
+    if (tpType !== 'manual') {
+      const autoTp = computeTpPrice(tpType, curP, nextSl, newType);
+      if (autoTp) nextTp = autoTp;
+    } else if (curP > 0 && currentTpNum > 0) {
+      const dist = Math.abs(curP - currentTpNum);
+      if (dist > 0) {
+        nextTp = formatCleanDecimal(newType === 'Long' ? curP + dist : curP - dist, 2);
+      }
+    }
+
+    setForm(prev => {
+      const next = {
+        ...prev,
+        entryType: newType,
+        slPrice: nextSl,
+        tpPrice: nextTp
+      };
+
+      const sl = toFiniteNumber(next.slPrice, 0);
+      const r = toFiniteNumber(next.riskAmount, 0) || riskAmount;
+      if (curP > 0 && sl > 0 && r > 0) {
+        const dist = Math.abs(curP - sl);
+        if (dist > 0) {
+          next.volume = formatAutoVolume(r / dist, curP);
+        }
+      }
+
+      onChange?.(next);
+      return next;
+    });
+  };
 
   const handleChange = (field, nextValue) => {
     if (field === 'price') {
@@ -468,8 +523,7 @@ const TradeStationOrderForm = ({
     try {
       const now = new Date().toISOString();
 
-      const isLong = slPrice > 0 ? (entryPrice >= slPrice) : (tpPrice > 0 ? entryPrice <= tpPrice : true);
-      const tradeType = isLong ? 'Long' : 'Short';
+      const tradeType = entryType;
       const orderSide = isLong ? 'Buy' : 'Sell';
 
       const isBinance = !isDerivative && (
@@ -590,18 +644,45 @@ const TradeStationOrderForm = ({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h4 className="text-sm font-bold uppercase tracking-wider text-gray-300">Trade Setup</h4>
-          <p className="mt-1 text-xs text-gray-500">Size the position and save it as a new open trade.</p>
         </div>
         <button
           type="button"
           onClick={handleSave}
           disabled={!canSave}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${entryType === 'Short' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'
+            }`}
           title="Đặt lệnh lên sàn và lưu vào Nhật ký"
         >
           <Save size={16} />
-          {saving ? 'Đang gửi lệnh...' : 'Order'}
+          {saving ? 'Đang gửi lệnh...' : `Order`}
         </button>
+      </div>
+
+      {/* Entry Type Selector */}
+      <div className="bg-gray-800/70 p-2.5 rounded-lg border border-gray-700/80 space-y-1">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+            <span>Entry Type</span>
+          </label>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${entryType === 'Long'
+            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+            : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+            }`}>
+            {entryType === 'Long' ? '📈 Long (Mua)' : '📉 Short (Bán)'}
+          </span>
+        </div>
+        <select
+          value={entryType}
+          onChange={(e) => handleEntryTypeChange(e.target.value)}
+          disabled={disabled || saving}
+          className={`w-full rounded-lg border px-3 py-1.5 text-xs font-bold outline-none cursor-pointer transition ${entryType === 'Long'
+            ? 'border-emerald-600/60 bg-gray-900 text-emerald-400 focus:ring-1 focus:ring-emerald-500'
+            : 'border-rose-600/60 bg-gray-900 text-rose-400 focus:ring-1 focus:ring-rose-500'
+            }`}
+        >
+          <option value="Long" className="bg-gray-900 text-emerald-400 font-bold">Long (Mua / Buy)</option>
+          <option value="Short" className="bg-gray-900 text-rose-400 font-bold">Short (Bán / Sell)</option>
+        </select>
       </div>
 
       {/* Derivative Symbol Selector for Derivative Account */}

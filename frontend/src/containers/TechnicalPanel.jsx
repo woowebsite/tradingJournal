@@ -1,9 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { Activity } from 'lucide-react';
 import IndicatorTable from '../components/IndicatorTable';
+import { fetchExternalIndicators } from '../features/marketSlice';
 
-const TechnicalPanel = ({ externalIndicators }) => {
+const TechnicalPanel = ({ externalIndicators: propExternalIndicators, selectedSymbol, selectedAccount }) => {
+    const dispatch = useDispatch();
+    const reduxExternalIndicators = useSelector(state => state.market.externalIndicators);
+    const externalIndicators = propExternalIndicators || reduxExternalIndicators;
     const [activeTab, setActiveTab] = useState('technical');
+
+    useEffect(() => {
+        const symName = selectedSymbol?.Name || selectedSymbol?.name;
+        if (symName) {
+            const isCrypto = selectedAccount?.market?.Name === 'Crypto' ||
+                /USDT|\.P|BINANCE:/i.test(symName);
+            if (!isCrypto) {
+                dispatch(fetchExternalIndicators(symName));
+            }
+        }
+    }, [dispatch, selectedSymbol, selectedAccount]);
 
     return (
         <div className="w-80 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg flex flex-col">

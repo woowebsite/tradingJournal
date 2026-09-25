@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchSymbols, fetchHistories, loadExternalHistory, fetchExternalIndicators, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle, getSymbolHistoriesCache, loadCachedSymbolHistories } from '../features/marketSlice';
+import { fetchSymbols, fetchHistories, loadExternalHistory, syncSymbolMetadata, deleteAllHistories, hasTodayCandle, updateRealtimeCandle, getSymbolHistoriesCache, loadCachedSymbolHistories } from '../features/marketSlice';
 import { subscribeBinanceKlineWS } from '../services/binance';
 import { getYahooFinanceHistory } from '../services/yahooFinance';
 import { getStockHistory } from '../services/24hmoney';
@@ -15,7 +15,6 @@ import { fetchWatchlists, updateWatchlist } from '../features/watchlistSlice';
 import TradingViewChart from '../components/TradingViewChart';
 import CreateSymbolModal from '../components/CreateSymbolModal';
 import StrategyPanel from '../containers/StrategyPanel';
-import TechnicalPanel from '../containers/TechnicalPanel';
 import WatchlistSelector from '../components/WatchlistSelector';
 import TradeDetailModal from '../components/TradeDetailModal';
 import TradeModal from '../components/TradeModal';
@@ -40,7 +39,7 @@ import StrategyTemplatesListModal from '../components/python-strategy/StrategyTe
 
 const TradeStation = () => {
     const dispatch = useDispatch();
-    const { symbols, histories, externalIndicators, loading, historyLoading } = useSelector(state => state.market);
+    const { symbols, histories, loading, historyLoading } = useSelector(state => state.market);
     const { items: allSignals } = useSelector(state => state.signals);
     const { items: strategies } = useSelector(state => state.strategies);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -64,7 +63,7 @@ const TradeStation = () => {
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [templatesListModalOpen, setTemplatesListModalOpen] = useState(false);
-    const [tradeFormSetup, setTradeFormSetup] = useState({ price: '', slPrice: '', tpPrice: '' });
+    const [tradeFormSetup, setTradeFormSetup] = useState({ entryType: 'Long', price: '', slPrice: '', tpPrice: '' });
     const [pythonScanResult, setPythonScanResult] = useState(null);
     const [showSignals, setShowSignals] = useState(() => {
         try {
@@ -107,6 +106,7 @@ const TradeStation = () => {
     const autoTradeContextRef = useRef({});
     const { selectedAccount, defaultWatchlist } = useAccount();
     const symbolParam = searchParams.get('symbol');
+    const typeParam = searchParams.get('type') || searchParams.get('entryType');
     const priceParam = searchParams.get('price');
     const slPriceParam = searchParams.get('slPrice');
     const tpPriceParam = searchParams.get('tpPrice');
@@ -131,10 +131,11 @@ const TradeStation = () => {
     }, [symbolParam, symbols]);
 
     const tradeSetupValue = useMemo(() => ({
+        entryType: tradeFormSetup.entryType || (typeParam ? (typeParam.toLowerCase().includes('short') ? 'Short' : 'Long') : 'Long'),
         price: tradeFormSetup.price || priceParam || '',
         slPrice: tradeFormSetup.slPrice || slPriceParam || '',
         tpPrice: tradeFormSetup.tpPrice || tpPriceParam || ''
-    }), [tradeFormSetup, priceParam, slPriceParam, tpPriceParam]);
+    }), [tradeFormSetup, priceParam, slPriceParam, tpPriceParam, typeParam]);
 
     const tradeSetupKey = useMemo(() => (
         [
@@ -145,7 +146,7 @@ const TradeStation = () => {
     ), [selectedSymbolId, symbolParam, selectedAccount]);
 
     useEffect(() => {
-        setTradeFormSetup({ price: '', slPrice: '', tpPrice: '' });
+        setTradeFormSetup({ entryType: 'Long', price: '', slPrice: '', tpPrice: '' });
     }, [selectedSymbolId]);
 
     const selectedSymbol = useMemo(() => {
@@ -729,16 +730,6 @@ const TradeStation = () => {
                     }
                 }
             }
-
-            // Also fetch external indicators (only for VN stocks)
-            const sym = symbols.find(s => (s.documentId || s.id) === selectedSymbolId);
-            if (sym && sym.Name) {
-                const isCrypto = selectedAccount?.market?.Name === 'Crypto' ||
-                    /USDT|\.P|BINANCE:/i.test(sym.Name);
-                if (!isCrypto) {
-                    dispatch(fetchExternalIndicators(sym.Name));
-                }
-            }
         }
     }, [dispatch, selectedSymbolId, symbols, histories, timeframe, selectedSymbol, selectedAccount]);
 
@@ -1055,12 +1046,11 @@ const TradeStation = () => {
         }
     }, [selectedSymbolId, templates]);
 
-    // Auto scan python strategy when template is selected or showSignals is enabled to keep signals and chart in sync
+    // Auto scan python strategy when showSignals is enabled to keep signals and chart in sync
     useEffect(() => {
-        if ((!selectedTemplate && !showSignals) || !selectedSymbol?.Name) {
-            if (!showSignals) {
-                setPythonScanResult(null);
-            }
+        if (!showSignals || !selectedSymbol?.Name) {
+            setPythonScanResult(null);
+            setIsScanningSignals(false);
             return;
         }
 
@@ -1084,19 +1074,36 @@ const TradeStation = () => {
 
         // 2. Fetch fresh scan in background
         setIsScanningSignals(true);
+        let isCurrent = true;
         scanPythonStrategy(scanParams)
             .then(res => {
+                if (!isCurrent) return;
                 if (res && !res.error) {
-                    setPythonScanResult(res);
+                    setPythonScanResult(prev => {
+                        if (JSON.stringify(prev) === JSON.stringify(res)) {
+                            return prev;
+                        }
+                        return res;
+                    });
                     try {
                         localStorage.setItem(cacheKey, JSON.stringify(res));
                     } catch (e) { }
                 }
             })
-            .catch(err => console.warn('Could not sync python strategy signals:', err))
+            .catch(err => {
+                if (isCurrent) {
+                    console.warn('Could not sync python strategy signals:', err);
+                }
+            })
             .finally(() => {
-                setIsScanningSignals(false);
+                if (isCurrent) {
+                    setIsScanningSignals(false);
+                }
             });
+
+        return () => {
+            isCurrent = false;
+        };
     }, [showSignals, selectedTemplate, symbolTemplates, selectedSymbol?.Name, timeframe, chartTemplate, vwapAnchor, maPeriod, stPeriod, stMultiplier]);
 
     const handleTimeframeChange = (newTf) => {
@@ -1848,6 +1855,7 @@ const TradeStation = () => {
                 const finalTp = tp ? Number(tp) : calculatedTp;
 
                 setTradeFormSetup({
+                    entryType: isLong ? 'Long' : 'Short',
                     price: String(Number(actualEntry.toFixed(6))),
                     slPrice: String(Number(actualSl.toFixed(6))),
                     tpPrice: String(Number(finalTp.toFixed(6)))
@@ -2148,7 +2156,6 @@ const TradeStation = () => {
                         onDerivativeSymbolChange={setDerivativeSymbol}
                         allSymbols={symbols}
                     />
-                    <TechnicalPanel externalIndicators={externalIndicators} />
                 </div>
             </div>
             <TradeDetailModal
