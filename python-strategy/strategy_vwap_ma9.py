@@ -1,5 +1,10 @@
 import sys
 import os
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 import time
 import re
 import warnings
@@ -152,178 +157,132 @@ def get_or_create_symbol_in_strapi(ticker: str) -> Optional[str]:
         print(f"Warning: get_or_create_symbol_in_strapi failed for {ticker}: {e}", file=sys.stderr, flush=True)
     return None
 
-def sync_candles_to_strapi(ticker: str, df: pd.DataFrame, symbol_id: str, timeframe: str = "D1", max_sync: int = 1500):
-    """Đồng bộ các nến từ external vào bảng symbol-histories của Strapi theo đúng Timeframe sử dụng đa luồng (super-fast)"""
-    if df.empty or not symbol_id:
-        return
+try:
+    from binance_data_helper import fetch_binance_candles, sync_candles_to_strapi_bulk, get_default_crypto_countback
+    def sync_candles_to_strapi(ticker: str, df: pd.DataFrame, symbol_id: str, timeframe: str = "D1", max_sync: int = 50000):
+        sync_candles_to_strapi_bulk(ticker, df, symbol_id=symbol_id, timeframe=timeframe, max_sync=max_sync)
+except ImportError:
+    def get_default_crypto_countback(timeframe: str, countback: Optional[int] = None) -> int:
+        req = int(countback) if countback and countback > 0 else 0
+        tf_map = {"1M": 20000, "M1": 20000, "5M": 30000, "M5": 30000, "15M": 20000, "M15": 20000, "30M": 15000, "M30": 15000, "1H": 10000, "H1": 10000, "4H": 5000, "H4": 5000, "D1": 2500, "1D": 2500}
+        return max(req, tf_map.get(str(timeframe or "D1").strip().upper(), 5000))
 
-    tf = str(timeframe or "D1").strip().upper()
-    headers = get_strapi_headers()
-    clean = ticker.strip().upper()
-
-    try:
-        # Lấy danh sách ngày đã có sẵn trong Strapi cho symbol và timeframe này (tối đa max_sync) để tránh trùng lặp
-        existing_dates = set()
-        page = 1
-        tf_filter = f"&filters[$or][0][timeframe][$eq]={tf}&filters[$or][1][timeframe][$null]=true" if tf == "D1" else f"&filters[timeframe][$eq]={tf}"
-
-        while len(existing_dates) < max_sync:
-            check_res = requests.get(
-                f"{STRAPI_BASE_URL}/api/symbol-histories?filters[symbol][Name][$eq]={clean}{tf_filter}&sort=date:desc&pagination[page]={page}&pagination[pageSize]=100",
-                headers=headers,
-                timeout=10
-            )
-            if check_res.status_code != 200:
-                break
-            check_json = check_res.json()
-            items = check_json.get("data", [])
-            if not items:
-                break
-            for item in items:
-                attrs = item.get("attributes", item)
-                d_val = attrs.get("date")
-                if d_val:
-                    existing_dates.add(str(d_val)[:19])
-
-            meta_pg = check_json.get("meta", {}).get("pagination", {})
-            page_count = meta_pg.get("pageCount")
-            if page_count and page >= page_count:
-                break
-            if len(items) < 100:
-                break
-            page += 1
-
-        # Lọc các nến trong df chưa có trong existing_dates
-        to_insert_candles = []
-        for _, row in df.tail(max_sync).iterrows():
-            candle_date = str(row["date"])[:19]
-            if candle_date not in existing_dates:
-                to_insert_candles.append(row)
-
-        if not to_insert_candles:
+    def sync_candles_to_strapi(ticker: str, df: pd.DataFrame, symbol_id: str, timeframe: str = "D1", max_sync: int = 1500):
+        """Đồng bộ các nến từ external vào bảng symbol-histories của Strapi"""
+        if df.empty or not symbol_id:
             return
-
-        session = requests.Session()
-        session.headers.update(headers)
-
-        def insert_single_candle(candle):
-            payload = {
-                "data": {
-                    "symbol": symbol_id,
-                    "date": candle["date"],
-                    "open": float(candle["open"]),
-                    "high": float(candle["high"]),
-                    "low": float(candle["low"]),
-                    "close": float(candle["close"]),
-                    "volume": float(candle.get("volume", 0)),
-                    "timeframe": tf
-                }
-            }
-            try:
-                session.post(f"{STRAPI_BASE_URL}/api/symbol-histories", json=payload, timeout=8)
-            except Exception:
-                pass
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
-            list(executor.map(insert_single_candle, to_insert_candles))
-
-    except Exception as e:
-        print(f"Warning: sync_candles_to_strapi failed for {ticker} ({tf}): {e}", file=sys.stderr, flush=True)
-
-def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
-    """
-    Lấy dữ liệu lịch sử nến từ Binance API (Spot & Futures).
-    Hỗ trợ các ticker dạng LINKUSDT.P, BTCUSDT, ETHUSDT, BINANCE:LINKUSDT.P...
-    Tự động phân trang (pagination) nếu countback > 1000/1500 để nạp dữ liệu quá khứ không giới hạn khi cuộn.
-    """
-    clean = ticker.strip().upper()
-    is_perpetual = clean.endswith(".P") or "PERP" in clean
-    symbol = re.sub(r"^.*:", "", clean).replace(".P", "").replace("PERP", "").strip()
-    interval = map_timeframe_to_binance(timeframe)
-    is_daily_or_weekly = interval in ["1d", "1w", "1M"]
-
-    endpoint_configs = [
-        ("https://fapi.binance.com/fapi/v1/klines", 1500) if is_perpetual else ("https://api.binance.com/api/v3/klines", 1000),
-        ("https://api.binance.com/api/v3/klines", 1000) if is_perpetual else ("https://fapi.binance.com/fapi/v1/klines", 1500),
-    ]
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
-    for base_url, max_limit in endpoint_configs:
-        all_raw = []
-        target_count = max(int(countback), 500)
-        current_end_time = None
-
+        tf = str(timeframe or "D1").strip().upper()
+        headers = get_strapi_headers()
+        clean = ticker.strip().upper()
         try:
-            while len(all_raw) < target_count:
-                limit = min(target_count - len(all_raw), max_limit)
-                params = f"symbol={symbol}&interval={interval}&limit={limit}"
-                if current_end_time is not None:
-                    params += f"&endTime={current_end_time}"
-
-                url = f"{base_url}?{params}"
-                res = requests.get(url, headers=headers, timeout=10)
-                if res.status_code != 200:
-                    break
-
-                data = res.json()
-                if not isinstance(data, list) or len(data) == 0:
-                    break
-
-                all_raw = data + all_raw
-                oldest_open_time = data[0][0]
-                current_end_time = oldest_open_time - 1
-
-                if len(data) < limit:
-                    break
-
-            if len(all_raw) > 0:
-                seen_times = set()
-                deduped = []
-                for item in all_raw:
-                    if item[0] not in seen_times:
-                        seen_times.add(item[0])
-                        deduped.append(item)
-
-                candles = []
-                for item in deduped:
-                    open_time_ms = item[0]
-                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
-                    if is_daily_or_weekly:
-                        date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
-                        time_str = dt.strftime("%Y-%m-%d")
-                    else:
-                        date_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                        time_str = dt.strftime("%H:%M:%S")
-
-                    o = float(item[1])
-                    h = float(item[2])
-                    l = float(item[3])
-                    c = float(item[4])
-                    v = float(item[5])
-
-                    decimals = 6 if c < 0.01 else (4 if c < 10 else (2 if c >= 100 else 3))
-                    candles.append({
-                        "date": date_str,
-                        "time": time_str,
-                        "open": round(o, decimals),
-                        "high": round(h, decimals),
-                        "low": round(l, decimals),
-                        "close": round(c, decimals),
-                        "volume": float(v)
-                    })
-
-                df = pd.DataFrame(candles)
-                df["dt"] = pd.to_datetime(df["date"])
-                df = df.sort_values("dt").reset_index(drop=True)
-                if len(df) > 0:
-                    return df
+            candles_payload = []
+            for _, row in df.tail(max_sync).iterrows():
+                candles_payload.append({
+                    "date": str(row["date"]),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row.get("volume", 0)),
+                })
+            requests.post(
+                f"{STRAPI_BASE_URL}/api/symbol-histories/bulk",
+                json={"symbolId": symbol_id, "symbol": clean, "timeframe": tf, "candles": candles_payload},
+                headers=headers,
+                timeout=12
+            )
         except Exception:
             pass
 
-    return pd.DataFrame()
+    def fetch_binance_candles(ticker: str, countback: Optional[int] = None, timeframe: str = "D1", auto_boost: bool = True, sync_strapi: bool = False) -> pd.DataFrame:
+        clean = ticker.strip().upper()
+        is_perpetual = clean.endswith(".P") or "PERP" in clean
+        symbol = re.sub(r"^.*:", "", clean).replace(".P", "").replace("PERP", "").strip()
+        interval = map_timeframe_to_binance(timeframe)
+        is_daily_or_weekly = interval in ["1d", "1w", "1M"]
+        target_count = get_default_crypto_countback(timeframe, countback) if auto_boost else max(int(countback or 500), 500)
+
+        endpoint_configs = [
+            ("https://fapi.binance.com/fapi/v1/klines", 1500) if is_perpetual else ("https://api.binance.com/api/v3/klines", 1000),
+            ("https://api.binance.com/api/v3/klines", 1000) if is_perpetual else ("https://fapi.binance.com/fapi/v1/klines", 1500),
+        ]
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        for base_url, max_limit in endpoint_configs:
+            all_raw = []
+            current_end_time = None
+
+            try:
+                while len(all_raw) < target_count:
+                    limit = min(target_count - len(all_raw), max_limit)
+                    params = f"symbol={symbol}&interval={interval}&limit={limit}"
+                    if current_end_time is not None:
+                        params += f"&endTime={current_end_time}"
+
+                    url = f"{base_url}?{params}"
+                    res = requests.get(url, headers=headers, timeout=10)
+                    if res.status_code != 200:
+                        break
+
+                    data = res.json()
+                    if not isinstance(data, list) or len(data) == 0:
+                        break
+
+                    all_raw = data + all_raw
+                    oldest_open_time = data[0][0]
+                    current_end_time = oldest_open_time - 1
+
+                    if len(data) < limit:
+                        break
+
+                if len(all_raw) > 0:
+                    seen_times = set()
+                    deduped = []
+                    for item in all_raw:
+                        if item[0] not in seen_times:
+                            seen_times.add(item[0])
+                            deduped.append(item)
+
+                    candles = []
+                    for item in deduped:
+                        open_time_ms = item[0]
+                        dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
+                        if is_daily_or_weekly:
+                            date_str = dt.strftime("%Y-%m-%dT00:00:00.000Z")
+                            time_str = dt.strftime("%Y-%m-%d")
+                        else:
+                            date_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                            time_str = dt.strftime("%H:%M:%S")
+
+                        o = float(item[1])
+                        h = float(item[2])
+                        l = float(item[3])
+                        c = float(item[4])
+                        v = float(item[5])
+
+                        decimals = 6 if c < 0.01 else (4 if c < 10 else (2 if c >= 100 else 3))
+                        candles.append({
+                            "date": date_str,
+                            "time": time_str,
+                            "open": round(o, decimals),
+                            "high": round(h, decimals),
+                            "low": round(l, decimals),
+                            "close": round(c, decimals),
+                            "volume": float(v)
+                        })
+
+                    df = pd.DataFrame(candles)
+                    df["dt"] = pd.to_datetime(df["date"])
+                    df = df.sort_values("dt").reset_index(drop=True)
+                    if len(df) > 0:
+                        return df
+            except Exception:
+                pass
+
+        return pd.DataFrame()
 
 def fetch_history_from_strapi(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
     """Lấy dữ liệu nến trực tiếp từ Strapi symbol-histories theo countback và đúng Timeframe"""

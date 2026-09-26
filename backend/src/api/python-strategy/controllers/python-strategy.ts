@@ -489,10 +489,12 @@ export default {
       }
 
       const { stdout, stderr } = await execFileAsync(pythonExe, args, {
-        maxBuffer: 1024 * 1024 * 20,
-        timeout: 45000,
+        cwd: strategyDir,
+        maxBuffer: 1024 * 1024 * 50,
+        timeout: 60000,
         env: {
           ...process.env,
+          PYTHONPATH: strategyDir,
           PYTHONWARNINGS: 'ignore',
           PYTHONIOENCODING: 'utf-8',
           STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || `http://127.0.0.1:${process.env.PORT || 1337}`,
@@ -731,10 +733,12 @@ export default {
       }
 
       const { stdout, stderr } = await execFileAsync(pythonExe, args, {
+        cwd: strategyDir,
         maxBuffer: 1024 * 1024 * 50,
         timeout: 180000,
         env: {
           ...process.env,
+          PYTHONPATH: strategyDir,
           PYTHONWARNINGS: 'ignore',
           PYTHONIOENCODING: 'utf-8',
           STRAPI_BASE_URL: process.env.STRAPI_BASE_URL || `http://127.0.0.1:${process.env.PORT || 1337}`,

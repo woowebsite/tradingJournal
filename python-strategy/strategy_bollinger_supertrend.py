@@ -1,5 +1,10 @@
 import sys
 import os
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 import time
 import json
 import argparse
@@ -115,34 +120,68 @@ def clean_candle_df(df: pd.DataFrame) -> pd.DataFrame:
 # 1. FETCH DATA TỪ CÁC NGUỒN (BINANCE, YAHOO, 24HMONEY, STRAPI)
 # ==============================================================================
 
-def fetch_binance_candles(ticker: str, countback: int = 500, timeframe: str = "D1") -> pd.DataFrame:
-    clean = ticker.strip().upper().replace("BINANCE:", "").replace(".P", "").replace("PERP", "")
-    interval = map_timeframe_to_binance(timeframe)
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={clean}&interval={interval}&limit={min(max(countback, 100), 1500)}"
-    try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, list) and len(data) > 0:
-                candles = []
-                is_daily = interval in ["1d", "1w"]
-                for item in data:
-                    dt = datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc)
-                    candles.append({
-                        "date": dt.strftime("%Y-%m-%dT00:00:00.000Z") if is_daily else dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                        "time": dt.strftime("%Y-%m-%d") if is_daily else dt.strftime("%H:%M:%S"),
-                        "open": float(item[1]),
-                        "high": float(item[2]),
-                        "low": float(item[3]),
-                        "close": float(item[4]),
-                        "volume": float(item[5])
-                    })
-                df = pd.DataFrame(candles)
-                df["dt"] = pd.to_datetime(df["date"])
-                return df
-    except Exception:
-        pass
-    return pd.DataFrame()
+try:
+    from binance_data_helper import fetch_binance_candles, sync_candles_to_strapi_bulk, get_default_crypto_countback
+except ImportError:
+    def get_default_crypto_countback(timeframe: str, countback: Optional[int] = None) -> int:
+        req = int(countback) if countback and countback > 0 else 0
+        tf_map = {"1M": 20000, "M1": 20000, "5M": 30000, "M5": 30000, "15M": 20000, "M15": 20000, "30M": 15000, "M30": 15000, "1H": 10000, "H1": 10000, "4H": 5000, "H4": 5000, "D1": 2500, "1D": 2500}
+        return max(req, tf_map.get(str(timeframe or "D1").strip().upper(), 5000))
+
+    def fetch_binance_candles(ticker: str, countback: Optional[int] = None, timeframe: str = "D1", auto_boost: bool = True, sync_strapi: bool = False) -> pd.DataFrame:
+        clean = ticker.strip().upper()
+        is_perpetual = clean.endswith(".P") or "PERP" in clean
+        symbol = re.sub(r"^.*:", "", clean).replace(".P", "").replace("PERP", "").strip()
+        interval = map_timeframe_to_binance(timeframe)
+        is_daily_or_weekly = interval in ["1d", "1w", "1M"]
+        target_count = get_default_crypto_countback(timeframe, countback) if auto_boost else max(int(countback or 500), 500)
+        endpoint_configs = [
+            ("https://fapi.binance.com/fapi/v1/klines", 1500) if is_perpetual else ("https://api.binance.com/api/v3/klines", 1000),
+            ("https://api.binance.com/api/v3/klines", 1000) if is_perpetual else ("https://fapi.binance.com/fapi/v1/klines", 1500),
+        ]
+        headers = {"User-Agent": "Mozilla/5.0"}
+        for base_url, max_limit in endpoint_configs:
+            all_raw = []
+            current_end_time = None
+            try:
+                while len(all_raw) < target_count:
+                    limit = min(target_count - len(all_raw), max_limit)
+                    params = f"symbol={symbol}&interval={interval}&limit={limit}"
+                    if current_end_time is not None:
+                        params += f"&endTime={current_end_time}"
+                    res = requests.get(f"{base_url}?{params}", headers=headers, timeout=12)
+                    if res.status_code != 200:
+                        break
+                    data = res.json()
+                    if not isinstance(data, list) or len(data) == 0:
+                        break
+                    all_raw = data + all_raw
+                    current_end_time = data[0][0] - 1
+                    if len(data) < limit:
+                        break
+                if len(all_raw) > 0:
+                    candles = []
+                    seen = set()
+                    for item in all_raw:
+                        if item[0] in seen:
+                            continue
+                        seen.add(item[0])
+                        dt = datetime.fromtimestamp(item[0] / 1000.0, tz=timezone.utc)
+                        candles.append({
+                            "date": dt.strftime("%Y-%m-%dT00:00:00.000Z") if is_daily_or_weekly else dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                            "time": dt.strftime("%Y-%m-%d") if is_daily_or_weekly else dt.strftime("%H:%M:%S"),
+                            "open": float(item[1]),
+                            "high": float(item[2]),
+                            "low": float(item[3]),
+                            "close": float(item[4]),
+                            "volume": float(item[5])
+                        })
+                    df = pd.DataFrame(candles)
+                    df["dt"] = pd.to_datetime(df["date"])
+                    return df.sort_values("dt").reset_index(drop=True)
+            except Exception:
+                pass
+        return pd.DataFrame()
 
 def fetch_yahoo_candles(ticker: str, countback: int = 1000, timeframe: str = "D1") -> pd.DataFrame:
     clean = ticker.strip().upper()
